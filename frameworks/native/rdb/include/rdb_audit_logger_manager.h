@@ -68,11 +68,17 @@ private:
     RdbAuditLoggerManager();
 
     void MaybeRotateLog();
+    void WriteLineLocked(const std::string &line);
 
     std::string auditDir_;
     int writeFd_ = -1;  // persistent fd for events.log
     int lockFd_ = -1;  // persistent fd for events.lock (cross-process)
     bool initialized_ = false;
+    // Rate limit: at most 60 lines per second. Excess lines are dropped; one
+    // RATE_LIMIT summary line replaces all dropped lines at the next window start.
+    int64_t rateLimitWindowStart_ = 0;
+    size_t rateLimitCount_ = 0;
+    size_t droppedCount_ = 0;
     mutable std::mutex mutex_;
 };
 

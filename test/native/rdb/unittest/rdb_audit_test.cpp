@@ -71,9 +71,11 @@ constexpr int64_t SIZE_AFTER = 2048;
 // EVENT_LINES_OPEN: real DB open writes PRG (integrity check) + OPEN.
 // EVENT_LINES_OPEN_PLUS_OP: open (2 lines) + one SQL/PRAGMA op.
 // EVENT_LINES_TWO_OPS: two direct On* calls (e.g. DROP + TRUNCATE).
+// EVENT_LINES_OPEN_THROTTLE_OP: open (2) + THROTTLE (1, 2nd throttled op) + flushed SQL op (1).
 constexpr size_t EVENT_LINES_OPEN = 2;
 constexpr size_t EVENT_LINES_OPEN_PLUS_OP = 3;
 constexpr size_t EVENT_LINES_TWO_OPS = 2;
+constexpr size_t EVENT_LINES_OPEN_THROTTLE_OP = 4;
 
 bool MakeDirRecursive(const std::string &path, mode_t mode)
 {
@@ -395,6 +397,7 @@ HWTEST_F(RdbAuditTest, AuditDisabled_010, TestSize.Level0)
     logger.OnCorrupt(DbPath(), TEST_CORRUPT_RC, RC_OK, "detail");
     logger.OnIoError("execute", DbPath(), TEST_IO_ERR_CODE, TEST_IO_OS_ERRNO);
     logger.OnDbDelete(DbPath(), "delete_store");
+    logger.OnTransaction(DbPath(), "BEGIN", RC_OK, true);
     EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), linesBefore);
     EXPECT_EQ(ReadFileContent(AuditJsonPath()), jsonBefore);
 }
@@ -613,6 +616,7 @@ HWTEST_F(RdbAuditTest, Create_021, TestSize.Level0)
     disabled->OnOpenOk(DbPath(), false);
     disabled->OnSqlAudit(DbPath(), "DELETE", "", 1);
     disabled->OnPragma(DbPath(), "PRAGMA integrity_check", RC_OK, "ok");
+    disabled->OnTransaction(DbPath(), "BEGIN", RC_OK, true);
     EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), before);
 }
 
@@ -656,14 +660,17 @@ HWTEST_F(RdbAuditTest, RealDbUpdate_023, TestSize.Level0)
     upd.Put("name", "b");
     RdbPredicates p("users");
     p.EqualTo("id", 1);
-    // Update goes through the 60s throttle; flush is triggered when
-    // accumulatedRows reaches FLUSH_THRESHOLD (1000). 1001 updates
-    // (each changed=1) → flush at the 1001st call.
+    // Update goes through the 60s throttle; the 2nd update emits a THROTTLE
+    // line (suppression starts), and flush is triggered when accumulatedRows
+    // reaches FLUSH_THRESHOLD (1000). 1001 updates (each changed=1) → flush at
+    // the 1001st call. events.log = 2 (open) + 1 (THROTTLE) + 1 (SQL flush).
     for (int i = 0; i < 1001; ++i) {
         store->Update(upd, p, ReturningConfig{});
     }
-    EXPECT_EQ(WaitEventLines(EVENT_LINES_OPEN_PLUS_OP, 10000), EVENT_LINES_OPEN_PLUS_OP);
-    EXPECT_NE(ReadFileContent(EventsLogPath()).find("op=UPDATE"), NPOS);
+    EXPECT_EQ(WaitEventLines(EVENT_LINES_OPEN_THROTTLE_OP, 10000), EVENT_LINES_OPEN_THROTTLE_OP);
+    auto content = ReadFileContent(EventsLogPath());
+    EXPECT_NE(content.find("op=UPDATE"), NPOS);
+    EXPECT_NE(content.find("THROTTLE:"), NPOS);
 }
 
 /**
@@ -713,4 +720,151 @@ HWTEST_F(RdbAuditTest, RealDbExecuteExtDropTable_026, TestSize.Level0)
     store->ExecuteExt("DROP TABLE IF EXISTS users");
     EXPECT_EQ(WaitEventLines(EVENT_LINES_OPEN_PLUS_OP), EVENT_LINES_OPEN_PLUS_OP);
     EXPECT_NE(ReadFileContent(EventsLogPath()).find("op=DROP"), NPOS);
+}
+
+// ===== Part 6: transaction + throttle audit =====
+
+/**
+ * @tc.name: RdbAudit_OnTransaction_027
+ * @tc.desc: Only COMMIT writes a TRX line; BEGIN/ROLLBACK are silent. SQL inside a
+ *          transaction is buffered and flushed on COMMIT, discarded on ROLLBACK.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbAuditTest, OnTransaction_027, TestSize.Level0)
+{
+    RdbAuditLoggerImpl logger;
+    // BEGIN/ROLLBACK alone produce nothing (no commit → nothing recorded).
+    logger.OnTransaction(DbPath(), "BEGIN", RC_OK, true);
+    logger.OnTransaction(DbPath(), "ROLLBACK", RC_OK, true);
+    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 0);
+    // BEGIN + SQL + COMMIT: buffered SQL flushed + COMMIT line (2 lines).
+    logger.OnTransaction(DbPath(), "BEGIN", RC_OK, true);
+    logger.OnSqlAudit(DbPath(), "INSERT", "", 5);
+    logger.OnSqlAudit(DbPath(), "INSERT", "", 3); // aggregated → rows=8
+    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 0);
+    logger.OnTransaction(DbPath(), "COMMIT", RC_OK, true);
+    EXPECT_EQ(WaitEventLines(2), 2);
+    auto content = ReadFileContent(EventsLogPath());
+    EXPECT_NE(content.find("SQL:"), NPOS);
+    EXPECT_NE(content.find("op=INSERT"), NPOS);
+    EXPECT_NE(content.find("rows=8"), NPOS);
+    EXPECT_NE(content.find("TRX:"), NPOS);
+    EXPECT_NE(content.find("op=COMMIT"), NPOS);
+    EXPECT_EQ(content.find("op=BEGIN"), NPOS);
+    EXPECT_EQ(content.find("op=ROLLBACK"), NPOS);
+}
+
+/**
+ * @tc.name: RdbAudit_OnThrottle_028
+ * @tc.desc: Throttled INSERT: 2nd call emits a THROTTLE line once, 3rd is silent
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbAuditTest, OnThrottle_028, TestSize.Level0)
+{
+    RdbAuditLoggerImpl logger;
+    // 1st INSERT: starts the 60s window, stored, no emit, no THROTTLE.
+    logger.OnSqlAudit(DbPath(), "INSERT", "", 1);
+    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 0);
+    // 2nd INSERT: suppressed; throttle starts → one THROTTLE line.
+    logger.OnSqlAudit(DbPath(), "INSERT", "", 1);
+    EXPECT_EQ(WaitEventLines(1), 1);
+    EXPECT_NE(ReadFileContent(EventsLogPath()).find("THROTTLE:"), NPOS);
+    // 3rd INSERT: suppressed; throttleLogged already true → no new line.
+    logger.OnSqlAudit(DbPath(), "INSERT", "", 1);
+    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 1);
+}
+
+/**
+ * @tc.name: RdbAudit_RealDbTransaction_029
+ * @tc.desc: Real DB: committed transaction's SQL is audited; rolled-back is not.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbAuditTest, RealDbTransaction_029, TestSize.Level0)
+{
+    AuditOpenCallback cb;
+    int err = E_OK;
+    auto store = RdbHelper::GetRdbStore(MakeAuditConfig(), 1, cb, err);
+    ASSERT_NE(store, nullptr);
+    // Committed transaction: INSERT buffered → flushed on COMMIT.
+    store->BeginTransaction();
+    ValuesBucket b;
+    b.Put("id", 1);
+    b.Put("name", "a");
+    store->Insert("users", b);
+    store->Commit();
+    // Rolled-back transaction: INSERT buffered → discarded on ROLLBACK.
+    store->BeginTransaction();
+    ValuesBucket b2;
+    b2.Put("id", 2);
+    b2.Put("name", "b");
+    store->Insert("users", b2);
+    store->RollBack();
+    // open (2) + INSERT(1, flushed) + COMMIT(1) = 4. Rollback adds nothing.
+    EXPECT_EQ(WaitEventLines(4), 4);
+    auto content = ReadFileContent(EventsLogPath());
+    EXPECT_NE(content.find("op=INSERT"), NPOS);
+    EXPECT_NE(content.find("op=COMMIT"), NPOS);
+    EXPECT_EQ(content.find("op=BEGIN"), NPOS);
+    EXPECT_EQ(content.find("op=ROLLBACK"), NPOS);
+}
+
+/**
+ * @tc.name: RdbAudit_RealDbCreateTransaction_030
+ * @tc.desc: CreateTransaction path: committed SQL audited; rolled-back is not.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbAuditTest, RealDbCreateTransaction_030, TestSize.Level0)
+{
+    AuditOpenCallback cb;
+    int err = E_OK;
+    auto store = RdbHelper::GetRdbStore(MakeAuditConfig(), 1, cb, err);
+    ASSERT_NE(store, nullptr);
+    // Committed transaction via CreateTransaction: INSERT buffered → flushed on COMMIT.
+    auto [ret, trans] = store->CreateTransaction(Transaction::EXCLUSIVE);
+    ASSERT_EQ(ret, E_OK);
+    ASSERT_NE(trans, nullptr);
+    ValuesBucket b;
+    b.Put("id", 1);
+    b.Put("name", "a");
+    trans->Insert("users", b);
+    trans->Commit();
+    // Rolled-back transaction via CreateTransaction: INSERT discarded on ROLLBACK.
+    auto [ret2, trans2] = store->CreateTransaction(Transaction::EXCLUSIVE);
+    ASSERT_EQ(ret2, E_OK);
+    ASSERT_NE(trans2, nullptr);
+    ValuesBucket b2;
+    b2.Put("id", 2);
+    b2.Put("name", "b");
+    trans2->Insert("users", b2);
+    trans2->Rollback();
+    // open (2) + INSERT(1, flushed) + COMMIT(1) = 4. Rollback adds nothing.
+    EXPECT_EQ(WaitEventLines(4), 4);
+    auto content = ReadFileContent(EventsLogPath());
+    EXPECT_NE(content.find("op=INSERT"), NPOS);
+    EXPECT_NE(content.find("op=COMMIT"), NPOS);
+    EXPECT_EQ(content.find("op=BEGIN"), NPOS);
+    EXPECT_EQ(content.find("op=ROLLBACK"), NPOS);
+}
+
+/**
+ * @tc.name: RdbAudit_RateLimit_031
+ * @tc.desc: At most 60 lines/s; excess replaced by one RATE_LIMIT summary line
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbAuditTest, RateLimit_031, TestSize.Level0)
+{
+    truncate(EventsLogPath().c_str(), 0);
+    auto &mgr = RdbAuditLoggerManager::GetInstance();
+    // 100 sync writes in the same 1s window: 60 written, 40 dropped.
+    for (int i = 0; i < 100; ++i) {
+        mgr.AppendEventSync("{\"evt\":\"TEST\",\"i\":" + std::to_string(i) + "}");
+    }
+    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 60);
+    // Wait for window reset: next call emits one RATE_LIMIT summary + the line.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    mgr.AppendEventSync("{\"evt\":\"AFTER\"}");
+    auto content = ReadFileContent(EventsLogPath());
+    EXPECT_EQ(CountLines(content), 62); // 60 + 1 RATE_LIMIT + 1 AFTER
+    EXPECT_NE(content.find("RATE_LIMIT:"), NPOS);
+    EXPECT_NE(content.find("dropped=40"), NPOS);
 }

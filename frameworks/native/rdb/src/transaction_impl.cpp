@@ -18,6 +18,7 @@
 #include "transaction_impl.h"
 
 #include "logger.h"
+#include "rdb_audit_logger.h"
 #include "rdb_errno.h"
 #include "rdb_store.h"
 #include "rdb_trace.h"
@@ -29,10 +30,15 @@ using namespace OHOS::Rdb;
 namespace OHOS::NativeRdb {
 using PerfStat = DistributedRdb::PerfStat;
 __attribute__((used))
-const int32_t TransactionImpl::regCreator_ = Transaction::RegisterCreator(TransactionImpl::Create);
+const int32_t TransactionImpl::regCreator_ = Transaction::RegisterCreator(
+    [](int32_t type, std::shared_ptr<Connection> conn, const std::string &path)
+        -> std::pair<int32_t, std::shared_ptr<Transaction>> {
+        return TransactionImpl::Create(type, std::move(conn), path);
+    });
 
-TransactionImpl::TransactionImpl(std::shared_ptr<Connection> connection, const std::string &path)
-    : path_(path), connection_(std::move(connection))
+TransactionImpl::TransactionImpl(std::shared_ptr<Connection> connection, const std::string &path,
+    RdbAuditLogger *auditLogger)
+    : path_(path), connection_(std::move(connection)), auditLogger_(auditLogger)
 {
     seqId_ = PerfStat::GenerateId();
     PerfStat perfStat(path_, "", PerfStat::Step::STEP_TRANS_START, seqId_);
@@ -53,7 +59,14 @@ TransactionImpl::~TransactionImpl()
 std::pair<int32_t, std::shared_ptr<Transaction>> TransactionImpl::Create(
     int32_t type, std::shared_ptr<Connection> connection, const std::string &path)
 {
-    auto trans = std::make_shared<TransactionImpl>(std::move(connection), path);
+    return Create(type, std::move(connection), path, nullptr);
+}
+
+std::pair<int32_t, std::shared_ptr<Transaction>> TransactionImpl::Create(
+    int32_t type, std::shared_ptr<Connection> connection, const std::string &path,
+    RdbAuditLogger *auditLogger)
+{
+    auto trans = std::make_shared<TransactionImpl>(std::move(connection), path, auditLogger);
     if (trans == nullptr) {
         return { E_ERROR, nullptr };
     }
@@ -112,6 +125,9 @@ int32_t TransactionImpl::Begin(int32_t type)
         CloseInner();
         return errorCode;
     }
+    if (auditLogger_ != nullptr) {
+        auditLogger_->OnTransaction(path_, "BEGIN", E_OK, true);
+    }
     return E_OK;
 }
 
@@ -130,6 +146,9 @@ int32_t TransactionImpl::Commit()
     if (errorCode != E_OK) {
         LOG_ERROR("create statement failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
+        if (auditLogger_ != nullptr) {
+            auditLogger_->OnTransaction(path_, "ROLLBACK", errorCode, true);
+        }
         return errorCode;
     }
 
@@ -137,9 +156,15 @@ int32_t TransactionImpl::Commit()
     if (errorCode != E_OK) {
         LOG_ERROR("statement execute failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
+        if (auditLogger_ != nullptr) {
+            auditLogger_->OnTransaction(path_, "ROLLBACK", errorCode, true);
+        }
         return errorCode;
     }
     CloseInner();
+    if (auditLogger_ != nullptr) {
+        auditLogger_->OnTransaction(path_, "COMMIT", E_OK, true);
+    }
     return E_OK;
 }
 
@@ -158,6 +183,9 @@ int32_t TransactionImpl::Rollback()
     if (errorCode != E_OK) {
         LOG_ERROR("create statement failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
+        if (auditLogger_ != nullptr) {
+            auditLogger_->OnTransaction(path_, "ROLLBACK", errorCode, true);
+        }
         return errorCode;
     }
 
@@ -165,9 +193,15 @@ int32_t TransactionImpl::Rollback()
     if (errorCode != E_OK) {
         LOG_ERROR("statement execute failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
+        if (auditLogger_ != nullptr) {
+            auditLogger_->OnTransaction(path_, "ROLLBACK", errorCode, true);
+        }
         return errorCode;
     }
     CloseInner();
+    if (auditLogger_ != nullptr) {
+        auditLogger_->OnTransaction(path_, "ROLLBACK", E_OK, true);
+    }
     return E_OK;
 }
 
@@ -224,6 +258,9 @@ std::pair<int32_t, int64_t> TransactionImpl::BatchInsert(const std::string &tabl
     }
     int64_t insertRows{};
     auto errorCode = store->BatchInsert(insertRows, table, rows);
+    if (errorCode == E_OK && auditLogger_ != nullptr) {
+        auditLogger_->OnSqlAudit(path_, "BatchInsert", "", insertRows);
+    }
     return { errorCode, insertRows };
 }
 
@@ -235,7 +272,11 @@ std::pair<int, int64_t> TransactionImpl::BatchInsert(const std::string &table, c
         LOG_ERROR("transaction already close");
         return { E_ALREADY_CLOSED, -1 };
     }
-    return store->BatchInsert(table, rows);
+    auto [err, insertRows] = store->BatchInsert(table, rows);
+    if (err == E_OK && auditLogger_ != nullptr) {
+        auditLogger_->OnSqlAudit(path_, "BatchInsert", "", insertRows);
+    }
+    return { err, insertRows };
 }
 
 void TransactionImpl::AddResultSet(std::weak_ptr<ResultSet> resultSet)
@@ -318,6 +359,7 @@ std::pair<int32_t, Results> TransactionImpl::Delete(
         CloseInner(true);
     }
     return result;
+}
 }
 
 std::shared_ptr<ResultSet> TransactionImpl::QueryByStep(

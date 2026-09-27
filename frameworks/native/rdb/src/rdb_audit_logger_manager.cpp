@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <sstream>
 
@@ -47,6 +48,16 @@ constexpr size_t YEAR_PREFIX_LEN = 5;
 constexpr uint64_t AUDIT_FD_TAG_ID = 0xD001650;
 const uint64_t AUDIT_FD_TAG = fdsan_create_owner_tag(FDSAN_OWNER_TYPE_FILE, AUDIT_FD_TAG_ID);
 
+// Hard rate limit: at most 60 lines written to events.log per second.
+constexpr int64_t RATE_LIMIT_WINDOW_MS = 1000;
+constexpr size_t RATE_LIMIT_MAX_LINES = 60;
+
+int64_t NowMs()
+{
+    auto dur = std::chrono::steady_clock::now().time_since_epoch();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(dur).count();
+}
+
 // hilog-style timestamp: "MM-DD HH:MM:SS.mmm" (strip the year prefix).
 std::string TsLog()
 {
@@ -64,6 +75,16 @@ std::string BuildPragmaLine(
     os << ts << " " << caller.pid << " " << caller.tid << " PRG:"
        << " db=" << dbName << " sql=" << SqliteUtils::SqlAnonymous(sql)
        << " rc=" << rc << " result=" << result;
+    return os.str();
+}
+
+std::string BuildRateLimitLine(size_t dropped)
+{
+    std::string ts = TsLog();
+    auto caller = RdbDbInfoManager::GetInstance().CollectCaller();
+    std::ostringstream os;
+    os << ts << " " << caller.pid << " " << caller.tid << " RATE_LIMIT:"
+       << " dropped=" << dropped;
     return os.str();
 }
 } // namespace
@@ -119,14 +140,37 @@ void RdbAuditLoggerManager::AppendEventSync(const std::string &jsonLine)
     if (!initialized_ || writeFd_ < 0 || jsonLine.empty()) {
         return;
     }
+    int64_t now = NowMs();
+    if (now - rateLimitWindowStart_ >= RATE_LIMIT_WINDOW_MS) {
+        // Window expired. If lines were dropped, emit one summary line that
+        // replaces all the dropped lines.
+        if (droppedCount_ > 0) {
+            WriteLineLocked(BuildRateLimitLine(droppedCount_));
+            rateLimitCount_ = 1;
+        } else {
+            rateLimitCount_ = 0;
+        }
+        rateLimitWindowStart_ = now;
+        droppedCount_ = 0;
+    }
+    if (rateLimitCount_ >= RATE_LIMIT_MAX_LINES) {
+        droppedCount_++;
+        return;
+    }
+    rateLimitCount_++;
+    WriteLineLocked(jsonLine);
+}
+
+void RdbAuditLoggerManager::WriteLineLocked(const std::string &line)
+{
     if (lockFd_ >= 0 && flock(lockFd_, LOCK_EX) != 0) {
         LOG_WARN("AppendEventSync: flock LOCK_EX failed, errno=%{public}d", errno);
     }
     MaybeRotateLog();
-    std::string line = jsonLine + "\n";
+    std::string buf = line + "\n";
     size_t total = 0;
-    while (total < line.size()) {
-        ssize_t n = write(writeFd_, line.data() + total, line.size() - total);
+    while (total < buf.size()) {
+        ssize_t n = write(writeFd_, buf.data() + total, buf.size() - total);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;

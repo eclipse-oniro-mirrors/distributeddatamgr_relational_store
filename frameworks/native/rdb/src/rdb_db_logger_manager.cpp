@@ -225,6 +225,7 @@ void RdbDbLoggerManager::WithAuditRecord(
         if (fd >= 0) {
             fdsan_exchange_owner_tag(fd, 0, AUDIT_FD_TAG);
             fdsan_close_with_tag(fd, AUDIT_FD_TAG);
+            fd = -1;
         } else {
             LOG_ERROR("create file failed errno:%{public}d", errno);
             return;

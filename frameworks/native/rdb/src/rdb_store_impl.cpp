@@ -70,6 +70,7 @@
 #include "task_executor.h"
 #include "traits.h"
 #include "transaction.h"
+#include "transaction_impl.h"
 #include "values_buckets.h"
 #if !defined(CROSS_PLATFORM)
 #include "sqlite_shared_result_set.h"
@@ -2150,9 +2151,6 @@ std::pair<int32_t, ValueObject> RdbStoreImpl::Execute(
 std::pair<int32_t, ValueObject> RdbStoreImpl::HandleDifferentSqlTypes(
     std::shared_ptr<Statement> &&statement, const std::string &sql, int32_t code, int sqlType)
 {
-    if (sqlType == SqliteUtils::STATEMENT_PRAGMA) {
-        auditLogger_->OnPragma(config_.GetPath(), sql, code, "");
-    }
     if (code != E_OK) {
         LOG_ERROR("failed, error:0x%{public}x app self can check the SQL:%{public}s", code,
             SqliteUtils::SqlAnonymous(sql).c_str());
@@ -2169,6 +2167,7 @@ std::pair<int32_t, ValueObject> RdbStoreImpl::HandleDifferentSqlTypes(
     }
 
     if (sqlType == SqliteUtils::STATEMENT_PRAGMA) {
+        auditLogger_->OnPragma(config_.GetPath(), sql, code, "");
         if (statement->GetColumnCount() == 1) {
             return statement->GetColumn(0);
         }
@@ -2857,7 +2856,7 @@ int RdbStoreImpl::BeginTransaction()
     if (id > 1) {
         LOG_WARN("[%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
     }
-
+    auditLogger_->OnTransaction(config_.GetPath(), "BEGIN", E_OK, id == 1);
     return E_OK;
 }
 
@@ -2911,6 +2910,7 @@ int RdbStoreImpl::RollBack()
     }
     BaseTransaction transaction = pool->GetTransactionStack().top();
     pool->GetTransactionStack().pop();
+    bool outer = pool->GetTransactionStack().empty();
     if (transaction.GetType() != TransType::ROLLBACK_SELF && !pool->GetTransactionStack().empty()) {
         pool->GetTransactionStack().top().SetChildFailure(true);
     }
@@ -2921,6 +2921,7 @@ int RdbStoreImpl::RollBack()
         }
         // size + 1 means the number of transactions in process
         LOG_ERROR("statement err. [%{public}zu, %{public}s]", id + 1, SqliteUtils::Anonymous(name_).c_str());
+        auditLogger_->OnTransaction(config_.GetPath(), "ROLLBACK", E_DATABASE_BUSY, outer);
         return E_DATABASE_BUSY;
     }
     err = statement->Execute();
@@ -2929,6 +2930,7 @@ int RdbStoreImpl::RollBack()
             Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, err, config_.GetBundleName(), "RollBusy"));
         }
         LOG_ERROR("failed. [%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
+        auditLogger_->OnTransaction(config_.GetPath(), "ROLLBACK", err, outer);
         return err;
     }
     if (pool->GetTransactionStack().empty()) {
@@ -2938,6 +2940,7 @@ int RdbStoreImpl::RollBack()
     if (id > 1) {
         LOG_WARN("[%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
     }
+    auditLogger_->OnTransaction(config_.GetPath(), "ROLLBACK", E_OK, outer);
     return E_OK;
 }
 
@@ -3030,11 +3033,13 @@ int RdbStoreImpl::Commit()
         return err;
     }
     pool->GetTransactionStack().pop();
-    if (pool->GetTransactionStack().empty()) {
-        pool->SetInTransaction(false);
-    } else {
+    bool outer = pool->GetTransactionStack().empty();
+    if (!outer) {
         LOG_WARN("[%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
+    } else {
+        pool->SetInTransaction(false);
     }
+    auditLogger_->OnTransaction(config_.GetPath(), "COMMIT", E_OK, outer);
     return E_OK;
 }
 
@@ -3686,7 +3691,7 @@ std::pair<int32_t, std::shared_ptr<Transaction>> RdbStoreImpl::CreateTransaction
         return { errCode, nullptr };
     }
     std::shared_ptr<Transaction> trans;
-    std::tie(errCode, trans) = Transaction::Create(type, conn, config_.GetPath());
+    std::tie(errCode, trans) = TransactionImpl::Create(type, conn, config_.GetPath(), auditLogger_.get());
     if (trans == nullptr) {
         TryDump(errCode, "TRANS");
         return { errCode, nullptr };
