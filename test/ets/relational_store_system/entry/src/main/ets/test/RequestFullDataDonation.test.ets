@@ -418,5 +418,145 @@ export default function RequestFullDataDonation() {
       }
       console.log(TAG + "************* RequestFullDataDonationTest0013 end *************");
     })
+
+    /**
+     * @tc.number RequestFullDataDonationTest0014
+     * @tc.name request full data donation with empty string element
+     * @tc.desc call requestFullDataDonation(["user_table", "", "order_table"]),
+     *          native RequestFullDataDonation does not validate table name content, expect success
+     */
+    it('RequestFullDataDonationTest0014', 0, async () => {
+      console.log(TAG + "************* RequestFullDataDonationTest0014 start *************");
+      if (rdbStore == undefined) {
+        expect().assertFail();
+        return;
+      }
+      try {
+        await rdbStore.executeSql(
+          'CREATE TABLE IF NOT EXISTS user_table (ID INTEGER PRIMARY KEY AUTOINCREMENT, NAME TEXT NOT NULL)');
+        await rdbStore.executeSql(
+          'CREATE TABLE IF NOT EXISTS order_table (ID INTEGER PRIMARY KEY AUTOINCREMENT, NAME TEXT NOT NULL)');
+      } catch (e) {
+        console.error(`executeSql error, code is ${e.code}, message is ${e.message}`);
+        expect(null).assertFail();
+      }
+      try {
+        await rdbStore.requestFullDataDonation(["user_table", "", "order_table"]);
+        console.info('RequestFullDataDonationTest0014 success (table name content not validated by native)');
+        expect(true).assertTrue();
+      } catch (err) {
+        console.info(`RequestFullDataDonationTest0014 failed, code is ${err.code}, message is ${err.message}`);
+        expect(null).assertFail();
+      }
+      console.log(TAG + "************* RequestFullDataDonationTest0014 end *************");
+    })
+
+    /**
+     * @tc.number RequestFullDataDonationTest0015
+     * @tc.name request full data donation with sql injection in table name
+     * @tc.desc call requestFullDataDonation(["table;DROP"]),
+     *          native RequestFullDataDonation does not interpret table names as SQL, expect success and db intact
+     */
+    it('RequestFullDataDonationTest0015', 0, async () => {
+      console.log(TAG + "************* RequestFullDataDonationTest0015 start *************");
+      if (rdbStore == undefined) {
+        expect().assertFail();
+        return;
+      }
+      try {
+        await rdbStore.requestFullDataDonation(["table;DROP"]);
+        console.info('RequestFullDataDonationTest0015 success (table name not interpreted as SQL)');
+        expect(true).assertTrue();
+      } catch (err) {
+        console.info(`RequestFullDataDonationTest0015 failed, code is ${err.code}, message is ${err.message}`);
+        expect(null).assertFail();
+      }
+      // Verify database integrity: EMPLOYEE table should still be queryable
+      try {
+        let resultSet = await rdbStore.querySql('SELECT COUNT(*) AS cnt FROM EMPLOYEE');
+        expect(resultSet.rowCount >= 0).assertTrue();
+        resultSet.close();
+        console.info('RequestFullDataDonationTest0015 db integrity verified, EMPLOYEE still exists');
+      } catch (e) {
+        console.info(`RequestFullDataDonationTest0015 db integrity broken, code is ${e.code}, message is ${e.message}`);
+        expect(null).assertFail();
+      }
+      console.log(TAG + "************* RequestFullDataDonationTest0015 end *************");
+    })
+
+    /**
+     * @tc.number RequestFullDataDonationTest0016
+     * @tc.name request full data donation with overlong table name
+     * @tc.desc call requestFullDataDonation with a 300-char table name,
+     *          native RequestFullDataDonation does not validate table name length, expect success
+     */
+    it('RequestFullDataDonationTest0016', 0, async () => {
+      console.log(TAG + "************* RequestFullDataDonationTest0016 start *************");
+      if (rdbStore == undefined) {
+        expect().assertFail();
+        return;
+      }
+      let longTableName = 'a'.repeat(300);
+      try {
+        await rdbStore.requestFullDataDonation([longTableName]);
+        console.info('RequestFullDataDonationTest0016 success (table name length not validated by native)');
+        expect(true).assertTrue();
+      } catch (err) {
+        console.info(`RequestFullDataDonationTest0016 err, code is ${err.code}, message is ${err.message}`);
+        expect(err.code).assertEqual(14800001);
+      }
+      console.log(TAG + "************* RequestFullDataDonationTest0016 end *************");
+    })
+
+    /**
+     * @tc.number RequestFullDataDonationTest0017
+     * @tc.name request full data donation with too many table names
+     * @tc.desc call requestFullDataDonation with 1000 table names,
+     *          NAPI layer rejects arrays exceeding TABLE_DONATION_MAX(10), expect 14800001 (E_INVALID_ARGS)
+     */
+    it('RequestFullDataDonationTest0017', 0, async () => {
+      console.log(TAG + "************* RequestFullDataDonationTest0017 start *************");
+      if (rdbStore == undefined) {
+        expect().assertFail();
+        return;
+      }
+      let tables: string[] = [];
+      for (let i = 0; i < 1000; i++) {
+        tables.push(`table_${i}`);
+      }
+      try {
+        await rdbStore.requestFullDataDonation(tables);
+        console.info('RequestFullDataDonationTest0017 should throw but did not');
+        expect(null).assertFail();
+      } catch (err) {
+        console.info(`RequestFullDataDonationTest0017 err, code is ${err.code}, message is ${err.message}`);
+        expect(err.code).assertEqual(14800001);
+      }
+      console.log(TAG + "************* RequestFullDataDonationTest0017 end *************");
+    })
+
+    /**
+     * @tc.number RequestFullDataDonationTest0018
+     * @tc.name request full data donation with undefined element
+     * @tc.desc call requestFullDataDonation(["EMPLOYEE", undefined, "DEPARTMENT"]),
+     *          NAPI Convert2Value rejects non-string element (undefined is not napi_string),
+     *          expect 401 (E_PARAM_ERROR)
+     */
+    it('RequestFullDataDonationTest0018', 0, async () => {
+      console.log(TAG + "************* RequestFullDataDonationTest0018 start *************");
+      if (rdbStore == undefined) {
+        expect().assertFail();
+        return;
+      }
+      try {
+        await (rdbStore as any).requestFullDataDonation(["EMPLOYEE", undefined, "DEPARTMENT"]);
+        console.info('RequestFullDataDonationTest0018 should throw but did not');
+        expect(null).assertFail();
+      } catch (err) {
+        console.info(`RequestFullDataDonationTest0018 err, code is ${err.code}, message is ${err.message}`);
+        expect(err.code).assertEqual(401);
+      }
+      console.log(TAG + "************* RequestFullDataDonationTest0018 end *************");
+    })
   })
 }
