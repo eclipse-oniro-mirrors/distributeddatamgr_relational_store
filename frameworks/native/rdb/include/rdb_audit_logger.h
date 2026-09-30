@@ -63,6 +63,10 @@ public:
     // empty). SQL events between BEGIN and the outermost COMMIT/ROLLBACK are buffered:
     // flushed to events.log only on successful outermost COMMIT, discarded on ROLLBACK.
     virtual void OnTransaction(const std::string &dbPath, const std::string &op, int rc, bool outer) {}
+    // Emits a TRX line without managing inTransaction_/txnBuffer_ state.
+    // Used by TransactionImpl (connection-based transactions) to avoid
+    // interfering with BeginTransaction's stack-based buffering.
+    virtual void OnTransactionEvent(const std::string &dbPath, const std::string &op, int rc) {}
 };
 
 // Real audit implementation. The constructor probes the shared audit root
@@ -85,6 +89,7 @@ public:
     void OnCorrupt(const std::string &dbPath, int rc, int osErrno, const std::string &detail) override;
     void OnDbDelete(const std::string &dbPath, const std::string &op) override;
     void OnTransaction(const std::string &dbPath, const std::string &op, int rc, bool outer) override;
+    void OnTransactionEvent(const std::string &dbPath, const std::string &op, int rc) override;
 
 private:
     // Outcome of a throttle window lookup for INSERT/UPDATE (high-frequency

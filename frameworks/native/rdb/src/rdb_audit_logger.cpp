@@ -244,7 +244,7 @@ void RdbAuditLoggerImpl::OnSqlAudit(
         return;
     }
     // Throttle stays sync (uses per-instance throttleMap_); only the write is async.
-    dbPath_ = dbPath; // remember for destructor flush (AUD-8)
+    // dbPath_ is set inside AccumulateOrFlush under mutex_ (AUD-8, destructor reads it under same lock).
     ThrottleDecision d = AccumulateOrFlush(dbPath, auditOp, tbl, rows);
     if (d.suppressed) {
         if (d.throttleStarted) {
@@ -285,6 +285,14 @@ void RdbAuditLoggerImpl::OnTransaction(
             inTransaction_ = false;
         }
     }
+}
+
+void RdbAuditLoggerImpl::OnTransactionEvent(const std::string &dbPath, const std::string &op, int rc)
+{
+    if (!IsActive()) {
+        return;
+    }
+    EmitTransaction(dbPath, op, rc);
 }
 
 void RdbAuditLoggerImpl::EmitSqlAudit(
@@ -385,6 +393,7 @@ RdbAuditLoggerImpl::ThrottleDecision RdbAuditLoggerImpl::AccumulateOrFlush(
     const std::string &dbPath, const std::string &op, const std::string &tbl, int64_t rows)
 {
     std::lock_guard<std::mutex> lock(mutex_);
+    dbPath_ = dbPath; // remember for destructor flush (AUD-8)
     std::string eventKey = "SQL_AUDIT:" + op + ":" + tbl;
     ThrottleDecision d;
     int64_t now = NowMs();

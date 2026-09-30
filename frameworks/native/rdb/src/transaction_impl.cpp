@@ -126,7 +126,7 @@ int32_t TransactionImpl::Begin(int32_t type)
         return errorCode;
     }
     if (auditLogger_ != nullptr) {
-        auditLogger_->OnTransaction(path_, "BEGIN", E_OK, true);
+        auditLogger_->OnTransactionEvent(path_, "BEGIN", E_OK);
     }
     return E_OK;
 }
@@ -147,7 +147,7 @@ int32_t TransactionImpl::Commit()
         LOG_ERROR("create statement failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
         if (auditLogger_ != nullptr) {
-            auditLogger_->OnTransaction(path_, "ROLLBACK", errorCode, true);
+            auditLogger_->OnTransactionEvent(path_, "ROLLBACK", errorCode);
         }
         return errorCode;
     }
@@ -157,13 +157,13 @@ int32_t TransactionImpl::Commit()
         LOG_ERROR("statement execute failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
         if (auditLogger_ != nullptr) {
-            auditLogger_->OnTransaction(path_, "ROLLBACK", errorCode, true);
+            auditLogger_->OnTransactionEvent(path_, "ROLLBACK", errorCode);
         }
         return errorCode;
     }
     CloseInner();
     if (auditLogger_ != nullptr) {
-        auditLogger_->OnTransaction(path_, "COMMIT", E_OK, true);
+        auditLogger_->OnTransactionEvent(path_, "COMMIT", E_OK);
     }
     return E_OK;
 }
@@ -184,7 +184,7 @@ int32_t TransactionImpl::Rollback()
         LOG_ERROR("create statement failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
         if (auditLogger_ != nullptr) {
-            auditLogger_->OnTransaction(path_, "ROLLBACK", errorCode, true);
+            auditLogger_->OnTransactionEvent(path_, "ROLLBACK", errorCode);
         }
         return errorCode;
     }
@@ -194,13 +194,13 @@ int32_t TransactionImpl::Rollback()
         LOG_ERROR("statement execute failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
         if (auditLogger_ != nullptr) {
-            auditLogger_->OnTransaction(path_, "ROLLBACK", errorCode, true);
+            auditLogger_->OnTransactionEvent(path_, "ROLLBACK", errorCode);
         }
         return errorCode;
     }
     CloseInner();
     if (auditLogger_ != nullptr) {
-        auditLogger_->OnTransaction(path_, "ROLLBACK", E_OK, true);
+        auditLogger_->OnTransactionEvent(path_, "ROLLBACK", E_OK);
     }
     return E_OK;
 }
@@ -258,6 +258,9 @@ std::pair<int32_t, int64_t> TransactionImpl::BatchInsert(const std::string &tabl
     }
     int64_t insertRows{};
     auto errorCode = store->BatchInsert(insertRows, table, rows);
+    if (errorCode == E_OK) {
+        AuditSql("BatchInsert", table, insertRows);
+    }
     return { errorCode, insertRows };
 }
 
@@ -269,7 +272,11 @@ std::pair<int, int64_t> TransactionImpl::BatchInsert(const std::string &table, c
         LOG_ERROR("transaction already close");
         return { E_ALREADY_CLOSED, -1 };
     }
-    return store->BatchInsert(table, rows);
+    auto result = store->BatchInsert(table, rows);
+    if (result.first == E_OK) {
+        AuditSql("BatchInsert", table, result.second);
+    }
+    return result;
 }
 
 void TransactionImpl::AddResultSet(std::weak_ptr<ResultSet> resultSet)
@@ -300,6 +307,9 @@ std::pair<int32_t, int64_t> TransactionImpl::Insert(
     if (errCode == E_SQLITE_INTERRUPT) {
         CloseInner(true);
     }
+    if (errCode == E_OK && rowId > 0) {
+        AuditSql("INSERT", table, 1);
+    }
     return { errCode, rowId };
 }
 
@@ -316,6 +326,9 @@ std::pair<int32_t, Results> TransactionImpl::BatchInsert(const std::string &tabl
     auto result = store->BatchInsert(table, rows, config);
     if (result.first == E_SQLITE_INTERRUPT) {
         CloseInner(true);
+    }
+    if (result.first == E_OK && result.second.changed > 0) {
+        AuditSql("BatchInsert", table, result.second.changed);
     }
     return result;
 }
@@ -334,6 +347,9 @@ std::pair<int32_t, Results> TransactionImpl::Update(const Row &row, const AbsRdb
     if (result.first == E_SQLITE_INTERRUPT) {
         CloseInner(true);
     }
+    if (result.first == E_OK) {
+        AuditSql("UPDATE", predicates.GetTableName(), result.second.changed);
+    }
     return result;
 }
 
@@ -351,8 +367,17 @@ std::pair<int32_t, Results> TransactionImpl::Delete(
     if (result.first == E_SQLITE_INTERRUPT) {
         CloseInner(true);
     }
+    if (result.first == E_OK) {
+        AuditSql("DELETE", predicates.GetTableName(), result.second.changed);
+    }
     return result;
 }
+
+void TransactionImpl::AuditSql(const std::string &op, const std::string &tbl, int64_t rows)
+{
+    if (auditLogger_ != nullptr) {
+        auditLogger_->OnSqlAudit(path_, op, tbl, rows);
+    }
 }
 
 std::shared_ptr<ResultSet> TransactionImpl::QueryByStep(

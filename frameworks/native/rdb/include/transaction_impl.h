@@ -71,6 +71,7 @@ private:
     std::shared_ptr<Connection> GetConnection();
     void AddResultSet(std::weak_ptr<ResultSet> resultSet);
     std::unique_ptr<SqlTimeoutGuard> MakeGuard(int64_t timeoutMs);
+    void AuditSql(const std::string &op, const std::string &tbl, int64_t rows);
 
     std::string path_;
     uint32_t seqId_ = 0;

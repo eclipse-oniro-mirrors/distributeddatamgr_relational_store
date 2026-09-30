@@ -374,7 +374,8 @@ private:
     mutable std::shared_mutex poolMutex_;
     std::mutex mutex_;
     std::mutex initMutex_;
-    std::unique_ptr<RdbAuditLogger> auditLogger_;
+    const std::unique_ptr<RdbAuditLogger> auditLoggerHolder_;
+    RdbAuditLogger& auditLogger_;
     std::shared_ptr<ConnectionPool> connectionPool_ = nullptr;
     std::shared_ptr<DelayNotify> delayNotifier_ = nullptr;
     std::shared_ptr<CloudTables> cloudInfo_ = std::make_shared<CloudTables>();

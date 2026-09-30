@@ -810,7 +810,7 @@ HWTEST_F(RdbAuditTest, RealDbTransaction_029, TestSize.Level0)
 
 /**
  * @tc.name: RdbAudit_RealDbCreateTransaction_030
- * @tc.desc: CreateTransaction path: committed SQL audited; rolled-back is not.
+ * @tc.desc: CreateTransaction path: BEGIN/COMMIT/ROLLBACK TRX lines emitted; SQL audited via throttle.
  * @tc.type: FUNC
  */
 HWTEST_F(RdbAuditTest, RealDbCreateTransaction_030, TestSize.Level0)
@@ -819,7 +819,6 @@ HWTEST_F(RdbAuditTest, RealDbCreateTransaction_030, TestSize.Level0)
     int err = E_OK;
     auto store = RdbHelper::GetRdbStore(MakeAuditConfig(), 1, cb, err);
     ASSERT_NE(store, nullptr);
-    // Committed transaction via CreateTransaction: INSERT buffered → flushed on COMMIT.
     auto [ret, trans] = store->CreateTransaction(Transaction::EXCLUSIVE);
     ASSERT_EQ(ret, E_OK);
     ASSERT_NE(trans, nullptr);
@@ -828,7 +827,6 @@ HWTEST_F(RdbAuditTest, RealDbCreateTransaction_030, TestSize.Level0)
     b.Put("name", "a");
     trans->Insert("users", b);
     trans->Commit();
-    // Rolled-back transaction via CreateTransaction: INSERT discarded on ROLLBACK.
     auto [ret2, trans2] = store->CreateTransaction(Transaction::EXCLUSIVE);
     ASSERT_EQ(ret2, E_OK);
     ASSERT_NE(trans2, nullptr);
@@ -837,13 +835,13 @@ HWTEST_F(RdbAuditTest, RealDbCreateTransaction_030, TestSize.Level0)
     b2.Put("name", "b");
     trans2->Insert("users", b2);
     trans2->Rollback();
-    // open (2) + INSERT(1, flushed) + COMMIT(1) = 4. Rollback adds nothing.
-    EXPECT_EQ(WaitEventLines(4), 4);
+    // open(2) + BEGIN(1) + COMMIT(1) + BEGIN(1) + THROTTLE(1) + ROLLBACK(1) = 7.
+    // 1st INSERT starts throttle window (no emit); 2nd INSERT emits THROTTLE.
+    EXPECT_EQ(WaitEventLines(7), 7);
     auto content = ReadFileContent(EventsLogPath());
-    EXPECT_NE(content.find("op=INSERT"), NPOS);
+    EXPECT_NE(content.find("op=BEGIN"), NPOS);
     EXPECT_NE(content.find("op=COMMIT"), NPOS);
-    EXPECT_EQ(content.find("op=BEGIN"), NPOS);
-    EXPECT_EQ(content.find("op=ROLLBACK"), NPOS);
+    EXPECT_NE(content.find("op=ROLLBACK"), NPOS);
 }
 
 /**
