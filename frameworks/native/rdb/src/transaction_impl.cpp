@@ -258,9 +258,6 @@ std::pair<int32_t, int64_t> TransactionImpl::BatchInsert(const std::string &tabl
     }
     int64_t insertRows{};
     auto errorCode = store->BatchInsert(insertRows, table, rows);
-    if (errorCode == E_OK && auditLogger_ != nullptr) {
-        auditLogger_->OnSqlAudit(path_, "BatchInsert", "", insertRows);
-    }
     return { errorCode, insertRows };
 }
 
@@ -272,11 +269,7 @@ std::pair<int, int64_t> TransactionImpl::BatchInsert(const std::string &table, c
         LOG_ERROR("transaction already close");
         return { E_ALREADY_CLOSED, -1 };
     }
-    auto [err, insertRows] = store->BatchInsert(table, rows);
-    if (err == E_OK && auditLogger_ != nullptr) {
-        auditLogger_->OnSqlAudit(path_, "BatchInsert", "", insertRows);
-    }
-    return { err, insertRows };
+    return store->BatchInsert(table, rows);
 }
 
 void TransactionImpl::AddResultSet(std::weak_ptr<ResultSet> resultSet)

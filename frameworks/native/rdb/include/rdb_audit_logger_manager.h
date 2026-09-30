@@ -16,6 +16,7 @@
 #ifndef RDB_AUDIT_LOGGER_MANAGER_H
 #define RDB_AUDIT_LOGGER_MANAGER_H
 
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -54,7 +55,7 @@ public:
     // Receive the probed audit root directory from the façade. Idempotent.
     void Init(const std::string &auditDir);
 
-    bool IsInitialized() const { return initialized_; }
+    bool IsInitialized() const { return initialized_.load(std::memory_order_acquire); }
 
     // Synchronous append of a jsonl line to events.log. Called from inside an
     // executor task — not intended for direct caller use.
@@ -73,7 +74,7 @@ private:
     std::string auditDir_;
     int writeFd_ = -1;  // persistent fd for events.log
     int lockFd_ = -1;  // persistent fd for events.lock (cross-process)
-    bool initialized_ = false;
+    std::atomic<bool> initialized_ = false;
     // Rate limit: at most 60 lines per second. Excess lines are dropped; one
     // RATE_LIMIT summary line replaces all dropped lines at the next window start.
     int64_t rateLimitWindowStart_ = 0;

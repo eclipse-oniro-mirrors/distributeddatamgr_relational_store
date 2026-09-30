@@ -1776,7 +1776,7 @@ std::pair<int, int64_t> RdbStoreImpl::Insert(
     int64_t rowid = -1;
     int errCode = ExecuteForLastInsertedRowId(rowid, sqlInfo.sql, sqlInfo.args, config.timeoutMs);
     if (errCode == E_OK && rowid > 0) {
-        auditLogger_->OnSqlAudit(config_.GetPath(), "INSERT", "", 1);
+        auditLogger_->OnSqlAudit(config_.GetPath(), "INSERT", table, 1);
     }
     if (errCode == E_OK) {
         DoCloudSync(table);
@@ -1817,7 +1817,7 @@ std::pair<int, int64_t> RdbStoreImpl::BatchInsert(const std::string &table, cons
     }
     conn = nullptr;
     int64_t insertedRows = int64_t(rows.RowSize());
-    auditLogger_->OnSqlAudit(config_.GetPath(), "BatchInsert", "", insertedRows);
+    auditLogger_->OnSqlAudit(config_.GetPath(), "BatchInsert", table, insertedRows);
     DoCloudSync(table);
     return { E_OK, insertedRows };
 }
@@ -1871,7 +1871,7 @@ std::pair<int32_t, Results> RdbStoreImpl::BatchInsert(
     auto [errCode, result] = ExecuteBatchInsertReturning(sqlArgs, conn, config, cfg.resolution);
     if (result.changed > 0) {
         DoCloudSync(table);
-        auditLogger_->OnSqlAudit(config_.GetPath(), "BatchInsert", "", result.changed);
+        auditLogger_->OnSqlAudit(config_.GetPath(), "BatchInsert", table, result.changed);
     }
     return { errCode, result };
 }
@@ -1924,7 +1924,7 @@ std::pair<int32_t, Results> RdbStoreImpl::Update(const Row &row, const AbsRdbPre
     }
     auto returningSql = SqliteSqlBuilder::GetReturningSql(cfg.returning.columns);
     auto [code, result] = ExecuteForRow(sqlInfo.sql, sqlInfo.args, cfg.returning, returningSql, cfg.timeoutMs);
-    auditLogger_->OnSqlAudit(config_.GetPath(), "UPDATE", "", result.changed);
+    auditLogger_->OnSqlAudit(config_.GetPath(), "UPDATE", predicates.GetTableName(), result.changed);
     if (result.changed > 0) {
         DoCloudSync(predicates.GetTableName());
     }
@@ -1948,7 +1948,7 @@ std::pair<int32_t, Results> RdbStoreImpl::Delete(
     auto returningSql = SqliteSqlBuilder::GetReturningSql(cfg.returning.columns);
     auto [code, result] =
         ExecuteForRow(sqlInfo.sql, predicates.GetBindArgs(), cfg.returning, returningSql, cfg.timeoutMs);
-    auditLogger_->OnSqlAudit(config_.GetPath(), "DELETE", "", result.changed);
+    auditLogger_->OnSqlAudit(config_.GetPath(), "DELETE", predicates.GetTableName(), result.changed);
     if (result.changed > 0) {
         DoCloudSync(predicates.GetTableName());
     }
@@ -2213,6 +2213,9 @@ std::pair<int32_t, Results> RdbStoreImpl::ExecuteExt(const std::string &sql, con
         LOG_ERROR("failed, error:0x%{public}x app self can check the SQL:%{public}s", errCode,
             SqliteUtils::SqlAnonymous(sql).c_str());
         return { errCode, result };
+    }
+    if (sqlType == SqliteUtils::STATEMENT_PRAGMA) {
+        auditLogger_->OnPragma(config_.GetPath(), sql, errCode, "");
     }
     if (sqlType == SqliteUtils::STATEMENT_DDL) {
         auditLogger_->OnSqlAudit(config_.GetPath(), "", sql, 0);

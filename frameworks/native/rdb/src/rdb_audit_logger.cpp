@@ -21,6 +21,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cinttypes>
 #include <cstring>
 #include <sstream>
 
@@ -103,14 +104,16 @@ std::string ProbeAuditDir()
     struct stat st;
     if (stat(AUDIT_DIR_SA_ROOT, &st) == 0 && S_ISDIR(st.st_mode)) {
         int32_t uid = static_cast<int32_t>(GetUid());
-        return std::string(AUDIT_DIR_SA_ROOT) + "/" + std::to_string(uid) + "/";
+        std::string saDir = std::string(AUDIT_DIR_SA_ROOT) + "/" + std::to_string(uid) + "/";
+        if (MkDirP(saDir)) {
+            return saDir;
+        }
     }
     if (stat(AUDIT_DIR_APP_ROOT, &st) == 0 && S_ISDIR(st.st_mode)) {
         std::string dir = std::string(AUDIT_DIR_APP_ROOT) + "/" + AUDIT_DIR_APP_SUB + "/";
         if (MkDirP(dir)) {
             return dir;
         }
-        return "";
     }
     LOG_INFO("ProbeAuditDir: no audit directory available, audit disabled");
     return "";
@@ -167,9 +170,11 @@ void RdbAuditLoggerImpl::OnOpenOk(const std::string &dbPath, bool created)
     if (executor == nullptr) {
         return;
     }
-    executor->Execute([dbPath, created]() {
-        RdbAuditLoggerManager::GetInstance().AppendEventSync(BuildOpenOkLine(dbPath));
-        LastOpenDbInfo lastOpen = RdbDbInfoManager::GetInstance().BuildLastOpen(dbPath, created);
+    // Collect file info synchronously to avoid TOCTOU with subsequent writes (AUD-5).
+    std::string openLine = BuildOpenOkLine(dbPath);
+    LastOpenDbInfo lastOpen = RdbDbInfoManager::GetInstance().BuildLastOpen(dbPath, created);
+    executor->Execute([openLine = std::move(openLine), dbPath, lastOpen = std::move(lastOpen)]() {
+        RdbAuditLoggerManager::GetInstance().AppendEventSync(openLine);
         RdbDbLoggerManager::GetInstance().RecordOpenSync(dbPath, lastOpen);
     });
 }
@@ -212,6 +217,9 @@ void RdbAuditLoggerImpl::OnSqlAudit(
             return;
         }
         tbl = RdbAuditUtils::ParseDropTruncateTable(sql);
+    } else {
+        // CRUD ops: caller passes the table name via the sql parameter (AUD-9).
+        tbl = sql;
     }
     bool alwaysLog = (auditOp == "DELETE" || auditOp == "DROP" || auditOp == "TRUNCATE" || auditOp == "BatchInsert");
     if (alwaysLog) {
@@ -236,8 +244,8 @@ void RdbAuditLoggerImpl::OnSqlAudit(
         return;
     }
     // Throttle stays sync (uses per-instance throttleMap_); only the write is async.
-    std::string eventKey = "SQL_AUDIT:" + auditOp + ":" + tbl;
-    ThrottleDecision d = AccumulateOrFlush(eventKey, rows);
+    dbPath_ = dbPath; // remember for destructor flush (AUD-8)
+    ThrottleDecision d = AccumulateOrFlush(dbPath, auditOp, tbl, rows);
     if (d.suppressed) {
         if (d.throttleStarted) {
             EmitThrottleLog(dbPath, auditOp, tbl, d.accumulated);
@@ -349,19 +357,35 @@ void RdbAuditLoggerImpl::OnDbDelete(const std::string &dbPath, const std::string
     if (executor == nullptr) {
         return;
     }
-    executor->Execute([dbPath, op]() {
-        DeleteInfo del;
-        del.files = RdbDbInfoManager::GetInstance().CollectDbFileInfo(dbPath);
-        del.callerInfo = RdbDbInfoManager::GetInstance().CollectCaller();
-        del.time = RdbTimeUtils::GetCurSysTimeWithMs();
+    // Collect file info synchronously before deletion takes effect (AUD-5).
+    DeleteInfo del;
+    del.files = RdbDbInfoManager::GetInstance().CollectDbFileInfo(dbPath);
+    del.callerInfo = RdbDbInfoManager::GetInstance().CollectCaller();
+    del.time = RdbTimeUtils::GetCurSysTimeWithMs();
+    executor->Execute([dbPath, del = std::move(del)]() {
         RdbDbLoggerManager::GetInstance().WriteDeleteSync(dbPath, del);
     });
 }
 
+RdbAuditLoggerImpl::~RdbAuditLoggerImpl()
+{
+    // Flush any accumulated throttle data that was never written (AUD-8).
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto &entry : throttleMap_) {
+        if (entry.second.accumulatedRows > 0) {
+            LOG_INFO("Audit throttle flush on destroy: op=%{public}s tbl=%{public}s rows=%{public}" PRId64,
+                entry.second.op.c_str(), SqliteUtils::Anonymous(entry.second.tbl).c_str(),
+                entry.second.accumulatedRows);
+            EmitSqlAudit(dbPath_, entry.second.op, entry.second.tbl, entry.second.accumulatedRows);
+        }
+    }
+}
+
 RdbAuditLoggerImpl::ThrottleDecision RdbAuditLoggerImpl::AccumulateOrFlush(
-    const std::string &eventKey, int64_t rows)
+    const std::string &dbPath, const std::string &op, const std::string &tbl, int64_t rows)
 {
     std::lock_guard<std::mutex> lock(mutex_);
+    std::string eventKey = "SQL_AUDIT:" + op + ":" + tbl;
     ThrottleDecision d;
     int64_t now = NowMs();
     auto it = throttleMap_.find(eventKey);
@@ -370,7 +394,9 @@ RdbAuditLoggerImpl::ThrottleDecision RdbAuditLoggerImpl::AccumulateOrFlush(
         d.accumulated = it->second.accumulatedRows;
         if (it->second.accumulatedRows >= FLUSH_THRESHOLD) {
             d.flushRows = it->second.accumulatedRows;
-            it->second = {now, 0, false};
+            LOG_INFO("Audit throttle early-flush: op=%{public}s tbl=%{public}s flushRows=%{public}" PRId64,
+                op.c_str(), SqliteUtils::Anonymous(tbl).c_str(), d.flushRows);
+            it->second = {now, 0, false, op, tbl};
             return d;
         }
         if (!it->second.throttleLogged) {
@@ -378,15 +404,25 @@ RdbAuditLoggerImpl::ThrottleDecision RdbAuditLoggerImpl::AccumulateOrFlush(
             d.throttleStarted = true;
         }
         d.suppressed = true;
+        LOG_INFO("Audit throttle accumulated: op=%{public}s tbl=%{public}s rows=%{public}" PRId64
+            " accumulated=%{public}" PRId64,
+            op.c_str(), SqliteUtils::Anonymous(tbl).c_str(), rows, d.accumulated);
         return d;
     }
     if (it != throttleMap_.end()) {
+        // Window expired: flush accumulated rows from the previous window.
         d.flushRows = it->second.accumulatedRows;
+        if (d.flushRows > 0) {
+            LOG_INFO("Audit throttle window-expired flush: op=%{public}s tbl=%{public}s flushRows=%{public}" PRId64,
+                op.c_str(), SqliteUtils::Anonymous(tbl).c_str(), d.flushRows);
+        }
     }
-    throttleMap_[eventKey] = {now, rows, false};
+    throttleMap_[eventKey] = {now, rows, false, op, tbl};
     if (throttleMap_.size() > THROTTLE_MAP_MAX_SIZE) {
         for (auto mapIt = throttleMap_.begin(); mapIt != throttleMap_.end();) {
             if (mapIt->first != eventKey && (now - mapIt->second.timestamp) >= THROTTLE_INTERVAL_MS) {
+                LOG_INFO("Audit throttle evict expired entry: op=%{public}s accumulated=%{public}" PRId64,
+                    mapIt->second.op.c_str(), mapIt->second.accumulatedRows);
                 mapIt = throttleMap_.erase(mapIt);
             } else {
                 ++mapIt;

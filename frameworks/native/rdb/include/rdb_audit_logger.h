@@ -73,7 +73,7 @@ public:
 class RdbAuditLoggerImpl : public RdbAuditLogger {
 public:
     RdbAuditLoggerImpl();
-    ~RdbAuditLoggerImpl() override = default;
+    ~RdbAuditLoggerImpl() override; // AUD-8: flush pending throttle data
     RdbAuditLoggerImpl(const RdbAuditLoggerImpl &) = delete;
     RdbAuditLoggerImpl &operator=(const RdbAuditLoggerImpl &) = delete;
 
@@ -95,7 +95,8 @@ private:
         int64_t flushRows = 0;         // accumulated rows to flush now
         int64_t accumulated = 0;       // total accumulated rows (for throttle log)
     };
-    ThrottleDecision AccumulateOrFlush(const std::string &eventKey, int64_t rows);
+    ThrottleDecision AccumulateOrFlush(
+        const std::string &dbPath, const std::string &op, const std::string &tbl, int64_t rows);
     bool IsActive() const { return enabled_; }
 
     void EmitSqlAudit(const std::string &dbPath, const std::string &op, const std::string &tbl, int64_t rows);
@@ -113,10 +114,13 @@ private:
         const std::string &dbPath, const std::string &op, const std::string &tbl, int64_t accumulated);
 
     bool enabled_ = false;
+    std::string dbPath_; // remembered for destructor throttle flush (AUD-8)
     struct ThrottleEntry {
         int64_t timestamp = 0;
         int64_t accumulatedRows = 0;
         bool throttleLogged = false; // THROTTLE line already emitted for this window
+        std::string op;  // for destructor flush (AUD-8)
+        std::string tbl; // for destructor flush (AUD-8)
     };
     std::unordered_map<std::string, ThrottleEntry> throttleMap_;
     std::mutex mutex_;
