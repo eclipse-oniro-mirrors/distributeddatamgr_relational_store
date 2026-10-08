@@ -19,7 +19,6 @@
 
 #include "logger.h"
 #include "rdb_audit_logger.h"
-#include "rdb_audit_logger_manager.h"
 #include "rdb_errno.h"
 #include "rdb_store.h"
 #include "rdb_trace.h"
@@ -37,11 +36,9 @@ const int32_t TransactionImpl::regCreator_ = Transaction::RegisterCreator(
         return TransactionImpl::Create(type, std::move(conn), path);
     });
 
-TransactionImpl::TransactionImpl(std::shared_ptr<Connection> connection, const std::string &path)
-    : path_(path), connection_(std::move(connection)),
-      auditLoggerHolder_(RdbAuditLogger::Create(
-          RdbAuditLoggerManager::GetInstance().IsInitialized())),
-      auditLogger_(*auditLoggerHolder_)
+TransactionImpl::TransactionImpl(std::shared_ptr<Connection> connection, const std::string &path,
+    RdbAuditLogger& auditLogger)
+    : path_(path), connection_(std::move(connection)), auditLogger_(auditLogger)
 {
     seqId_ = PerfStat::GenerateId();
     PerfStat perfStat(path_, "", PerfStat::Step::STEP_TRANS_START, seqId_);
@@ -62,7 +59,15 @@ TransactionImpl::~TransactionImpl()
 std::pair<int32_t, std::shared_ptr<Transaction>> TransactionImpl::Create(
     int32_t type, std::shared_ptr<Connection> connection, const std::string &path)
 {
-    auto trans = std::make_shared<TransactionImpl>(std::move(connection), path);
+    static RdbAuditLogger noopLogger;
+    return Create(type, std::move(connection), path, noopLogger);
+}
+
+std::pair<int32_t, std::shared_ptr<Transaction>> TransactionImpl::Create(
+    int32_t type, std::shared_ptr<Connection> connection, const std::string &path,
+    RdbAuditLogger& auditLogger)
+{
+    auto trans = std::make_shared<TransactionImpl>(std::move(connection), path, auditLogger);
     if (trans == nullptr) {
         return { E_ERROR, nullptr };
     }
