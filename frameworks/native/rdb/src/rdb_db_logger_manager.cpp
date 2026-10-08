@@ -54,12 +54,13 @@ public:
         if (fd_ < 0) {
             return;
         }
+        fdsan_exchange_owner_tag(fd_, 0, AUDIT_FD_TAG);
         int rc = -1;
         do {
             rc = flock(fd_, LOCK_EX);
         } while (rc < 0 && errno == EINTR);
         if (rc < 0) {
-            close(fd_);
+            fdsan_close_with_tag(fd_, AUDIT_FD_TAG);
             fd_ = -1;
         }
     }
@@ -70,7 +71,8 @@ public:
             do {
                 rc = flock(fd_, LOCK_UN);
             } while (rc < 0 && errno == EINTR);
-            close(fd_);
+            fdsan_close_with_tag(fd_, AUDIT_FD_TAG);
+            fd_ = -1;
         }
     }
     bool IsLocked() const { return fd_ >= 0; }
