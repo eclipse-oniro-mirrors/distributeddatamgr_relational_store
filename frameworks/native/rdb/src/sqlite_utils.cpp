@@ -854,6 +854,22 @@ bool SqliteUtils::IsSlaveInvalid(const std::string &dbPath)
     if (access(filePath.c_str(), F_OK) != 0) {
         return false;
     }
+    std::string reasonStr = ReadSlaveInvalidReason(dbPath);
+    LOG_WARN("slave is invalid:%{public}s, reason:%{public}s", Anonymous(dbPath).c_str(), reasonStr.c_str());
+    return true;
+}
+
+bool SqliteUtils::IsSlaveInterrupted(const std::string &dbPath)
+{
+    return access((dbPath + SLAVE_INTERRUPT).c_str(), F_OK) == 0;
+}
+
+std::string SqliteUtils::ReadSlaveInvalidReason(const std::string &dbPath)
+{
+    std::string filePath = dbPath + SLAVE_FAILURE;
+    if (access(filePath.c_str(), F_OK) != 0) {
+        return "";
+    }
     std::string timeStr;
     std::string reasonStr;
     std::ifstream file(filePath, std::ios::binary);
@@ -861,14 +877,14 @@ bool SqliteUtils::IsSlaveInvalid(const std::string &dbPath)
         std::getline(file, timeStr);
         std::getline(file, reasonStr);
     }
-    LOG_WARN("slave is invalid:%{public}s, reason:%{public}s, time:%{public}s", Anonymous(dbPath).c_str(),
-        reasonStr.c_str(), timeStr.c_str());
-    return true;
+    return reasonStr;
 }
 
-bool SqliteUtils::IsSlaveInterrupted(const std::string &dbPath)
+uint32_t SqliteUtils::GetProcUmask()
 {
-    return access((dbPath + SLAVE_INTERRUPT).c_str(), F_OK) == 0;
+    mode_t old = umask(0);
+    umask(old);
+    return static_cast<uint32_t>(old);
 }
 
 bool SqliteUtils::IsFileEmpty(const std::string &filePath)
@@ -1202,7 +1218,13 @@ std::string SqliteUtils::FormatDebugInfoBrief(const std::map<std::string, DebugI
 std::string SqliteUtils::FormatDfxInfo(const DfxInfo &dfxInfo)
 {
     std::stringstream oss;
-    oss << "LastOpen:" << dfxInfo.lastOpenTime_ << "," << "CUR_USER:" << dfxInfo.curUserId_;
+    oss << "LastOpen:" << dfxInfo.lastOpenTime_ << "," << "CUR_USER:" << dfxInfo.curUserId_
+        << ",UID:" << dfxInfo.procUid_ << ",GID:" << dfxInfo.procGid_
+        << ",UMASK:" << std::oct << dfxInfo.procUmask_ << std::dec
+        << ",SLV_ERR:" << dfxInfo.slaveHasError_ << ",SLV_INTR:" << dfxInfo.slaveInterrupted_
+        << ",SLV_CANCEL:" << dfxInfo.slaveCancelled_ << ",SLV_REASON:" << dfxInfo.slaveInvalidReason_
+        << ",SLV_INFO:" << GetFileStatInfo(dfxInfo.slaveDebugInfo_)
+        << ",MS_DIFF:" << dfxInfo.masterSlaveDiff_;
     return oss.str();
 }
 

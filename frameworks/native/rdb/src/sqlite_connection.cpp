@@ -260,6 +260,10 @@ std::pair<int32_t, std::shared_ptr<SqliteConnection>> SqliteConnection::CreateSl
     }
 
     if (!SqliteUtils::IsValidReplicaPath(config.GetReplicaPath())) {
+        if (!SqliteUtils::IsSlaveInvalid(config_.GetPath())) {
+            Reportor::ReportCorruptedOnce(Reportor::Create(config_, E_DFX_MASTER_SLAVE_INCONSISTENT,
+                "slave open failed, invalid replica path", true, RdbSubCase::INCONSISTENT));
+        }
         SqliteUtils::SetSlaveInvalid(config_.GetPath(), SqliteUtils::SlaveInvalidReason::OPEN_FAILED);
         LOG_WARN("invalid replicaPath, create slave connection failed:%{public}s",
             SqliteUtils::Anonymous(config.GetReplicaPath()).c_str());
@@ -413,7 +417,8 @@ void SqliteConnection::CheckIntegrityOnOpen(const RdbStoreConfig &config)
         LOG_ERROR("%{public}s integrity check result is %{public}s, sql:%{public}s",
             SqliteUtils::Anonymous(config.GetName()).c_str(), static_cast<std::string>(checkResult).c_str(),
             SqliteUtils::SqlAnonymous(sql).c_str());
-        Reportor::ReportCorruptedOnce(Reportor::Create(config, errCode, static_cast<std::string>(checkResult)));
+        Reportor::ReportCorruptedOnce(Reportor::Create(config, errCode, static_cast<std::string>(checkResult),
+            true, RdbSubCase::FIRST_PAGE));
         if (config.IsAuditEnabled()) {
             RdbDbLoggerManager::GetInstance().RecordCorrupt(
                 config.GetPath(), errCode, 0, static_cast<std::string>(checkResult));
@@ -445,10 +450,14 @@ int32_t SqliteConnection::OpenDatabase(const std::string &dbPath, int openFileFl
                 SqliteUtils::Anonymous(blockedPath).c_str(), diagMsg.c_str(),
                 blockedInfo.second.gid_, blockedInfo.second.uid_, blockedInfo.second.mode_);
             Reportor::ReportFault(RdbFaultDbFileEvent(RdbFaultType::FT_OPEN, E_SQLITE_CANTOPEN, config_,
-                "failed to openDB errno[ " + std::to_string(errno) + "]," +
+                std::string(RdbSubCase::TAG) + RdbSubCase::FILE_PERMISSION +
+                    ",failed to openDB errno[ " + std::to_string(errno) + "]," +
                     SqliteUtils::GetFileStatInfo(blockedInfo.second) +
                     "blockedPath=" + blockedPath + ", " + diagMsg +
-                    ", parent dir modes:" + SqliteUtils::GetParentModes(dbPath), true));
+                    ", parent dir modes:" + SqliteUtils::GetParentModes(dbPath) +
+                    ", procUid:" + std::to_string(getuid()) +
+                    ", procGid:" + std::to_string(getgid()) +
+                    ", procUmask:" + std::to_string(SqliteUtils::GetProcUmask()), true));
         }
 #if !defined(WINDOWS_PLATFORM) && !defined(MAC_PLATFORM)
         auto const pos = dbPath.find_last_of("\\/");
@@ -715,6 +724,10 @@ std::pair<int, std::shared_ptr<Statement>> SqliteConnection::CreateStatementInne
         errCode = slaveStmt->Prepare(slaveConnection_->dbHandle_, sql);
         if (errCode != E_OK) {
             LOG_WARN("prepare slave stmt failed:%{public}d, app self can check the SQL", errCode);
+            if (!SqliteUtils::IsSlaveInvalid(config_.GetPath())) {
+                Reportor::ReportCorruptedOnce(Reportor::Create(config_, E_DFX_MASTER_SLAVE_INCONSISTENT,
+                    "slave prepare stmt failed", true, RdbSubCase::INCONSISTENT));
+            }
             SqliteUtils::SetSlaveInvalid(config_.GetPath(), SqliteUtils::SlaveInvalidReason::EXCHANGE_FAILED);
             return { E_OK, statement };
         }
@@ -1458,8 +1471,6 @@ int SqliteConnection::TryCheckPoint(bool timeout)
             if (rc == E_SQLITE_CORRUPT) {
                 RdbStoreConfig slaveConfig(slaveConnection_->config_.GetPath());
                 DeleteCorruptSlave(slaveConfig.GetPath());
-                Reportor::ReportCorrupted(
-                    Reportor::Create(slaveConfig, SQLiteError::ErrNo(rc), "ErrorType: slaveCheckPoint"));
                 LOG_ERROR("slave CheckPoint failed err:%{public}d, errno:%{public}d", rc, errno);
             }
         }
@@ -1702,6 +1713,10 @@ int SqliteConnection::ExchangeSlaverToMaster(bool isRestore, bool verifyDb, std:
     *curStatus = SlaveStatus::BACKING_UP;
     int err = verifyDb ? ExchangeVerify(isRestore, isForceRestore) : E_OK;
     if (err != E_OK) {
+        if (isRestore) {
+            Reportor::ReportCorruptedOnce(Reportor::Create(config_, E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN,
+                "master corrupt and slave corrupt on restore", true, RdbSubCase::BOTH_FAIL));
+        }
         ReleaseTempSlaveConnection();
         *curStatus = SlaveStatus::UNDEFINED;
         return err;
@@ -1749,6 +1764,10 @@ int SqliteConnection::ResetBinlog(bool isNeedSetAcl)
         if (err != SQLITE_OK) {
             LOG_ERROR("clean all data failed:%{public}d", err);
             sqlite3_db_config(dbHandle_, SQLITE_DBCONFIG_ENABLE_BINLOG, nullptr);
+            if (!SqliteUtils::IsSlaveInvalid(config_.GetPath())) {
+                Reportor::ReportCorruptedOnce(Reportor::Create(config_, E_DFX_MASTER_SLAVE_INCONSISTENT,
+                    "slave backup verify failed", true, RdbSubCase::INCONSISTENT));
+            }
             SqliteUtils::SetSlaveInvalid(config_.GetPath(), SqliteUtils::SlaveInvalidReason::BACKUP_VERIFY_FAILED);
         }
     }
@@ -1813,7 +1832,6 @@ int SqliteConnection::SqliteNativeBackup(bool isRestore, std::shared_ptr<SlaveSt
                 DeleteCorruptSlave(slaveConfig.GetPath());
             }
             *curStatus = SlaveStatus::BACKUP_INTERRUPT;
-            Reportor::ReportCorrupted(Reportor::Create(slaveConfig, SQLiteError::ErrNo(rc), "ErrorType: slaveBackup"));
         }
         return rc == E_CANCEL ? E_CANCEL : SQLiteError::ErrNo(rc);
     }
@@ -2183,6 +2201,8 @@ int SqliteConnection::VerifySlaveIntegrity(const bool isForceRestore)
     if (err == E_OK && (static_cast<std::string>(obj) != "ok")) {
         LOG_ERROR("slave corrupt, ret:%{public}s, cRet:%{public}d, %{public}d", static_cast<std::string>(obj).c_str(),
             err, errno);
+        Reportor::ReportCorruptedOnce(Reportor::Create(slaveCfg, E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN,
+            "Verify Slave Integrity failed", true, RdbSubCase::BOTH_FAIL));
         SqliteUtils::SetSlaveInvalid(config_.GetPath(), SqliteUtils::SlaveInvalidReason::VERIFY_FAILED);
         return E_SQLITE_CORRUPT;
     }
@@ -2242,6 +2262,9 @@ void SqliteConnection::BinlogOnErrFunc(void *pCtx, int errNo, char *errMsg, cons
     }
     std::string dbPathStr(dbPath);
     LOG_WARN("binlog failed, mark invalid %{public}s", SqliteUtils::Anonymous(dbPathStr).c_str());
+    RdbStoreConfig cfg(dbPathStr);
+    Reportor::ReportCorruptedOnce(Reportor::Create(cfg, E_SQLITE_CORRUPT,
+        "slave binlog replay failed", true, RdbSubCase::NON_FIRST_PAGE));
     SqliteUtils::SetSlaveInvalid(dbPathStr, SqliteUtils::SlaveInvalidReason::BINLOG_REPLAY_FAILED);
 }
 
@@ -2422,6 +2445,10 @@ void SqliteConnection::ReplayBinlog(
     if (slaveConn->config_.GetHaMode() == HAMode::MANUAL_TRIGGER &&
         (SqliteUtils::GetFileCount(SqliteUtils::GetBinlogFolderPath(slaveConn->config_)) > BINLOG_FILE_REPLAY_LIMIT)) {
         LOG_WARN("binlog file count over limit: %{public}s", SqliteUtils::Anonymous(dbPath).c_str());
+        if (!SqliteUtils::IsSlaveInvalid(dbPath)) {
+            Reportor::ReportCorruptedOnce(Reportor::Create(slaveConn->config_, E_DFX_MASTER_SLAVE_INCONSISTENT,
+                "slave binlog replay over limit", true, RdbSubCase::INCONSISTENT));
+        }
         SqliteUtils::SetSlaveInvalid(dbPath, SqliteUtils::SlaveInvalidReason::BINLOG_REPLAY_FAILED);
         return;
     }
@@ -2459,6 +2486,10 @@ void SqliteConnection::ReplayBinlog(const RdbStoreConfig &config, bool chkBinlog
     if (chkBinlogCount && slaveConnection_->config_.GetHaMode() == HAMode::MANUAL_TRIGGER &&
         (SqliteUtils::GetFileCount(SqliteUtils::GetBinlogFolderPath(config)) > BINLOG_FILE_REPLAY_LIMIT)) {
         LOG_WARN("binlog file count over limit: %{public}s", SqliteUtils::Anonymous(config.GetPath()).c_str());
+        if (!SqliteUtils::IsSlaveInvalid(config.GetPath())) {
+            Reportor::ReportCorruptedOnce(Reportor::Create(config, E_DFX_MASTER_SLAVE_INCONSISTENT,
+                "slave binlog over limit", true, RdbSubCase::INCONSISTENT));
+        }
         SqliteUtils::SetSlaveInvalid(config.GetPath(), SqliteUtils::SlaveInvalidReason::BINLOG_REPLAY_FAILED);
         return;
     }
@@ -2484,7 +2515,6 @@ int SqliteConnection::SqliteBackupCheckpoint(bool isRestore, std::shared_ptr<Sla
         RdbStoreConfig slaveConfig(slaveConnection_->config_.GetPath());
         DeleteCorruptSlave(slaveConfig.GetPath());
         *curStatus = SlaveStatus::BACKUP_INTERRUPT;
-        Reportor::ReportCorrupted(Reportor::Create(slaveConfig, SQLiteError::ErrNo(rc), "ErrorType: slaveCheckPoint"));
         LOG_ERROR("CheckPoint failed, remove slave, err:%{public}d, isRestore:%{public}d", rc, isRestore);
         return rc;
     }
@@ -2518,6 +2548,12 @@ ExchangeStrategy SqliteConnection::CompareWithSlave(int64_t mCount, int64_t mIdx
     }
     LOG_INFO("backup, main:[%{public}" PRId64 ",%{public}" PRId64 "], slave:[%{public}" PRId64 ",%{public}" PRId64 "]",
         mCount, mIdxCount, sCount, sIdxCount);
+    if ((mCount != sCount || mIdxCount != sIdxCount) && !SqliteUtils::IsSlaveInvalid(config_.GetPath())) {
+        std::string diffDetail = "mCount=" + std::to_string(mCount) + ",sCount=" + std::to_string(sCount) +
+            ",mIdx=" + std::to_string(mIdxCount) + ",sIdx=" + std::to_string(sIdxCount);
+        Reportor::ReportCorruptedOnce(Reportor::Create(config_, E_DFX_MASTER_SLAVE_INCONSISTENT,
+            "SubCase:MasterSlaveInconsistent," + diffDetail, true, RdbSubCase::INCONSISTENT));
+    }
     return ExchangeStrategy::BACKUP;
 }
 
@@ -2537,6 +2573,10 @@ void SqliteConnection::DeleteCorruptSlave(const std::string &path)
         }
         slaveConnection_ = nullptr;
         (void)Delete(path);
+        if (!SqliteUtils::IsSlaveInvalid(config_.GetPath())) {
+            Reportor::ReportCorruptedOnce(Reportor::Create(config_, E_DFX_MASTER_SLAVE_INCONSISTENT,
+                "slave exchange failed, delete corrupt slave", true, RdbSubCase::INCONSISTENT));
+        }
         SqliteUtils::SetSlaveInvalid(config_.GetPath(), SqliteUtils::SlaveInvalidReason::EXCHANGE_FAILED);
         return;
     }

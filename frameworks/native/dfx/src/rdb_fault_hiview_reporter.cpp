@@ -103,14 +103,46 @@ void RdbFaultHiViewReporter::ReportCorruptedOnce(const RdbCorruptedEvent &eventI
 {
     if (IsReportCorruptedFault(eventInfo.path)) {
         RdbCorruptedEvent eventInfoAppend = eventInfo;
+        ApplySubCase(eventInfoAppend);
         eventInfoAppend.appendix += SqliteUtils::FormatDebugInfo(eventInfoAppend.debugInfos, "");
         eventInfoAppend.appendix += SqliteUtils::FormatDfxInfo(eventInfo.dfxInfo);
+        if (!eventInfoAppend.subCaseDesc.empty()) {
+            eventInfoAppend.appendix = std::string(RdbSubCase::TAG) + eventInfoAppend.subCaseDesc + "," +
+                eventInfoAppend.appendix;
+        }
         LOG_WARN("Corrupted %{public}s errCode:0x%{public}x [%{public}s]",
             SqliteUtils::Anonymous(eventInfoAppend.storeName).c_str(), eventInfoAppend.errorCode,
             eventInfoAppend.appendix.c_str());
         ReportCorrupted(eventInfoAppend);
         CreateCorruptedFlag(eventInfo.path);
     }
+}
+
+void RdbFaultHiViewReporter::ApplySubCase(RdbCorruptedEvent &eventInfo)
+{
+    if (!eventInfo.subCaseDesc.empty()) {
+        return;
+    }
+    for (auto &[_, di] : eventInfo.debugInfos) {
+        if (di.oldInode_ != 0 && di.oldInode_ != di.inode_) {
+            eventInfo.subCaseDesc = RdbSubCase::INODE_MISMATCH;
+            return;
+        }
+    }
+}
+
+void RdbFaultHiViewReporter::CollectDfxInfo(const RdbStoreConfig &config, DfxInfo &dfxInfo)
+{
+    dfxInfo.procUid_ = static_cast<uint32_t>(getuid());
+    dfxInfo.procGid_ = static_cast<uint32_t>(getgid());
+    dfxInfo.procUmask_ = SqliteUtils::GetProcUmask();
+    std::string dbPath = config.GetPath();
+    std::string slavePath = SqliteUtils::GetSlavePath(config);
+    dfxInfo.slaveHasError_ = SqliteUtils::IsSlaveInvalid(dbPath);
+    dfxInfo.slaveInterrupted_ = SqliteUtils::IsSlaveInterrupted(dbPath);
+    auto [_, slaveStat] = SqliteUtils::Stat(slavePath);
+    dfxInfo.slaveDebugInfo_ = slaveStat;
+    dfxInfo.slaveInvalidReason_ = SqliteUtils::ReadSlaveInvalidReason(dbPath);
 }
 
 void RdbFaultHiViewReporter::ReportRestore(const RdbCorruptedEvent &eventInfo, bool repair)
@@ -225,7 +257,8 @@ void RdbFaultHiViewReporter::DeleteCorruptedFlag(const std::string &dbPath)
 }
 
 RdbCorruptedEvent RdbFaultHiViewReporter::Create(
-    const RdbStoreConfig &config, int32_t errCode, const std::string &appendix, bool needSyncParaFromSrv)
+    const RdbStoreConfig &config, int32_t errCode, const std::string &appendix, bool needSyncParaFromSrv,
+    const std::string &subCaseDesc)
 {
     RdbCorruptedEvent eventInfo;
     eventInfo.bundleName = config.GetBundleName();
@@ -241,6 +274,7 @@ RdbCorruptedEvent RdbFaultHiViewReporter::Create(
     eventInfo.appendix = appendix;
     eventInfo.errorOccurTime = time(nullptr);
     eventInfo.debugInfos = Connection::Collect(config);
+    eventInfo.subCaseDesc = subCaseDesc;
     SqliteGlobalConfig::GetDbPath(config, eventInfo.path);
     if (collector_ != nullptr && needSyncParaFromSrv) {
         std::map<std::string, DistributedRdb::RdbDebugInfo> serviceDebugInfos;
@@ -248,6 +282,7 @@ RdbCorruptedEvent RdbFaultHiViewReporter::Create(
             Update(eventInfo.debugInfos, serviceDebugInfos);
         }
     }
+    CollectDfxInfo(config, eventInfo.dfxInfo);
     return eventInfo;
 }
 

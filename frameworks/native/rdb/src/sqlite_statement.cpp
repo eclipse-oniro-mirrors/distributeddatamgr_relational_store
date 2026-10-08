@@ -172,7 +172,8 @@ int SqliteStatement::Prepare(sqlite3 *dbHandle, const std::string &newSql)
         if (config_ != nullptr &&
             (errCode == SQLITE_CORRUPT || (errCode == SQLITE_NOTADB && config_->GetIter() != 0))) {
             Reportor::ReportCorruptedOnce(Reportor::Create(*config_, ret,
-                (errCode == SQLITE_CORRUPT ? SqliteGlobalConfig::GetLastCorruptionMsg() : "SqliteStatement::Prepare")));
+                (errCode == SQLITE_CORRUPT ? SqliteGlobalConfig::GetLastCorruptionMsg() : "SqliteStatement::Prepare"),
+                true, RdbSubCase::NON_FIRST_PAGE));
             std::string detail = errCode == SQLITE_CORRUPT
                 ? SqliteGlobalConfig::GetLastCorruptionMsg()
                 : "SqliteStatement::Prepare";
@@ -427,7 +428,8 @@ int SqliteStatement::InnerStep()
     int ret = SQLiteError::ErrNo(errCode);
     if (config_ != nullptr && (errCode == SQLITE_CORRUPT || (errCode == SQLITE_NOTADB && config_->GetIter() != 0))) {
         Reportor::ReportCorruptedOnce(Reportor::Create(*config_, ret,
-            (errCode == SQLITE_CORRUPT ? SqliteGlobalConfig::GetLastCorruptionMsg() : "SqliteStatement::InnerStep")));
+            (errCode == SQLITE_CORRUPT ? SqliteGlobalConfig::GetLastCorruptionMsg() : "SqliteStatement::InnerStep"),
+            true, RdbSubCase::NON_FIRST_PAGE));
         std::string detail = errCode == SQLITE_CORRUPT
             ? SqliteGlobalConfig::GetLastCorruptionMsg()
             : "SqliteStatement::InnerStep";
@@ -822,7 +824,7 @@ int32_t SqliteStatement::FillBlockInfo(SharedBlockInfo *info, int retryTime) con
         auto ret = (config_ != nullptr && errCode == E_SQLITE_CORRUPT);
         if (ret) {
             Reportor::ReportCorruptedOnce(Reportor::Create(*config_, errCode,
-                "FillBlockInfo: " + SqliteGlobalConfig::GetLastCorruptionMsg()));
+                "FillBlockInfo: " + SqliteGlobalConfig::GetLastCorruptionMsg(), true, RdbSubCase::NON_FIRST_PAGE));
             if (config_->IsAuditEnabled()) {
                 RdbDbLoggerManager::GetInstance().RecordCorrupt(config_->GetPath(), errCode, errno,
                     "FillBlockInfo: " + SqliteGlobalConfig::GetLastCorruptionMsg());

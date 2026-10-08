@@ -48,11 +48,22 @@ struct RdbCorruptedEvent {
     std::string path;
     std::map<std::string, DebugInfo> debugInfos;
     DfxInfo dfxInfo;
+    std::string subCaseDesc;
 };
 
 struct RdbFaultCode {
     int nativeCode;
     std::atomic<uint8_t> faultCounter;
+};
+
+struct RdbSubCase {
+    static constexpr const char *TAG = "SubCase:";
+    static constexpr const char *FIRST_PAGE = "FirstPage";
+    static constexpr const char *NON_FIRST_PAGE = "NonFirstPage";
+    static constexpr const char *INODE_MISMATCH = "InodeMismatch";
+    static constexpr const char *FILE_PERMISSION = "FilePermission";
+    static constexpr const char *BOTH_FAIL = "MasterSlaveBothFail";
+    static constexpr const char *INCONSISTENT = "MasterSlaveInconsistent";
 };
 
 // Fault Type Define
@@ -114,7 +125,7 @@ public:
     using Collector =  int32_t (*)(const RdbStoreConfig &config, std::map<std::string,
         DistributedRdb::RdbDebugInfo>&, DistributedRdb::RdbDfxInfo&);
     static RdbCorruptedEvent Create(const RdbStoreConfig &config, int32_t errCode, const std::string &appendix = "",
-        bool needSyncParaFromSrv = true);
+        bool needSyncParaFromSrv = true, const std::string &subCaseDesc = "");
     static bool RegCollector(Collector collector);
     static void ReportCorrupted(const RdbCorruptedEvent &eventInfo);
     static void ReportCorruptedOnce(const RdbCorruptedEvent &eventInfo);
@@ -131,6 +142,8 @@ private:
     static void DeleteCorruptedFlag(const std::string &dbPath);
     static bool IsReportFault(int32_t errCode);
     static std::atomic<uint8_t> *GetFaultCounter(int32_t errCode);
+    static void CollectDfxInfo(const RdbStoreConfig &config, DfxInfo &dfxInfo);
+    static void ApplySubCase(RdbCorruptedEvent &eventInfo);
     static Collector collector_;
     static RdbFaultCode faultCounters_[];
     static bool memCorruptReportedFlg_;
