@@ -19,6 +19,7 @@
 
 #include "logger.h"
 #include "rdb_audit_logger.h"
+#include "rdb_audit_logger_manager.h"
 #include "rdb_errno.h"
 #include "rdb_store.h"
 #include "rdb_trace.h"
@@ -36,9 +37,11 @@ const int32_t TransactionImpl::regCreator_ = Transaction::RegisterCreator(
         return TransactionImpl::Create(type, std::move(conn), path);
     });
 
-TransactionImpl::TransactionImpl(std::shared_ptr<Connection> connection, const std::string &path,
-    RdbAuditLogger *auditLogger)
-    : path_(path), connection_(std::move(connection)), auditLogger_(auditLogger)
+TransactionImpl::TransactionImpl(std::shared_ptr<Connection> connection, const std::string &path)
+    : path_(path), connection_(std::move(connection)),
+      auditLoggerHolder_(RdbAuditLogger::Create(
+          RdbAuditLoggerManager::GetInstance().IsInitialized())),
+      auditLogger_(*auditLoggerHolder_)
 {
     seqId_ = PerfStat::GenerateId();
     PerfStat perfStat(path_, "", PerfStat::Step::STEP_TRANS_START, seqId_);
@@ -59,14 +62,7 @@ TransactionImpl::~TransactionImpl()
 std::pair<int32_t, std::shared_ptr<Transaction>> TransactionImpl::Create(
     int32_t type, std::shared_ptr<Connection> connection, const std::string &path)
 {
-    return Create(type, std::move(connection), path, nullptr);
-}
-
-std::pair<int32_t, std::shared_ptr<Transaction>> TransactionImpl::Create(
-    int32_t type, std::shared_ptr<Connection> connection, const std::string &path,
-    RdbAuditLogger *auditLogger)
-{
-    auto trans = std::make_shared<TransactionImpl>(std::move(connection), path, auditLogger);
+    auto trans = std::make_shared<TransactionImpl>(std::move(connection), path);
     if (trans == nullptr) {
         return { E_ERROR, nullptr };
     }
@@ -125,9 +121,7 @@ int32_t TransactionImpl::Begin(int32_t type)
         CloseInner();
         return errorCode;
     }
-    if (auditLogger_ != nullptr) {
-        auditLogger_->OnTransactionEvent(path_, "BEGIN", E_OK);
-    }
+    auditLogger_.OnTransactionEvent(path_, "BEGIN", E_OK);
     return E_OK;
 }
 
@@ -146,9 +140,7 @@ int32_t TransactionImpl::Commit()
     if (errorCode != E_OK) {
         LOG_ERROR("create statement failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
-        if (auditLogger_ != nullptr) {
-            auditLogger_->OnTransactionEvent(path_, "ROLLBACK", errorCode);
-        }
+        auditLogger_.OnTransactionEvent(path_, "ROLLBACK", errorCode);
         return errorCode;
     }
 
@@ -156,15 +148,11 @@ int32_t TransactionImpl::Commit()
     if (errorCode != E_OK) {
         LOG_ERROR("statement execute failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
-        if (auditLogger_ != nullptr) {
-            auditLogger_->OnTransactionEvent(path_, "ROLLBACK", errorCode);
-        }
+        auditLogger_.OnTransactionEvent(path_, "ROLLBACK", errorCode);
         return errorCode;
     }
     CloseInner();
-    if (auditLogger_ != nullptr) {
-        auditLogger_->OnTransactionEvent(path_, "COMMIT", E_OK);
-    }
+    auditLogger_.OnTransactionEvent(path_, "COMMIT", E_OK);
     return E_OK;
 }
 
@@ -183,9 +171,7 @@ int32_t TransactionImpl::Rollback()
     if (errorCode != E_OK) {
         LOG_ERROR("create statement failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
-        if (auditLogger_ != nullptr) {
-            auditLogger_->OnTransactionEvent(path_, "ROLLBACK", errorCode);
-        }
+        auditLogger_.OnTransactionEvent(path_, "ROLLBACK", errorCode);
         return errorCode;
     }
 
@@ -193,15 +179,11 @@ int32_t TransactionImpl::Rollback()
     if (errorCode != E_OK) {
         LOG_ERROR("statement execute failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
-        if (auditLogger_ != nullptr) {
-            auditLogger_->OnTransactionEvent(path_, "ROLLBACK", errorCode);
-        }
+        auditLogger_.OnTransactionEvent(path_, "ROLLBACK", errorCode);
         return errorCode;
     }
     CloseInner();
-    if (auditLogger_ != nullptr) {
-        auditLogger_->OnTransactionEvent(path_, "ROLLBACK", E_OK);
-    }
+    auditLogger_.OnTransactionEvent(path_, "ROLLBACK", E_OK);
     return E_OK;
 }
 
@@ -375,9 +357,7 @@ std::pair<int32_t, Results> TransactionImpl::Delete(
 
 void TransactionImpl::AuditSql(const std::string &op, const std::string &tbl, int64_t rows)
 {
-    if (auditLogger_ != nullptr) {
-        auditLogger_->OnSqlAudit(path_, op, tbl, rows);
-    }
+    auditLogger_.OnSqlAudit(path_, op, tbl, rows);
 }
 
 std::shared_ptr<ResultSet> TransactionImpl::QueryByStep(
