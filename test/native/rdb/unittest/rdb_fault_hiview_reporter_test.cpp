@@ -164,7 +164,7 @@ HWTEST_F(RdbFaultHiViewReporterTest, ApplySubCase_Test_003, TestSize.Level1)
 
 HWTEST_F(RdbFaultHiViewReporterTest, CollectDfxInfo_Test_001, TestSize.Level1)
 {
-    RdbStoreConfig config(std::string(TEST_DB));
+    RdbStoreConfig config((std::string(TEST_DB)));
     DfxInfo info;
     RdbFaultHiViewReporter::CollectDfxInfo(config, info);
     EXPECT_EQ(info.procUid_, static_cast<uint32_t>(getuid()));
