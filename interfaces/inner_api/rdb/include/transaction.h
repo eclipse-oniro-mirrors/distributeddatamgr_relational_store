@@ -79,10 +79,11 @@ public:
     };
 
     using Creator = std::function<std::pair<int32_t, std::shared_ptr<Transaction>>(
-        int32_t type, std::shared_ptr<Connection> connection, const std::string &)>;
+        int32_t type, std::shared_ptr<Connection> connection, const std::string &, bool auditEnabled)>;
 
     static std::pair<int32_t, std::shared_ptr<Transaction>> Create(
-        int32_t type, std::shared_ptr<Connection> connection, const std::string &path);
+        int32_t type, std::shared_ptr<Connection> connection, const std::string &path,
+        bool auditEnabled = false);
     static int32_t RegisterCreator(Creator creator);
 
     virtual ~Transaction() = default;

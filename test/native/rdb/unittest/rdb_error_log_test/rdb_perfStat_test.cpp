@@ -69,9 +69,9 @@ void RdbPerfStatTest::SetUpTestCase(void)
     RdbHelper::DeleteRdbStore(databasePath);
     // Attempt to manually call LoadCreator to ensure that creator_ is set
     auto creator = Transaction::RegisterCreator(
-        [](int32_t type, std::shared_ptr<Connection> conn, const std::string &path)
+        [](int32_t type, std::shared_ptr<Connection> conn, const std::string &path, bool auditEnabled)
             -> std::pair<int32_t, std::shared_ptr<Transaction>> {
-            return TransactionImpl::Create(type, std::move(conn), path);
+            return TransactionImpl::Create(type, std::move(conn), path, auditEnabled);
         });
     // Verify if the creator has been registered
     if (creator != E_OK) {

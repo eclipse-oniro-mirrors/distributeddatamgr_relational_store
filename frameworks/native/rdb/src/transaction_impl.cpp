@@ -31,14 +31,16 @@ namespace OHOS::NativeRdb {
 using PerfStat = DistributedRdb::PerfStat;
 __attribute__((used))
 const int32_t TransactionImpl::regCreator_ = Transaction::RegisterCreator(
-    [](int32_t type, std::shared_ptr<Connection> conn, const std::string &path)
+    [](int32_t type, std::shared_ptr<Connection> conn, const std::string &path, bool auditEnabled)
         -> std::pair<int32_t, std::shared_ptr<Transaction>> {
-        return TransactionImpl::Create(type, std::move(conn), path);
+        return TransactionImpl::Create(type, std::move(conn), path, auditEnabled);
     });
 
 TransactionImpl::TransactionImpl(std::shared_ptr<Connection> connection, const std::string &path,
-    RdbAuditLogger& auditLogger)
-    : path_(path), connection_(std::move(connection)), auditLogger_(auditLogger)
+    bool auditEnabled)
+    : path_(path), connection_(std::move(connection)),
+      auditLoggerHolder_(RdbAuditLogger::Create(auditEnabled)),
+      auditLogger_(*auditLoggerHolder_)
 {
     seqId_ = PerfStat::GenerateId();
     PerfStat perfStat(path_, "", PerfStat::Step::STEP_TRANS_START, seqId_);
@@ -57,17 +59,10 @@ TransactionImpl::~TransactionImpl()
 }
 
 std::pair<int32_t, std::shared_ptr<Transaction>> TransactionImpl::Create(
-    int32_t type, std::shared_ptr<Connection> connection, const std::string &path)
-{
-    static RdbAuditLogger noopLogger;
-    return Create(type, std::move(connection), path, noopLogger);
-}
-
-std::pair<int32_t, std::shared_ptr<Transaction>> TransactionImpl::Create(
     int32_t type, std::shared_ptr<Connection> connection, const std::string &path,
-    RdbAuditLogger& auditLogger)
+    bool auditEnabled)
 {
-    auto trans = std::make_shared<TransactionImpl>(std::move(connection), path, auditLogger);
+    auto trans = std::make_shared<TransactionImpl>(std::move(connection), path, auditEnabled);
     if (trans == nullptr) {
         return { E_ERROR, nullptr };
     }

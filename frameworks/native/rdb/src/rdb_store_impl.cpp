@@ -70,7 +70,6 @@
 #include "task_executor.h"
 #include "traits.h"
 #include "transaction.h"
-#include "transaction_impl.h"
 #include "values_buckets.h"
 #if !defined(CROSS_PLATFORM)
 #include "sqlite_shared_result_set.h"
@@ -3695,7 +3694,7 @@ std::pair<int32_t, std::shared_ptr<Transaction>> RdbStoreImpl::CreateTransaction
         return { errCode, nullptr };
     }
     std::shared_ptr<Transaction> trans;
-    std::tie(errCode, trans) = TransactionImpl::Create(type, conn, config_.GetPath(), auditLogger_);
+    std::tie(errCode, trans) = Transaction::Create(type, conn, config_.GetPath(), config_.IsAuditEnabled());
     if (trans == nullptr) {
         TryDump(errCode, "TRANS");
         return { errCode, nullptr };
