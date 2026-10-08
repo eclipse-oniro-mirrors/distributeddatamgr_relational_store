@@ -131,7 +131,7 @@ void RdbAuditLoggerManager::Init(const std::string &auditDir)
     }
     auditDir_ = auditDir;
     std::string logPath = auditDir_ + EVENTS_LOG;
-    writeFd_ = open(logPath.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+    writeFd_ = open(logPath.c_str(), O_WRONLY | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
     if (writeFd_ < 0) {
         LOG_ERROR("Init: failed to open audit log, path=%{public}s, errno=%{public}d", logPath.c_str(), errno);
         auditDir_.clear();
@@ -139,7 +139,7 @@ void RdbAuditLoggerManager::Init(const std::string &auditDir)
     }
     fdsan_exchange_owner_tag(writeFd_, 0, AUDIT_FD_TAG);
     lockFd_ = open((auditDir_ + EVENTS_LOCK).c_str(),
-        O_WRONLY | O_CREAT | O_CLOEXEC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+        O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
     if (lockFd_ >= 0) {
         fdsan_exchange_owner_tag(lockFd_, 0, AUDIT_FD_TAG);
     }
@@ -227,8 +227,8 @@ void RdbAuditLoggerManager::MaybeRotateLog()
     if (!rotated) {
         LOG_ERROR("MaybeRotateLog: rename failed, errno=%{public}d", errno);
     }
-    int openFlags = rotated ? (O_CREAT | O_TRUNC | O_RDWR | O_CLOEXEC)
-                            : (O_CREAT | O_APPEND | O_RDWR | O_CLOEXEC);
+    int openFlags = rotated ? (O_CREAT | O_TRUNC | O_RDWR)
+                            : (O_CREAT | O_APPEND | O_RDWR);
     writeFd_ = open(logPath.c_str(), openFlags, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
     if (writeFd_ < 0) {
         LOG_ERROR("MaybeRotateLog: reopen events.log failed, errno=%{public}d", errno);
