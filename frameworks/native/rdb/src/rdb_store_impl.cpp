@@ -70,7 +70,6 @@
 #include "task_executor.h"
 #include "traits.h"
 #include "transaction.h"
-#include "transaction_impl.h"
 #include "values_buckets.h"
 #if !defined(CROSS_PLATFORM)
 #include "sqlite_shared_result_set.h"
@@ -3018,11 +3017,7 @@ int RdbStoreImpl::Commit()
         LOG_WARN("[%{public}zu, %{public}s, %{public}s]", id, SqliteUtils::Anonymous(name_).c_str(),
             SqliteUtils::SqlAnonymous(sqlStr).c_str());
         pool->GetTransactionStack().pop();
-        bool outer = pool->GetTransactionStack().empty();
-        if (outer) {
-            pool->SetInTransaction(false);
-        }
-        auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", E_OK, outer);
+        auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", E_OK, pool->GetTransactionStack().empty());
         return E_OK;
     }
     auto [err, statement] = GetStatement(sqlStr);
@@ -3042,13 +3037,12 @@ int RdbStoreImpl::Commit()
         return err;
     }
     pool->GetTransactionStack().pop();
-    bool outer = pool->GetTransactionStack().empty();
-    if (!outer) {
-        LOG_WARN("[%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
-    } else {
+    if (pool->GetTransactionStack().empty()) {
         pool->SetInTransaction(false);
+    } else {
+        LOG_WARN("[%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
     }
-    auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", E_OK, outer);
+    auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", E_OK, pool->GetTransactionStack().empty());
     return E_OK;
 }
 
@@ -3700,7 +3694,7 @@ std::pair<int32_t, std::shared_ptr<Transaction>> RdbStoreImpl::CreateTransaction
         return { errCode, nullptr };
     }
     std::shared_ptr<Transaction> trans;
-    std::tie(errCode, trans) = TransactionImpl::Create(type, conn, config_.GetPath(), &auditLogger_);
+    std::tie(errCode, trans) = Transaction::Create(type, conn, config_.GetPath());
     if (trans == nullptr) {
         TryDump(errCode, "TRANS");
         return { errCode, nullptr };
