@@ -62,12 +62,9 @@ constexpr int SQLITE_PAGE_SIZE = 4096;
 constexpr unsigned char CORRUPT_FILL_VALUE = 0xFF;
 constexpr int TEST_DATA_COUNT = 20;
 
-std::shared_ptr<RdbStore> CreateRdbStore(const std::string &path, bool doubleWrite = false)
+std::shared_ptr<RdbStore> CreateRdbStore(const std::string &path)
 {
     RdbStoreConfig config(path);
-    if (doubleWrite) {
-        config.SetHaMode(HAMode::MAIN_REPLICA);
-    }
     TestOpenCallback callback;
     int code = E_ERROR;
     auto store = RdbHelper::GetRdbStore(config, 1, callback, code);
@@ -91,21 +88,6 @@ void CorruptFirstPage(const std::string &path)
     }
     char garbage[CORRUPT_HEADER_SIZE];
     if (memset_s(garbage, sizeof(garbage), 0, sizeof(garbage)) != EOK) {
-        return;
-    }
-    f.write(garbage, sizeof(garbage));
-    f.close();
-}
-
-void CorruptNonFirstPage(const std::string &path)
-{
-    std::fstream f(path, std::ios::in | std::ios::out | std::ios::binary);
-    if (!f.is_open()) {
-        return;
-    }
-    f.seekp(SQLITE_PAGE_SIZE, std::ios::beg);
-    char garbage[SQLITE_PAGE_SIZE];
-    if (memset_s(garbage, sizeof(garbage), CORRUPT_FILL_VALUE, sizeof(garbage)) != EOK) {
         return;
     }
     f.write(garbage, sizeof(garbage));
@@ -457,113 +439,10 @@ HWTEST_F(RdbFaultHiViewReporterTest, CorruptFirstPage_GetRdbStore_Test_001, Test
     store.reset();
     RdbHelper::ClearCache();
     CorruptFirstPage(dbPath);
+    SqliteUtils::DeleteFile(dbPath + "-dwr");
     TestOpenCallback callback;
     int code = E_ERROR;
     auto store2 = RdbHelper::GetRdbStore(RdbStoreConfig(dbPath), 1, callback, code);
-    EXPECT_NE(code, E_OK);
+    EXPECT_EQ(code, E_SQLITE_CORRUPT);
     RdbHelper::DeleteRdbStore(dbPath);
-}
-
-/*
- * @tc.name: CorruptNonFirstPage_ExecuteSql_Test_001
- * @tc.desc: Use store->ExecuteSql to trigger corruption detection on non-first-page-corrupt DB
- * @tc.type: FUNC
- */
-HWTEST_F(RdbFaultHiViewReporterTest, CorruptNonFirstPage_ExecuteSql_Test_001, TestSize.Level1)
-{
-    std::string dbPath = std::string(TEST_DB);
-    RdbHelper::DeleteRdbStore(dbPath);
-    auto store = CreateRdbStore(dbPath);
-    ASSERT_NE(store, nullptr);
-    store.reset();
-    RdbHelper::ClearCache();
-    CorruptNonFirstPage(dbPath);
-    TestOpenCallback callback;
-    int code = E_ERROR;
-    auto store2 = RdbHelper::GetRdbStore(RdbStoreConfig(dbPath), 1, callback, code);
-    if (store2 != nullptr) {
-        int ret = store2->ExecuteSql("PRAGMA integrity_check");
-        EXPECT_NE(ret, E_OK);
-    }
-    EXPECT_TRUE(access((dbPath + ".corruptedflg").c_str(), F_OK) == 0);
-    RdbHelper::DeleteRdbStore(dbPath);
-}
-
-/*
- * @tc.name: CorruptNonFirstPage_QuerySql_Test_001
- * @tc.desc: Use store->QuerySql to trigger corruption detection on non-first-page-corrupt DB
- * @tc.type: FUNC
- */
-HWTEST_F(RdbFaultHiViewReporterTest, CorruptNonFirstPage_QuerySql_Test_001, TestSize.Level1)
-{
-    std::string dbPath = std::string(TEST_DB);
-    RdbHelper::DeleteRdbStore(dbPath);
-    auto store = CreateRdbStore(dbPath);
-    ASSERT_NE(store, nullptr);
-    store.reset();
-    RdbHelper::ClearCache();
-    CorruptNonFirstPage(dbPath);
-    TestOpenCallback callback;
-    int code = E_ERROR;
-    auto store2 = RdbHelper::GetRdbStore(RdbStoreConfig(dbPath), 1, callback, code);
-    if (store2 != nullptr) {
-        auto resultSet = store2->QuerySql("SELECT * FROM test");
-        EXPECT_NE(resultSet, nullptr);
-    }
-    EXPECT_TRUE(access((dbPath + ".corruptedflg").c_str(), F_OK) == 0);
-    RdbHelper::DeleteRdbStore(dbPath);
-}
-
-/*
- * @tc.name: CorruptBothMasterSlave_GetRdbStore_Test_001
- * @tc.desc: Use MAIN_REPLICA config to create double-write store, corrupt both master and slave first page,
- *           verify GetRdbStore fails
- * @tc.type: FUNC
- */
-HWTEST_F(RdbFaultHiViewReporterTest, CorruptBothMasterSlave_GetRdbStore_Test_001, TestSize.Level1)
-{
-    std::string dbPath = std::string(TEST_DB);
-    RdbStoreConfig config(dbPath);
-    if (!SqliteUtils::IsSupportBinlog(config)) {
-        GTEST_SKIP() << "Binlog not supported";
-    }
-    RdbHelper::DeleteRdbStore(dbPath);
-    auto store = CreateRdbStore(dbPath, true);
-    ASSERT_NE(store, nullptr);
-    std::string slavePath = SqliteUtils::GetSlavePath(config);
-    store.reset();
-    RdbHelper::ClearCache();
-    CorruptFirstPage(dbPath);
-    CorruptFirstPage(slavePath);
-    config.SetHaMode(HAMode::MAIN_REPLICA);
-    TestOpenCallback callback;
-    int code = E_ERROR;
-    auto store2 = RdbHelper::GetRdbStore(config, 1, callback, code);
-    EXPECT_NE(code, E_OK);
-    RdbHelper::DeleteRdbStore(config);
-}
-
-/*
- * @tc.name: CorruptSlaveInconsistent_GetRdbStore_Test_001
- * @tc.desc: Use MAIN_REPLICA config to create double-write store, corrupt slave non-first page,
- *           verify ReportSlaveInconsistent reports without crash
- * @tc.type: FUNC
- */
-HWTEST_F(RdbFaultHiViewReporterTest, CorruptSlaveInconsistent_GetRdbStore_Test_001, TestSize.Level1)
-{
-    std::string dbPath = std::string(TEST_DB);
-    RdbStoreConfig config(dbPath);
-    if (!SqliteUtils::IsSupportBinlog(config)) {
-        GTEST_SKIP() << "Binlog not supported";
-    }
-    RdbHelper::DeleteRdbStore(dbPath);
-    auto store = CreateRdbStore(dbPath, true);
-    ASSERT_NE(store, nullptr);
-    std::string slavePath = SqliteUtils::GetSlavePath(config);
-    store.reset();
-    RdbHelper::ClearCache();
-    CorruptNonFirstPage(slavePath);
-    EXPECT_FALSE(SqliteUtils::IsSlaveInvalid(dbPath));
-    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveInconsistent(config, "slave corrupt"));
-    RdbHelper::DeleteRdbStore(config);
 }

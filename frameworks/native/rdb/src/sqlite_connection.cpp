@@ -1711,7 +1711,7 @@ int SqliteConnection::ExchangeSlaverToMaster(bool isRestore, bool verifyDb, std:
     if (err != E_OK) {
         if (isRestore) {
             RdbStoreConfig slaveCfg(SqliteUtils::GetSlavePath(config_));
-            Reportor::ReportCorrupted(Reportor::Create(slaveCfg, E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN,
+            Reportor::ReportCorruptedOnce(Reportor::Create(slaveCfg, E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN,
                 std::string(RdbSubCase::TAG) + RdbSubCase::BOTH_FAIL + ",master corrupt and slave corrupt on restore",
                 true, true));
         }
@@ -2258,7 +2258,7 @@ void SqliteConnection::BinlogOnErrFunc(void *pCtx, int errNo, char *errMsg, cons
     std::string dbPathStr(dbPath);
     LOG_WARN("binlog failed, mark invalid %{public}s", SqliteUtils::Anonymous(dbPathStr).c_str());
     RdbStoreConfig cfg(dbPathStr);
-    Reportor::ReportCorruptedOnce(Reportor::Create(cfg, E_SQLITE_CORRUPT,
+    Reportor::ReportCorruptedOnce(Reportor::Create(cfg, E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN,
         std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE + ",slave binlog replay failed", true, true));
     SqliteUtils::SetSlaveInvalid(dbPathStr, SqliteUtils::SlaveInvalidReason::BINLOG_REPLAY_FAILED);
 }
