@@ -85,6 +85,9 @@ const std::unordered_map<int32_t, int> SqliteUtils::STATUS_MAP = {
     { DBStatus::DB_ERROR, E_SQLITE_ERROR },
     { DBStatus::NOT_SUPPORT, E_NOT_SUPPORT_NEW }
 };
+std::mutex SqliteUtils::procUmaskMutex_;
+uint32_t SqliteUtils::procUmaskCached_ = 0;
+bool SqliteUtils::procUmaskInitialized_ = false;
 
 
 int SqliteUtils::ConvertRdbStatusNative(int32_t status)
@@ -882,9 +885,14 @@ std::string SqliteUtils::ReadSlaveInvalidReason(const std::string &dbPath)
 
 uint32_t SqliteUtils::GetProcUmask()
 {
-    mode_t old = umask(0);
-    umask(old);
-    return static_cast<uint32_t>(old);
+    std::lock_guard<std::mutex> lock(procUmaskMutex_);
+    if (!procUmaskInitialized_) {
+        mode_t old = umask(0);
+        umask(old);
+        procUmaskCached_ = static_cast<uint32_t>(old);
+        procUmaskInitialized_ = true;
+    }
+    return procUmaskCached_;
 }
 
 bool SqliteUtils::IsFileEmpty(const std::string &filePath)

@@ -128,14 +128,14 @@ void RdbFaultHiViewReporter::ReportSlaveInconsistent(const RdbStoreConfig &confi
         return;
     }
     RdbStoreConfig slaveCfg(SqliteUtils::GetSlavePath(config));
-    ReportCorruptedOnce(Create(slaveCfg, E_DFX_MASTER_SLAVE_INCONSISTENT,
+    ReportCorrupted(Create(slaveCfg, E_DFX_MASTER_SLAVE_INCONSISTENT,
         std::string(RdbSubCase::TAG) + RdbSubCase::INCONSISTENT + "," + msg, true, true));
 }
 
 void RdbFaultHiViewReporter::CollectDfxInfo(const RdbStoreConfig &config, DfxInfo &dfxInfo)
 {
-    dfxInfo.procUid_ = static_cast<uint32_t>(getuid());
-    dfxInfo.procGid_ = static_cast<uint32_t>(getgid());
+    dfxInfo.procUid_ = GetUid();
+    dfxInfo.procGid_ = GetGid();
     dfxInfo.procUmask_ = SqliteUtils::GetProcUmask();
     std::string dbPath = config.GetPath();
     dfxInfo.slaveInterrupted_ = SqliteUtils::IsSlaveInterrupted(dbPath);
