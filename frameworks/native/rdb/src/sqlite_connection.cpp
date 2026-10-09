@@ -37,6 +37,7 @@
 #include "rdb_icu_manager.h"
 #include "rdb_local_db_observer.h"
 #include "rdb_manager.h"
+#include "rdb_platform.h"
 #include "rdb_security_manager.h"
 #include "rdb_service.h"
 #include "rdb_sql_log.h"
