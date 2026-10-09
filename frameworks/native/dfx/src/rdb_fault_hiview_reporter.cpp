@@ -119,8 +119,13 @@ void RdbFaultHiViewReporter::ReportSlaveInconsistent(const RdbStoreConfig &confi
         return;
     }
     RdbStoreConfig slaveCfg(SqliteUtils::GetSlavePath(config));
-    ReportCorrupted(Create(slaveCfg, E_DFX_MASTER_SLAVE_INCONSISTENT,
-        std::string(RdbSubCase::TAG) + RdbSubCase::INCONSISTENT + "," + msg, true, true));
+    auto event = Create(slaveCfg, E_DFX_MASTER_SLAVE_INCONSISTENT,
+        std::string(RdbSubCase::TAG) + RdbSubCase::INCONSISTENT + "," + msg, true, true);
+    DfxInfo dfxInfo;
+    CollectDfxInfo(config, dfxInfo);
+    event.appendix += SqliteUtils::FormatDebugInfo(event.debugInfos, "");
+    event.appendix += SqliteUtils::FormatDfxInfo(dfxInfo);
+    ReportCorrupted(event);
 }
 
 void RdbFaultHiViewReporter::CollectDfxInfo(const RdbStoreConfig &config, DfxInfo &dfxInfo)

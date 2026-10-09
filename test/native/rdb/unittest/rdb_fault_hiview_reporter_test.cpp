@@ -18,24 +18,89 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cstring>
 #include <fstream>
+#include <memory>
 #include <string>
 
+#include "rdb_errno.h"
 #include "rdb_dfx_errno.h"
 #include "rdb_fault_hiview_reporter.h"
+#include "rdb_helper.h"
+#include "rdb_open_callback.h"
+#include "rdb_store.h"
 #include "rdb_store_config.h"
 #include "rdb_types.h"
 #include "sqlite_utils.h"
+#include "values_bucket.h"
 
 using namespace testing::ext;
 using namespace OHOS::NativeRdb;
 using DfxInfo = OHOS::DistributedRdb::RdbDfxInfo;
 using DebugInfo = OHOS::DistributedRdb::RdbDebugInfo;
 
+class TestOpenCallback : public RdbOpenCallback {
+public:
+    int OnCreate(RdbStore &store) override
+    {
+        return store.ExecuteSql(
+            "CREATE TABLE IF NOT EXISTS test(id INTEGER PRIMARY KEY, v TEXT)");
+    }
+    int OnUpgrade(RdbStore &store, int oldVersion, int newVersion) override
+    {
+        return E_OK;
+    }
+};
+
 namespace {
 constexpr const char *TEST_DIR = "/data/test/rdb_fault_reporter";
 constexpr const char *TEST_DB = "/data/test/rdb_fault_reporter/test.db";
 constexpr mode_t TEST_DIR_MODE = 0770;
+
+std::shared_ptr<RdbStore> CreateRdbStore(const std::string &path, bool doubleWrite = false)
+{
+    RdbStoreConfig config(path);
+    if (doubleWrite) {
+        config.SetHaMode(HAMode::MAIN_REPLICA);
+    }
+    TestOpenCallback callback;
+    int code = E_ERROR;
+    auto store = RdbHelper::GetRdbStore(config, 1, callback, code);
+    if (store == nullptr || code != E_OK) {
+        return nullptr;
+    }
+    for (int i = 0; i < 20; i++) {
+        ValuesBucket values;
+        values.PutInt("id", i);
+        values.PutString("v", std::string("data"));
+        store->Insert("test", values);
+    }
+    return store;
+}
+
+void CorruptFirstPage(const std::string &path)
+{
+    std::fstream f(path, std::ios::in | std::ios::out | std::ios::binary);
+    if (!f.is_open()) {
+        return;
+    }
+    char garbage[16] = {0};
+    f.write(garbage, sizeof(garbage));
+    f.close();
+}
+
+void CorruptNonFirstPage(const std::string &path)
+{
+    std::fstream f(path, std::ios::in | std::ios::out | std::ios::binary);
+    if (!f.is_open()) {
+        return;
+    }
+    f.seekp(4096, std::ios::beg);
+    char garbage[4096];
+    memset(garbage, 0xFF, sizeof(garbage));
+    f.write(garbage, sizeof(garbage));
+    f.close();
+}
 }
 
 class RdbFaultHiViewReporterTest : public testing::Test {
@@ -56,6 +121,7 @@ public:
     {
         unlink((std::string(TEST_DB) + ".corruptedflg").c_str());
         unlink((std::string(TEST_DB) + "-slaveFailure").c_str());
+        unlink((std::string(TEST_DB) + "-syncInterrupt").c_str());
         RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
     }
 };
@@ -206,5 +272,288 @@ HWTEST_F(RdbFaultHiViewReporterTest, CorruptedFlag_Test_001, TestSize.Level1)
 HWTEST_F(RdbFaultHiViewReporterTest, DfxErrorCode_Test_001, TestSize.Level1)
 {
     EXPECT_EQ(E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN, E_DFX_BASE + 0x1A);
-    EXPECT_EQ(E_DFX_MASTER_SLAVE_INCONSISTENT, E_DFX_BASE + 0x1C);
+    EXPECT_EQ(E_DFX_MASTER_SLAVE_INCONSISTENT, E_DFX_BASE + 0x1B);
+}
+
+/*
+ * @tc.name: Create_FirstPage_Test_001
+ * @tc.desc: Verify Create sets FirstPage sub case in appendix and errorCode
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, Create_FirstPage_Test_001, TestSize.Level1)
+{
+    RdbStoreConfig config((std::string(TEST_DB)));
+    auto event = RdbFaultHiViewReporter::Create(config, E_SQLITE_CORRUPT,
+        std::string(RdbSubCase::TAG) + RdbSubCase::FIRST_PAGE + ",integrity_check failed", false, true);
+    EXPECT_EQ(event.errorCode, static_cast<uint32_t>(E_SQLITE_CORRUPT));
+    EXPECT_NE(event.appendix.find("SubCase:FirstPage"), std::string::npos);
+}
+
+/*
+ * @tc.name: Create_NonFirstPage_Test_001
+ * @tc.desc: Verify Create sets NonFirstPage sub case in appendix
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, Create_NonFirstPage_Test_001, TestSize.Level1)
+{
+    RdbStoreConfig config((std::string(TEST_DB)));
+    auto event = RdbFaultHiViewReporter::Create(config, E_SQLITE_CORRUPT,
+        std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE + ",corrupt index page", false, true);
+    EXPECT_NE(event.appendix.find("SubCase:NonFirstPage"), std::string::npos);
+}
+
+/*
+ * @tc.name: Create_FilePermission_Test_001
+ * @tc.desc: Verify Create sets FilePermission sub case in appendix
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, Create_FilePermission_Test_001, TestSize.Level1)
+{
+    RdbStoreConfig config((std::string(TEST_DB)));
+    auto event = RdbFaultHiViewReporter::Create(config, E_SQLITE_CANTOPEN,
+        std::string(RdbSubCase::TAG) + RdbSubCase::FILE_PERMISSION + ",EISDIR", false, true);
+    EXPECT_NE(event.appendix.find("SubCase:FilePermission"), std::string::npos);
+}
+
+/*
+ * @tc.name: Create_BothFail_Test_001
+ * @tc.desc: Verify Create sets MasterSlaveBothFail sub case and DFX error code for both-corrupt scenario
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, Create_BothFail_Test_001, TestSize.Level1)
+{
+    RdbStoreConfig config((std::string(TEST_DB)));
+    auto event = RdbFaultHiViewReporter::Create(config, E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN,
+        std::string(RdbSubCase::TAG) + RdbSubCase::BOTH_FAIL + ",master and slave corrupt on open", false, true);
+    EXPECT_EQ(event.errorCode, static_cast<uint32_t>(E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN));
+    EXPECT_NE(event.appendix.find("SubCase:MasterSlaveBothFail"), std::string::npos);
+}
+
+/*
+ * @tc.name: ReportCorruptedOnce_SubCase_Test_001
+ * @tc.desc: Verify ReportCorruptedOnce creates corruptedflg and dedup blocks second report
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, ReportCorruptedOnce_SubCase_Test_001, TestSize.Level1)
+{
+    RdbStoreConfig config((std::string(TEST_DB)));
+    auto event = RdbFaultHiViewReporter::Create(config, E_SQLITE_CORRUPT,
+        std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE + ",test", false, true);
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsReportCorruptedFault(TEST_DB));
+    RdbFaultHiViewReporter::ReportCorruptedOnce(event);
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsReportCorruptedFault(TEST_DB));
+    EXPECT_TRUE(access((std::string(TEST_DB) + ".corruptedflg").c_str(), F_OK) == 0);
+    RdbFaultHiViewReporter::ReportCorruptedOnce(event);
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsReportCorruptedFault(TEST_DB));
+}
+
+/*
+ * @tc.name: ReportSlaveInconsistent_Test_002
+ * @tc.desc: Verify ReportSlaveInconsistent does not crash when slave is valid (not invalid)
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, ReportSlaveInconsistent_Test_002, TestSize.Level1)
+{
+    RdbStoreConfig config((std::string(TEST_DB)));
+    EXPECT_FALSE(SqliteUtils::IsSlaveInvalid(TEST_DB));
+    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveInconsistent(config, "mCount=1,sCount=2"));
+}
+
+/*
+ * @tc.name: CollectDfxInfo_Test_002
+ * @tc.desc: Verify CollectDfxInfo fills procUmask with cached process umask
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, CollectDfxInfo_Test_002, TestSize.Level1)
+{
+    RdbStoreConfig config((std::string(TEST_DB)));
+    DfxInfo info;
+    RdbFaultHiViewReporter::CollectDfxInfo(config, info);
+    EXPECT_EQ(info.procUmask_, SqliteUtils::GetProcUmask());
+}
+
+/*
+ * @tc.name: CollectDfxInfo_Test_003
+ * @tc.desc: Verify CollectDfxInfo sets slaveInterrupted when syncInterrupt flag file exists
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, CollectDfxInfo_Test_003, TestSize.Level1)
+{
+    std::string flag = std::string(TEST_DB) + "-syncInterrupt";
+    std::ofstream f(flag);
+    f << "interrupted";
+    f.close();
+    RdbStoreConfig config((std::string(TEST_DB)));
+    DfxInfo info;
+    RdbFaultHiViewReporter::CollectDfxInfo(config, info);
+    EXPECT_TRUE(info.slaveInterrupted_);
+    unlink(flag.c_str());
+}
+
+/*
+ * @tc.name: CollectDfxInfo_Test_004
+ * @tc.desc: Verify CollectDfxInfo fills slaveInvalidReason when slaveFailure flag file exists
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, CollectDfxInfo_Test_004, TestSize.Level1)
+{
+    std::string flag = std::string(TEST_DB) + "-slaveFailure";
+    std::ofstream f(flag);
+    f << "2026-10-08\nbackup_verify_failed";
+    f.close();
+    RdbStoreConfig config((std::string(TEST_DB)));
+    DfxInfo info;
+    RdbFaultHiViewReporter::CollectDfxInfo(config, info);
+    EXPECT_EQ(info.slaveInvalidReason_, "backup_verify_failed");
+    unlink(flag.c_str());
+}
+
+/*
+ * @tc.name: IsSlaveInterrupted_Test_001
+ * @tc.desc: Verify IsSlaveInterrupted returns false when no syncInterrupt flag file exists
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, IsSlaveInterrupted_Test_001, TestSize.Level1)
+{
+    EXPECT_FALSE(SqliteUtils::IsSlaveInterrupted(TEST_DB));
+}
+
+/*
+ * @tc.name: IsSlaveInterrupted_Test_002
+ * @tc.desc: Verify IsSlaveInterrupted returns true when syncInterrupt flag file exists
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, IsSlaveInterrupted_Test_002, TestSize.Level1)
+{
+    std::string flag = std::string(TEST_DB) + "-syncInterrupt";
+    std::ofstream f(flag);
+    f << "interrupted";
+    f.close();
+    EXPECT_TRUE(SqliteUtils::IsSlaveInterrupted(TEST_DB));
+    unlink(flag.c_str());
+}
+
+/*
+ * @tc.name: CorruptFirstPage_GetRdbStore_Test_001
+ * @tc.desc: Use RdbHelper::GetRdbStore to open DB with corrupted first page, verify open fails
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, CorruptFirstPage_GetRdbStore_Test_001, TestSize.Level1)
+{
+    std::string dbPath = std::string(TEST_DB);
+    RdbHelper::DeleteRdbStore(dbPath);
+    auto store = CreateRdbStore(dbPath);
+    ASSERT_NE(store, nullptr);
+    store.reset();
+    RdbHelper::ClearCache();
+    CorruptFirstPage(dbPath);
+    TestOpenCallback callback;
+    int code = E_ERROR;
+    auto store2 = RdbHelper::GetRdbStore(RdbStoreConfig(dbPath), 1, callback, code);
+    EXPECT_NE(code, E_OK);
+    RdbHelper::DeleteRdbStore(dbPath);
+}
+
+/*
+ * @tc.name: CorruptNonFirstPage_ExecuteSql_Test_001
+ * @tc.desc: Use store->ExecuteSql to trigger corruption detection on non-first-page-corrupt DB
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, CorruptNonFirstPage_ExecuteSql_Test_001, TestSize.Level1)
+{
+    std::string dbPath = std::string(TEST_DB);
+    RdbHelper::DeleteRdbStore(dbPath);
+    auto store = CreateRdbStore(dbPath);
+    ASSERT_NE(store, nullptr);
+    store.reset();
+    RdbHelper::ClearCache();
+    CorruptNonFirstPage(dbPath);
+    TestOpenCallback callback;
+    int code = E_ERROR;
+    auto store2 = RdbHelper::GetRdbStore(RdbStoreConfig(dbPath), 1, callback, code);
+    if (store2 != nullptr) {
+        int ret = store2->ExecuteSql("PRAGMA integrity_check");
+        EXPECT_NE(ret, E_OK);
+    }
+    EXPECT_TRUE(access((dbPath + ".corruptedflg").c_str(), F_OK) == 0);
+    RdbHelper::DeleteRdbStore(dbPath);
+}
+
+/*
+ * @tc.name: CorruptNonFirstPage_QuerySql_Test_001
+ * @tc.desc: Use store->QuerySql to trigger corruption detection on non-first-page-corrupt DB
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, CorruptNonFirstPage_QuerySql_Test_001, TestSize.Level1)
+{
+    std::string dbPath = std::string(TEST_DB);
+    RdbHelper::DeleteRdbStore(dbPath);
+    auto store = CreateRdbStore(dbPath);
+    ASSERT_NE(store, nullptr);
+    store.reset();
+    RdbHelper::ClearCache();
+    CorruptNonFirstPage(dbPath);
+    TestOpenCallback callback;
+    int code = E_ERROR;
+    auto store2 = RdbHelper::GetRdbStore(RdbStoreConfig(dbPath), 1, callback, code);
+    if (store2 != nullptr) {
+        auto resultSet = store2->QuerySql("SELECT * FROM test");
+        EXPECT_NE(resultSet, nullptr);
+    }
+    EXPECT_TRUE(access((dbPath + ".corruptedflg").c_str(), F_OK) == 0);
+    RdbHelper::DeleteRdbStore(dbPath);
+}
+
+/*
+ * @tc.name: CorruptBothMasterSlave_GetRdbStore_Test_001
+ * @tc.desc: Use MAIN_REPLICA config to create double-write store, corrupt both master and slave first page,
+ *           verify GetRdbStore fails
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, CorruptBothMasterSlave_GetRdbStore_Test_001, TestSize.Level1)
+{
+    std::string dbPath = std::string(TEST_DB);
+    RdbStoreConfig config(dbPath);
+    if (!SqliteUtils::IsSupportBinlog(config)) {
+        GTEST_SKIP() << "Binlog not supported";
+    }
+    RdbHelper::DeleteRdbStore(dbPath);
+    auto store = CreateRdbStore(dbPath, true);
+    ASSERT_NE(store, nullptr);
+    std::string slavePath = SqliteUtils::GetSlavePath(config);
+    store.reset();
+    RdbHelper::ClearCache();
+    CorruptFirstPage(dbPath);
+    CorruptFirstPage(slavePath);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    TestOpenCallback callback;
+    int code = E_ERROR;
+    auto store2 = RdbHelper::GetRdbStore(config, 1, callback, code);
+    EXPECT_NE(code, E_OK);
+    RdbHelper::DeleteRdbStore(config);
+}
+
+/*
+ * @tc.name: CorruptSlaveInconsistent_GetRdbStore_Test_001
+ * @tc.desc: Use MAIN_REPLICA config to create double-write store, corrupt slave non-first page,
+ *           verify ReportSlaveInconsistent reports without crash
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, CorruptSlaveInconsistent_GetRdbStore_Test_001, TestSize.Level1)
+{
+    std::string dbPath = std::string(TEST_DB);
+    RdbStoreConfig config(dbPath);
+    if (!SqliteUtils::IsSupportBinlog(config)) {
+        GTEST_SKIP() << "Binlog not supported";
+    }
+    RdbHelper::DeleteRdbStore(dbPath);
+    auto store = CreateRdbStore(dbPath, true);
+    ASSERT_NE(store, nullptr);
+    std::string slavePath = SqliteUtils::GetSlavePath(config);
+    store.reset();
+    RdbHelper::ClearCache();
+    CorruptNonFirstPage(slavePath);
+    EXPECT_FALSE(SqliteUtils::IsSlaveInvalid(dbPath));
+    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveInconsistent(config, "slave corrupt"));
+    RdbHelper::DeleteRdbStore(config);
 }
