@@ -91,6 +91,9 @@ HWTEST_F(RdbFaultHiViewReporterTest, FormatDfxInfo_Test_001, TestSize.Level1)
     EXPECT_NE(out.find("SLV_INTR:0"), std::string::npos);
     EXPECT_NE(out.find("SLV_REASON:exchange_failed"), std::string::npos);
     EXPECT_NE(out.find("MS_DIFF:mCount=1,sCount=2"), std::string::npos);
+    EXPECT_EQ(out.find("SLV_ERR"), std::string::npos);
+    EXPECT_EQ(out.find("SLV_CANCEL"), std::string::npos);
+    EXPECT_EQ(out.find("SLV_INFO"), std::string::npos);
 }
 
 HWTEST_F(RdbFaultHiViewReporterTest, IsSlaveInvalid_Test_001, TestSize.Level1)
@@ -124,6 +127,13 @@ HWTEST_F(RdbFaultHiViewReporterTest, GetProcUmask_Test_001, TestSize.Level1)
     EXPECT_LE(mask, 0777u);
 }
 
+HWTEST_F(RdbFaultHiViewReporterTest, GetProcUmask_Test_002, TestSize.Level1)
+{
+    uint32_t first = SqliteUtils::GetProcUmask();
+    uint32_t second = SqliteUtils::GetProcUmask();
+    EXPECT_EQ(first, second);
+}
+
 HWTEST_F(RdbFaultHiViewReporterTest, CollectDfxInfo_Test_001, TestSize.Level1)
 {
     RdbStoreConfig config((std::string(TEST_DB)));
@@ -133,6 +143,17 @@ HWTEST_F(RdbFaultHiViewReporterTest, CollectDfxInfo_Test_001, TestSize.Level1)
     EXPECT_EQ(info.procGid_, static_cast<uint32_t>(getgid()));
     EXPECT_FALSE(info.slaveInterrupted_);
     EXPECT_TRUE(info.slaveInvalidReason_.empty());
+}
+
+HWTEST_F(RdbFaultHiViewReporterTest, ReportSlaveInconsistent_Test_001, TestSize.Level1)
+{
+    std::string flag = std::string(TEST_DB) + "-slaveFailure";
+    std::ofstream f(flag);
+    f << "2026-10-08\nverify_failed";
+    f.close();
+    RdbStoreConfig config((std::string(TEST_DB)));
+    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveInconsistent(config, "test dedup"));
+    unlink(flag.c_str());
 }
 
 HWTEST_F(RdbFaultHiViewReporterTest, CorruptedFlag_Test_001, TestSize.Level1)
