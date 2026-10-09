@@ -48,7 +48,6 @@ struct RdbCorruptedEvent {
     std::string path;
     std::map<std::string, DebugInfo> debugInfos;
     DfxInfo dfxInfo;
-    std::string subCaseDesc;
 };
 
 struct RdbFaultCode {
@@ -125,10 +124,11 @@ public:
     using Collector =  int32_t (*)(const RdbStoreConfig &config, std::map<std::string,
         DistributedRdb::RdbDebugInfo>&, DistributedRdb::RdbDfxInfo&);
     static RdbCorruptedEvent Create(const RdbStoreConfig &config, int32_t errCode, const std::string &appendix = "",
-        bool needSyncParaFromSrv = true, const std::string &subCaseDesc = "");
+        bool needSyncParaFromSrv = true, bool skipDfxInfo = false);
     static bool RegCollector(Collector collector);
     static void ReportCorrupted(const RdbCorruptedEvent &eventInfo);
     static void ReportCorruptedOnce(const RdbCorruptedEvent &eventInfo);
+    static void ReportSlaveInconsistent(const RdbStoreConfig &config, const std::string &msg);
     API_EXPORT static void ReportFault(const RdbFaultEvent &faultEvent);
     static void ReportRestore(const RdbCorruptedEvent &eventInfo, bool repair = true);
     static bool IsReportCorruptedFault(const std::string &dbPath);
@@ -143,7 +143,6 @@ private:
     static bool IsReportFault(int32_t errCode);
     static std::atomic<uint8_t> *GetFaultCounter(int32_t errCode);
     static void CollectDfxInfo(const RdbStoreConfig &config, DfxInfo &dfxInfo);
-    static void ApplySubCase(RdbCorruptedEvent &eventInfo);
     static Collector collector_;
     static RdbFaultCode faultCounters_[];
     static bool memCorruptReportedFlg_;

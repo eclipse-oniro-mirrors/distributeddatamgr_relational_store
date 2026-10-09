@@ -100,11 +100,8 @@ struct RdbDfxInfo {
     uint32_t procUid_ = 0;
     uint32_t procGid_ = 0;
     uint32_t procUmask_ = 0;
-    bool slaveHasError_ = false;
     bool slaveInterrupted_ = false;
-    bool slaveCancelled_ = false;
     std::string slaveInvalidReason_;
-    RdbDebugInfo slaveDebugInfo_;
     std::string masterSlaveDiff_;
 };
 

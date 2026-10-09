@@ -79,9 +79,7 @@ HWTEST_F(RdbFaultHiViewReporterTest, FormatDfxInfo_Test_001, TestSize.Level1)
     info.procUid_ = 1000;
     info.procGid_ = 2000;
     info.procUmask_ = 022;
-    info.slaveHasError_ = true;
     info.slaveInterrupted_ = false;
-    info.slaveCancelled_ = false;
     info.slaveInvalidReason_ = "exchange_failed";
     info.masterSlaveDiff_ = "mCount=1,sCount=2";
     std::string out = SqliteUtils::FormatDfxInfo(info);
@@ -90,9 +88,7 @@ HWTEST_F(RdbFaultHiViewReporterTest, FormatDfxInfo_Test_001, TestSize.Level1)
     EXPECT_NE(out.find("UID:1000"), std::string::npos);
     EXPECT_NE(out.find("GID:2000"), std::string::npos);
     EXPECT_NE(out.find("UMASK:"), std::string::npos);
-    EXPECT_NE(out.find("SLV_ERR:1"), std::string::npos);
     EXPECT_NE(out.find("SLV_INTR:0"), std::string::npos);
-    EXPECT_NE(out.find("SLV_CANCEL:0"), std::string::npos);
     EXPECT_NE(out.find("SLV_REASON:exchange_failed"), std::string::npos);
     EXPECT_NE(out.find("MS_DIFF:mCount=1,sCount=2"), std::string::npos);
 }
@@ -128,40 +124,6 @@ HWTEST_F(RdbFaultHiViewReporterTest, GetProcUmask_Test_001, TestSize.Level1)
     EXPECT_LE(mask, 0777u);
 }
 
-HWTEST_F(RdbFaultHiViewReporterTest, ApplySubCase_Test_001, TestSize.Level1)
-{
-    RdbCorruptedEvent event;
-    DebugInfo di;
-    di.inode_ = 100;
-    di.oldInode_ = 200;
-    event.debugInfos["db"] = di;
-    RdbFaultHiViewReporter::ApplySubCase(event);
-    EXPECT_EQ(event.subCaseDesc, RdbSubCase::INODE_MISMATCH);
-}
-
-HWTEST_F(RdbFaultHiViewReporterTest, ApplySubCase_Test_002, TestSize.Level1)
-{
-    RdbCorruptedEvent event;
-    event.subCaseDesc = RdbSubCase::FIRST_PAGE;
-    DebugInfo di;
-    di.inode_ = 100;
-    di.oldInode_ = 200;
-    event.debugInfos["db"] = di;
-    RdbFaultHiViewReporter::ApplySubCase(event);
-    EXPECT_EQ(event.subCaseDesc, RdbSubCase::FIRST_PAGE);
-}
-
-HWTEST_F(RdbFaultHiViewReporterTest, ApplySubCase_Test_003, TestSize.Level1)
-{
-    RdbCorruptedEvent event;
-    DebugInfo di;
-    di.inode_ = 100;
-    di.oldInode_ = 100;
-    event.debugInfos["db"] = di;
-    RdbFaultHiViewReporter::ApplySubCase(event);
-    EXPECT_TRUE(event.subCaseDesc.empty());
-}
-
 HWTEST_F(RdbFaultHiViewReporterTest, CollectDfxInfo_Test_001, TestSize.Level1)
 {
     RdbStoreConfig config((std::string(TEST_DB)));
@@ -169,7 +131,6 @@ HWTEST_F(RdbFaultHiViewReporterTest, CollectDfxInfo_Test_001, TestSize.Level1)
     RdbFaultHiViewReporter::CollectDfxInfo(config, info);
     EXPECT_EQ(info.procUid_, static_cast<uint32_t>(getuid()));
     EXPECT_EQ(info.procGid_, static_cast<uint32_t>(getgid()));
-    EXPECT_FALSE(info.slaveHasError_);
     EXPECT_FALSE(info.slaveInterrupted_);
     EXPECT_TRUE(info.slaveInvalidReason_.empty());
 }

@@ -1221,9 +1221,8 @@ std::string SqliteUtils::FormatDfxInfo(const DfxInfo &dfxInfo)
     oss << "LastOpen:" << dfxInfo.lastOpenTime_ << "," << "CUR_USER:" << dfxInfo.curUserId_
         << ",UID:" << dfxInfo.procUid_ << ",GID:" << dfxInfo.procGid_
         << ",UMASK:" << std::oct << dfxInfo.procUmask_ << std::dec
-        << ",SLV_ERR:" << dfxInfo.slaveHasError_ << ",SLV_INTR:" << dfxInfo.slaveInterrupted_
-        << ",SLV_CANCEL:" << dfxInfo.slaveCancelled_ << ",SLV_REASON:" << dfxInfo.slaveInvalidReason_
-        << ",SLV_INFO:" << GetFileStatInfo(dfxInfo.slaveDebugInfo_)
+        << ",SLV_INTR:" << dfxInfo.slaveInterrupted_
+        << ",SLV_REASON:" << dfxInfo.slaveInvalidReason_
         << ",MS_DIFF:" << dfxInfo.masterSlaveDiff_;
     return oss.str();
 }
