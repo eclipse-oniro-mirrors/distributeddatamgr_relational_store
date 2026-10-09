@@ -416,7 +416,7 @@ void SqliteConnection::CheckIntegrityOnOpen(const RdbStoreConfig &config)
             SqliteUtils::Anonymous(config.GetName()).c_str(), static_cast<std::string>(checkResult).c_str(),
             SqliteUtils::SqlAnonymous(sql).c_str());
         Reportor::ReportCorruptedOnce(Reportor::Create(config, errCode,
-            std::string(RdbSubCase::TAG) + RdbSubCase::FIRST_PAGE + "," + static_cast<std::string>(checkResult),
+            std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE + "," + static_cast<std::string>(checkResult),
             true));
         if (config.IsAuditEnabled()) {
             RdbDbLoggerManager::GetInstance().RecordCorrupt(

@@ -171,12 +171,11 @@ int SqliteStatement::Prepare(sqlite3 *dbHandle, const std::string &newSql)
         int ret = SQLiteError::ErrNo(errCode);
         if (config_ != nullptr &&
             (errCode == SQLITE_CORRUPT || (errCode == SQLITE_NOTADB && config_->GetIter() != 0))) {
-            Reportor::ReportCorruptedOnce(Reportor::Create(*config_, ret,
-                std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE + "," +
-                (errCode == SQLITE_CORRUPT ? SqliteGlobalConfig::GetLastCorruptionMsg() : "SqliteStatement::Prepare"),
-                true));
             std::string detail = errCode == SQLITE_CORRUPT ? SqliteGlobalConfig::GetLastCorruptionMsg()
                 : "SqliteStatement::Prepare";
+            Reportor::ReportCorruptedOnce(Reportor::Create(*config_, ret, std::string(RdbSubCase::TAG) +
+                (errCode == SQLITE_CORRUPT ? RdbSubCase::NON_FIRST_PAGE : RdbSubCase::FIRST_PAGE) + "," + detail,
+                true));
             if (config_->IsAuditEnabled()) {
                 RdbDbLoggerManager::GetInstance().RecordCorrupt(config_->GetPath(), ret, errno, detail);
             }
@@ -427,13 +426,13 @@ int SqliteStatement::InnerStep()
     TryNotifyErrorLog(errCode, db, sql_);
     int ret = SQLiteError::ErrNo(errCode);
     if (config_ != nullptr && (errCode == SQLITE_CORRUPT || (errCode == SQLITE_NOTADB && config_->GetIter() != 0))) {
-        Reportor::ReportCorruptedOnce(Reportor::Create(*config_, ret,
-            std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE + "," +
-            (errCode == SQLITE_CORRUPT ? SqliteGlobalConfig::GetLastCorruptionMsg() : "SqliteStatement::InnerStep"),
-            true));
         std::string detail = errCode == SQLITE_CORRUPT
             ? SqliteGlobalConfig::GetLastCorruptionMsg()
             : "SqliteStatement::InnerStep";
+        Reportor::ReportCorruptedOnce(Reportor::Create(*config_, ret,
+            std::string(RdbSubCase::TAG) +
+            (errCode == SQLITE_CORRUPT ? RdbSubCase::NON_FIRST_PAGE : RdbSubCase::FIRST_PAGE) + "," + detail,
+            true));
         if (config_->IsAuditEnabled()) {
             RdbDbLoggerManager::GetInstance().RecordCorrupt(config_->GetPath(), ret, errno, detail);
         }
