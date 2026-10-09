@@ -15,6 +15,7 @@
 
 #include <fcntl.h>
 #include <gtest/gtest.h>
+#include <securec.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -56,6 +57,10 @@ namespace {
 constexpr const char *TEST_DIR = "/data/test/rdb_fault_reporter";
 constexpr const char *TEST_DB = "/data/test/rdb_fault_reporter/test.db";
 constexpr mode_t TEST_DIR_MODE = 0770;
+constexpr int CORRUPT_HEADER_SIZE = 16;
+constexpr int SQLITE_PAGE_SIZE = 4096;
+constexpr unsigned char CORRUPT_FILL_VALUE = 0xFF;
+constexpr int TEST_DATA_COUNT = 20;
 
 std::shared_ptr<RdbStore> CreateRdbStore(const std::string &path, bool doubleWrite = false)
 {
@@ -69,7 +74,7 @@ std::shared_ptr<RdbStore> CreateRdbStore(const std::string &path, bool doubleWri
     if (store == nullptr || code != E_OK) {
         return nullptr;
     }
-    for (int i = 0; i < 20; i++) {
+    for (int i = 0; i < TEST_DATA_COUNT; i++) {
         ValuesBucket values;
         values.PutInt("id", i);
         values.PutString("v", std::string("data"));
@@ -84,7 +89,10 @@ void CorruptFirstPage(const std::string &path)
     if (!f.is_open()) {
         return;
     }
-    char garbage[16] = {0};
+    char garbage[CORRUPT_HEADER_SIZE];
+    if (memset_s(garbage, sizeof(garbage), 0, sizeof(garbage)) != EOK) {
+        return;
+    }
     f.write(garbage, sizeof(garbage));
     f.close();
 }
@@ -95,9 +103,11 @@ void CorruptNonFirstPage(const std::string &path)
     if (!f.is_open()) {
         return;
     }
-    f.seekp(4096, std::ios::beg);
-    char garbage[4096];
-    memset(garbage, 0xFF, sizeof(garbage));
+    f.seekp(SQLITE_PAGE_SIZE, std::ios::beg);
+    char garbage[SQLITE_PAGE_SIZE];
+    if (memset_s(garbage, sizeof(garbage), CORRUPT_FILL_VALUE, sizeof(garbage)) != EOK) {
+        return;
+    }
     f.write(garbage, sizeof(garbage));
     f.close();
 }
