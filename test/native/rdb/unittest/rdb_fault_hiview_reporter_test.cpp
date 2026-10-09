@@ -145,6 +145,42 @@ HWTEST_F(RdbFaultHiViewReporterTest, CollectDfxInfo_Test_001, TestSize.Level1)
     EXPECT_TRUE(info.slaveInvalidReason_.empty());
 }
 
+HWTEST_F(RdbFaultHiViewReporterTest, ApplyInodeSubCase_Test_001, TestSize.Level1)
+{
+    RdbCorruptedEvent event;
+    event.appendix = "corrupt msg";
+    DebugInfo di;
+    di.inode_ = 100;
+    di.oldInode_ = 200;
+    event.debugInfos["db"] = di;
+    RdbFaultHiViewReporter::ApplyInodeSubCase(event);
+    EXPECT_NE(event.appendix.find("SubCase:InodeMismatch,"), std::string::npos);
+}
+
+HWTEST_F(RdbFaultHiViewReporterTest, ApplyInodeSubCase_Test_002, TestSize.Level1)
+{
+    RdbCorruptedEvent event;
+    event.appendix = std::string(RdbSubCase::TAG) + RdbSubCase::FIRST_PAGE + ",msg";
+    DebugInfo di;
+    di.inode_ = 100;
+    di.oldInode_ = 200;
+    event.debugInfos["db"] = di;
+    RdbFaultHiViewReporter::ApplyInodeSubCase(event);
+    EXPECT_EQ(event.appendix, std::string(RdbSubCase::TAG) + RdbSubCase::FIRST_PAGE + ",msg");
+}
+
+HWTEST_F(RdbFaultHiViewReporterTest, ApplyInodeSubCase_Test_003, TestSize.Level1)
+{
+    RdbCorruptedEvent event;
+    event.appendix = "corrupt msg";
+    DebugInfo di;
+    di.inode_ = 100;
+    di.oldInode_ = 100;
+    event.debugInfos["db"] = di;
+    RdbFaultHiViewReporter::ApplyInodeSubCase(event);
+    EXPECT_EQ(event.appendix, "corrupt msg");
+}
+
 HWTEST_F(RdbFaultHiViewReporterTest, ReportSlaveInconsistent_Test_001, TestSize.Level1)
 {
     std::string flag = std::string(TEST_DB) + "-slaveFailure";

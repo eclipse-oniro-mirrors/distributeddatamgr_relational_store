@@ -103,15 +103,6 @@ void RdbFaultHiViewReporter::ReportCorruptedOnce(const RdbCorruptedEvent &eventI
 {
     if (IsReportCorruptedFault(eventInfo.path)) {
         RdbCorruptedEvent eventInfoAppend = eventInfo;
-        if (eventInfoAppend.appendix.find(RdbSubCase::TAG) == std::string::npos) {
-            for (auto &[_, di] : eventInfoAppend.debugInfos) {
-                if (di.oldInode_ != 0 && di.oldInode_ != di.inode_) {
-                    eventInfoAppend.appendix = std::string(RdbSubCase::TAG) + RdbSubCase::INODE_MISMATCH +
-                        "," + eventInfoAppend.appendix;
-                    break;
-                }
-            }
-        }
         eventInfoAppend.appendix += SqliteUtils::FormatDebugInfo(eventInfoAppend.debugInfos, "");
         eventInfoAppend.appendix += SqliteUtils::FormatDfxInfo(eventInfo.dfxInfo);
         LOG_WARN("Corrupted %{public}s errCode:0x%{public}x [%{public}s]",
@@ -140,6 +131,20 @@ void RdbFaultHiViewReporter::CollectDfxInfo(const RdbStoreConfig &config, DfxInf
     std::string dbPath = config.GetPath();
     dfxInfo.slaveInterrupted_ = SqliteUtils::IsSlaveInterrupted(dbPath);
     dfxInfo.slaveInvalidReason_ = SqliteUtils::ReadSlaveInvalidReason(dbPath);
+}
+
+void RdbFaultHiViewReporter::ApplyInodeSubCase(RdbCorruptedEvent &eventInfo)
+{
+    if (eventInfo.appendix.find(RdbSubCase::TAG) != std::string::npos) {
+        return;
+    }
+    for (auto &item : eventInfo.debugInfos) {
+        if (item.second.oldInode_ != 0 && item.second.oldInode_ != item.second.inode_) {
+            eventInfo.appendix = std::string(RdbSubCase::TAG) + RdbSubCase::INODE_MISMATCH +
+                "," + eventInfo.appendix;
+            return;
+        }
+    }
 }
 
 void RdbFaultHiViewReporter::ReportRestore(const RdbCorruptedEvent &eventInfo, bool repair)
@@ -278,6 +283,7 @@ RdbCorruptedEvent RdbFaultHiViewReporter::Create(
             Update(eventInfo.debugInfos, serviceDebugInfos);
         }
     }
+    ApplyInodeSubCase(eventInfo);
     if (!skipDfxInfo) {
         CollectDfxInfo(config, eventInfo.dfxInfo);
     }

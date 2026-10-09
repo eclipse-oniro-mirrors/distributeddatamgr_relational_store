@@ -143,6 +143,7 @@ private:
     static bool IsReportFault(int32_t errCode);
     static std::atomic<uint8_t> *GetFaultCounter(int32_t errCode);
     static void CollectDfxInfo(const RdbStoreConfig &config, DfxInfo &dfxInfo);
+    static void ApplyInodeSubCase(RdbCorruptedEvent &eventInfo);
     static Collector collector_;
     static RdbFaultCode faultCounters_[];
     static bool memCorruptReportedFlg_;

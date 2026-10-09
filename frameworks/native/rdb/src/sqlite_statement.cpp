@@ -175,8 +175,7 @@ int SqliteStatement::Prepare(sqlite3 *dbHandle, const std::string &newSql)
                 std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE + "," +
                 (errCode == SQLITE_CORRUPT ? SqliteGlobalConfig::GetLastCorruptionMsg() : "SqliteStatement::Prepare"),
                 true));
-            std::string detail = errCode == SQLITE_CORRUPT
-                ? SqliteGlobalConfig::GetLastCorruptionMsg()
+            std::string detail = errCode == SQLITE_CORRUPT ? SqliteGlobalConfig::GetLastCorruptionMsg()
                 : "SqliteStatement::Prepare";
             if (config_->IsAuditEnabled()) {
                 RdbDbLoggerManager::GetInstance().RecordCorrupt(config_->GetPath(), ret, errno, detail);

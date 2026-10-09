@@ -130,7 +130,8 @@ int RdStatement::Prepare(GRD_DB *db, const std::string &newSql)
     int ret = RdUtils::RdSqlPrepare(db, newSql.c_str(), newSql.length(), &tmpStmt, nullptr);
     if (ret != E_OK) {
         if (ret == E_SQLITE_CORRUPT && config_ != nullptr) {
-            Reportor::ReportCorruptedOnce(Reportor::Create(*config_, ret, std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE, true));
+            Reportor::ReportCorruptedOnce(Reportor::Create(
+                *config_, ret, std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE, true));
             CorruptedHandleManager::GetInstance().HandleCorrupt(*config_);
         }
         if (tmpStmt != nullptr) {
@@ -318,7 +319,8 @@ int32_t RdStatement::Step()
     }
     int ret = RdUtils::RdSqlStep(stmtHandle_);
     if (ret == E_SQLITE_CORRUPT && config_ != nullptr) {
-        Reportor::ReportCorruptedOnce(Reportor::Create(*config_, ret, std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE, true));
+        Reportor::ReportCorruptedOnce(Reportor::Create(
+            *config_, ret, std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE, true));
         CorruptedHandleManager::GetInstance().HandleCorrupt(*config_);
     }
     stepCnt_++;
