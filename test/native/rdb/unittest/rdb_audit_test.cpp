@@ -750,31 +750,33 @@ HWTEST_F(RdbAuditTest, RealDbExecuteExtDropTable_026, TestSize.Level0)
 
 /**
  * @tc.name: RdbAudit_OnTransaction_027
- * @tc.desc: Only COMMIT writes a TRX line; BEGIN/ROLLBACK are silent. SQL inside a
- *          transaction is buffered and flushed on COMMIT, discarded on ROLLBACK.
+ * @tc.desc: COMMIT emits one combined line (BEGIN>SQL>COMMIT); ROLLBACK emits
+ *          one combined line (BEGIN>SQL>ROLLBACK). SQL is buffered, not separate.
  * @tc.type: FUNC
  */
 HWTEST_F(RdbAuditTest, OnTransaction_027, TestSize.Level0)
 {
     RdbAuditLoggerImpl logger;
-    // BEGIN/ROLLBACK alone produce nothing (no commit → nothing recorded).
+    // BEGIN/ROLLBACK: ROLLBACK now emits a combined line (BEGIN>ROLLBACK).
     logger.OnTransaction(DbPath(), "BEGIN", RC_OK, true);
     logger.OnTransaction(DbPath(), "ROLLBACK", RC_OK, true);
-    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 0);
-    // BEGIN + SQL + COMMIT: buffered SQL flushed + COMMIT line (2 lines).
+    EXPECT_EQ(WaitEventLines(1), 1);
+    auto rollbackContent = ReadFileContent(EventsLogPath());
+    EXPECT_NE(rollbackContent.find("TRX:"), NPOS);
+    EXPECT_NE(rollbackContent.find("BEGIN"), NPOS);
+    EXPECT_NE(rollbackContent.find("ROLLBACK"), NPOS);
+    // BEGIN + SQL + COMMIT: one combined line (BEGIN>INSERT(rows=8)>COMMIT).
     logger.OnTransaction(DbPath(), "BEGIN", RC_OK, true);
     logger.OnSqlAudit(DbPath(), "INSERT", "", 5);
     logger.OnSqlAudit(DbPath(), "INSERT", "", 3); // aggregated → rows=8
-    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 0);
+    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 1); // still only ROLLBACK line
     logger.OnTransaction(DbPath(), "COMMIT", RC_OK, true);
-    EXPECT_EQ(WaitEventLines(2), 2);
+    EXPECT_EQ(WaitEventLines(2), 2); // ROLLBACK + COMMIT combined lines
     auto content = ReadFileContent(EventsLogPath());
-    EXPECT_NE(content.find("SQL:"), NPOS);
-    EXPECT_NE(content.find("op=INSERT"), NPOS);
-    EXPECT_NE(content.find("rows=8"), NPOS);
     EXPECT_NE(content.find("TRX:"), NPOS);
-    EXPECT_NE(content.find("op=COMMIT"), NPOS);
-    EXPECT_EQ(content.find("op=BEGIN"), NPOS);
-    EXPECT_EQ(content.find("op=ROLLBACK"), NPOS);
+    EXPECT_NE(content.find("INSERT("), NPOS);
+    EXPECT_NE(content.find("rows=8"), NPOS);
+    EXPECT_NE(content.find(">COMMIT"), NPOS);
+    EXPECT_EQ(content.find("SQL:"), NPOS); // no separate SQL lines
 }
 

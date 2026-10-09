@@ -315,7 +315,8 @@ HWTEST_F(RdbAuditTxnTest, OnThrottle_MultiTable_004, TestSize.Level0)
 
 /**
  * @tc.name: RdbAuditTxn_OnTransaction_Nested_005
- * @tc.desc: Inner BEGIN/COMMIT/ROLLBACK (outer=false) are no-ops; only outermost matters.
+ * @tc.desc: Inner BEGIN/COMMIT/ROLLBACK (outer=false) are no-ops; only outermost
+ *          COMMIT emits one combined line (BEGIN>INSERT>COMMIT).
  * @tc.type: FUNC
  */
 HWTEST_F(RdbAuditTxnTest, OnTransaction_Nested_005, TestSize.Level0)
@@ -334,17 +335,21 @@ HWTEST_F(RdbAuditTxnTest, OnTransaction_Nested_005, TestSize.Level0)
     // Inner ROLLBACK (outer=false): no-op, buffer NOT discarded.
     logger.OnTransaction(DbPath(), "ROLLBACK", RC_OK, false);
     EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 0);
-    // Outer COMMIT: flush buffer + emit TRX.
+    // Outer COMMIT: one combined line.
     logger.OnTransaction(DbPath(), "COMMIT", RC_OK, true);
-    EXPECT_EQ(WaitEventLines(2), 2); // SQL flush + TRX COMMIT
+    EXPECT_EQ(WaitEventLines(1), 1);
     auto content = ReadFileContent(EventsLogPath());
-    EXPECT_NE(content.find("op=INSERT"), NPOS);
-    EXPECT_NE(content.find("op=COMMIT"), NPOS);
+    EXPECT_NE(content.find("TRX:"), NPOS);
+    EXPECT_NE(content.find("INSERT("), NPOS);
+    EXPECT_NE(content.find("rows=5"), NPOS);
+    EXPECT_NE(content.find(">COMMIT"), NPOS);
+    EXPECT_EQ(content.find("SQL:"), NPOS); // no separate SQL lines
 }
 
 /**
  * @tc.name: RdbAuditTxn_OnTransaction_Aggregation_006
- * @tc.desc: INSERT + UPDATE to same table are aggregated separately in txnBuffer_, flushed on COMMIT.
+ * @tc.desc: INSERT + UPDATE to same table are aggregated separately in txnBuffer_,
+ *          emitted as one combined line on COMMIT.
  * @tc.type: FUNC
  */
 HWTEST_F(RdbAuditTxnTest, OnTransaction_Aggregation_006, TestSize.Level0)
@@ -356,18 +361,19 @@ HWTEST_F(RdbAuditTxnTest, OnTransaction_Aggregation_006, TestSize.Level0)
     logger.OnSqlAudit(DbPath(), "INSERT", "tblA", 2); // aggregated → INSERT rows=7
     EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 0);
     logger.OnTransaction(DbPath(), "COMMIT", RC_OK, true);
-    EXPECT_EQ(WaitEventLines(3), 3); // SQL INSERT + SQL UPDATE + TRX COMMIT
+    EXPECT_EQ(WaitEventLines(1), 1); // one combined line
     auto content = ReadFileContent(EventsLogPath());
-    EXPECT_NE(content.find("op=INSERT"), NPOS);
+    EXPECT_NE(content.find("INSERT("), NPOS);
     EXPECT_NE(content.find("rows=7"), NPOS);
-    EXPECT_NE(content.find("op=UPDATE"), NPOS);
+    EXPECT_NE(content.find("UPDATE("), NPOS);
     EXPECT_NE(content.find("rows=3"), NPOS);
-    EXPECT_NE(content.find("op=COMMIT"), NPOS);
+    EXPECT_NE(content.find(">COMMIT"), NPOS);
+    EXPECT_EQ(content.find("SQL:"), NPOS); // no separate SQL lines
 }
 
 /**
  * @tc.name: RdbAuditTxn_OnTransaction_RollbackDiscards_007
- * @tc.desc: ROLLBACK (outer=true) discards all buffered SQL; no audit lines written.
+ * @tc.desc: ROLLBACK emits one combined line showing the discarded ops.
  * @tc.type: FUNC
  */
 HWTEST_F(RdbAuditTxnTest, OnTransaction_RollbackDiscards_007, TestSize.Level0)
@@ -378,10 +384,14 @@ HWTEST_F(RdbAuditTxnTest, OnTransaction_RollbackDiscards_007, TestSize.Level0)
     logger.OnSqlAudit(DbPath(), "UPDATE", "tblA", 3);
     EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 0);
     logger.OnTransaction(DbPath(), "ROLLBACK", RC_OK, true);
-    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 0);
+    EXPECT_EQ(WaitEventLines(1), 1); // one combined ROLLBACK line
+    auto content = ReadFileContent(EventsLogPath());
+    EXPECT_NE(content.find("INSERT("), NPOS);
+    EXPECT_NE(content.find("UPDATE("), NPOS);
+    EXPECT_NE(content.find(">ROLLBACK"), NPOS);
     // After ROLLBACK, inTransaction_ is false; new SQL goes through throttle.
     logger.OnSqlAudit(DbPath(), "INSERT", "tblB", 1);
-    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 0); // 1st in new window, no emit
+    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 1); // 1st in new window, no emit
 }
 
 /**
@@ -404,7 +414,7 @@ HWTEST_F(RdbAuditTxnTest, OnTransaction_Disabled_008, TestSize.Level0)
 
 /**
  * @tc.name: RdbAuditTxn_RealDbTransaction_009
- * @tc.desc: Real DB: committed transaction's SQL is audited; rolled-back is not.
+ * @tc.desc: Real DB: committed transaction emits combined line; rolled-back also emits.
  * @tc.type: FUNC
  */
 HWTEST_F(RdbAuditTxnTest, RealDbTransaction_009, TestSize.Level0)
@@ -413,32 +423,32 @@ HWTEST_F(RdbAuditTxnTest, RealDbTransaction_009, TestSize.Level0)
     int err = E_OK;
     auto store = RdbHelper::GetRdbStore(MakeAuditConfig(), 1, cb, err);
     ASSERT_NE(store, nullptr);
-    // Committed transaction: INSERT buffered → flushed on COMMIT.
+    // Committed transaction: INSERT buffered → combined COMMIT line.
     store->BeginTransaction();
     ValuesBucket b;
     b.Put("id", 1);
     b.Put("name", "a");
     store->Insert("users", b);
     store->Commit();
-    // Rolled-back transaction: INSERT buffered → discarded on ROLLBACK.
+    // Rolled-back transaction: INSERT buffered → combined ROLLBACK line.
     store->BeginTransaction();
     ValuesBucket b2;
     b2.Put("id", 2);
     b2.Put("name", "b");
     store->Insert("users", b2);
     store->RollBack();
-    // open (2) + INSERT(1, flushed) + COMMIT(1) = 4. Rollback adds nothing.
+    // open (2) + combined COMMIT(1) + combined ROLLBACK(1) = 4.
     EXPECT_EQ(WaitEventLines(4), 4);
     auto content = ReadFileContent(EventsLogPath());
-    EXPECT_NE(content.find("op=INSERT"), NPOS);
-    EXPECT_NE(content.find("op=COMMIT"), NPOS);
-    EXPECT_EQ(content.find("op=BEGIN"), NPOS);
-    EXPECT_EQ(content.find("op=ROLLBACK"), NPOS);
+    EXPECT_NE(content.find("INSERT("), NPOS);
+    EXPECT_NE(content.find(">COMMIT"), NPOS);
+    EXPECT_NE(content.find(">ROLLBACK"), NPOS);
+    EXPECT_EQ(content.find("SQL:"), NPOS); // no separate SQL lines
 }
 
 /**
  * @tc.name: RdbAuditTxn_RealDbCreateTransaction_010
- * @tc.desc: CreateTransaction path: BEGIN/COMMIT/ROLLBACK TRX lines emitted; SQL via throttle.
+ * @tc.desc: CreateTransaction path: SQL buffered, COMMIT/ROLLBACK emit combined lines.
  * @tc.type: FUNC
  */
 HWTEST_F(RdbAuditTxnTest, RealDbCreateTransaction_010, TestSize.Level0)
@@ -463,30 +473,35 @@ HWTEST_F(RdbAuditTxnTest, RealDbCreateTransaction_010, TestSize.Level0)
     b2.Put("name", "b");
     trans2->Insert("users", b2);
     trans2->Rollback();
-    // open(2) + BEGIN(1) + COMMIT(1) + BEGIN(1) + THROTTLE(1) + ROLLBACK(1) = 7.
-    EXPECT_EQ(WaitEventLines(7), 7);
+    // open(2) + combined COMMIT(1) + combined ROLLBACK(1) = 4.
+    EXPECT_EQ(WaitEventLines(4), 4);
     auto content = ReadFileContent(EventsLogPath());
-    EXPECT_NE(content.find("op=BEGIN"), NPOS);
-    EXPECT_NE(content.find("op=COMMIT"), NPOS);
-    EXPECT_NE(content.find("op=ROLLBACK"), NPOS);
+    EXPECT_NE(content.find(">COMMIT"), NPOS);
+    EXPECT_NE(content.find(">ROLLBACK"), NPOS);
+    EXPECT_NE(content.find("INSERT("), NPOS);
+    EXPECT_EQ(content.find("SQL:"), NPOS); // no separate SQL lines
 }
 
 // ===== OnTransactionEvent (connection-based, no buffer) =====
 
 /**
  * @tc.name: RdbAuditTxn_OnTransactionEvent_CommitFail_011
- * @tc.desc: OnTransactionEvent with ROLLBACK + error code emits TRX line with rc=err.
+ * @tc.desc: OnTransactionEvent BEGIN + ROLLBACK(error) emits one combined line with rc=err.
  * @tc.type: FUNC
  */
 HWTEST_F(RdbAuditTxnTest, OnTransactionEvent_CommitFail_011, TestSize.Level0)
 {
     RdbAuditLoggerImpl logger;
+    // BEGIN: sets inTransaction_, no emit.
     logger.OnTransactionEvent(DbPath(), "BEGIN", RC_OK);
+    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 0);
+    // ROLLBACK with error: one combined line (BEGIN>ROLLBACK rc=14).
     logger.OnTransactionEvent(DbPath(), "ROLLBACK", RC_ERR);
-    EXPECT_EQ(WaitEventLines(2), 2);
+    EXPECT_EQ(WaitEventLines(1), 1);
     auto content = ReadFileContent(EventsLogPath());
-    EXPECT_NE(content.find("op=BEGIN"), NPOS);
-    EXPECT_NE(content.find("op=ROLLBACK"), NPOS);
+    EXPECT_NE(content.find("TRX:"), NPOS);
+    EXPECT_NE(content.find("BEGIN"), NPOS);
+    EXPECT_NE(content.find("ROLLBACK"), NPOS);
     EXPECT_NE(content.find("rc=" + std::to_string(RC_ERR)), NPOS);
 }
 

@@ -273,14 +273,15 @@ void RdbAuditLoggerImpl::OnTransaction(
     }
     if (op == "COMMIT") {
         if (outer) {
-            FlushTxnBuffer(dbPath);
-            EmitTransaction(dbPath, "COMMIT", rc);
+            EmitCombinedTransaction(dbPath, "COMMIT", rc);
+            txnBuffer_.clear();
             inTransaction_ = false;
         }
         return;
     }
     if (op == "ROLLBACK") {
         if (outer) {
+            EmitCombinedTransaction(dbPath, "ROLLBACK", rc);
             txnBuffer_.clear();
             inTransaction_ = false;
         }
@@ -292,7 +293,23 @@ void RdbAuditLoggerImpl::OnTransactionEvent(const std::string &dbPath, const std
     if (!IsActive()) {
         return;
     }
-    EmitTransaction(dbPath, op, rc);
+    std::lock_guard<std::mutex> lock(txnMutex_);
+    if (op == "BEGIN") {
+        inTransaction_ = true;
+        txnBuffer_.clear();
+        return;
+    }
+    if (op == "COMMIT") {
+        EmitCombinedTransaction(dbPath, "COMMIT", rc);
+        txnBuffer_.clear();
+        inTransaction_ = false;
+        return;
+    }
+    if (op == "ROLLBACK") {
+        EmitCombinedTransaction(dbPath, "ROLLBACK", rc);
+        txnBuffer_.clear();
+        inTransaction_ = false;
+    }
 }
 
 void RdbAuditLoggerImpl::EmitSqlAudit(
@@ -319,23 +336,18 @@ void RdbAuditLoggerImpl::EmitThrottleLog(
     });
 }
 
-void RdbAuditLoggerImpl::EmitTransaction(const std::string &dbPath, const std::string &op, int rc)
+void RdbAuditLoggerImpl::EmitCombinedTransaction(
+    const std::string &dbPath, const std::string &finalOp, int rc)
 {
+    // Must be called under txnMutex_ — reads txnBuffer_.
+    std::string line = BuildCombinedTransactionLine(dbPath, finalOp, rc);
     auto executor = TaskExecutor::GetInstance().GetExecutor();
     if (executor == nullptr) {
         return;
     }
-    executor->Execute([dbPath, op, rc]() {
-        RdbAuditLoggerManager::GetInstance().AppendEventSync(BuildTransactionLine(dbPath, op, rc));
+    executor->Execute([line = std::move(line)]() {
+        RdbAuditLoggerManager::GetInstance().AppendEventSync(line);
     });
-}
-
-void RdbAuditLoggerImpl::FlushTxnBuffer(const std::string &dbPath)
-{
-    for (const auto &entry : txnBuffer_) {
-        EmitSqlAudit(dbPath, entry.first.first, entry.first.second, entry.second);
-    }
-    txnBuffer_.clear();
 }
 
 void RdbAuditLoggerImpl::OnPragma(
@@ -489,15 +501,22 @@ std::string RdbAuditLoggerImpl::BuildSqlAuditLine(
     return os.str();
 }
 
-std::string RdbAuditLoggerImpl::BuildTransactionLine(
-    const std::string &dbPath, const std::string &op, int rc)
+std::string RdbAuditLoggerImpl::BuildCombinedTransactionLine(
+    const std::string &dbPath, const std::string &finalOp, int rc)
 {
+    // Must be called under txnMutex_ — reads txnBuffer_.
     std::string ts = TsLog();
     auto caller = RdbDbInfoManager::GetInstance().CollectCaller();
     std::string dbName = SqliteUtils::Anonymous(StringUtils::ExtractFileName(dbPath));
     std::ostringstream os;
     os << ts << " " << caller.pid << " " << caller.tid << " TRX:"
-       << " db=" << dbName << " op=" << op << " rc=" << rc
+       << " db=" << dbName << " BEGIN";
+    for (const auto &entry : txnBuffer_) {
+        os << ">" << entry.first.first
+           << "(tbl=" << SqliteUtils::Anonymous(entry.first.second)
+           << ",rows=" << entry.second << ")";
+    }
+    os << ">" << finalOp << " rc=" << rc
        << " caller=pid:" << caller.pid << ":tid:" << caller.tid;
     return os.str();
 }

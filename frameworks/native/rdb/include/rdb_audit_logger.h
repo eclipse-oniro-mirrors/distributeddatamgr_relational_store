@@ -107,14 +107,13 @@ private:
     void EmitSqlAudit(const std::string &dbPath, const std::string &op, const std::string &tbl, int64_t rows);
     void EmitThrottleLog(const std::string &dbPath, const std::string &op, const std::string &tbl,
         int64_t accumulated);
-    void EmitTransaction(const std::string &dbPath, const std::string &op, int rc);
-    void FlushTxnBuffer(const std::string &dbPath);
+    void EmitCombinedTransaction(const std::string &dbPath, const std::string &finalOp, int rc);
 
     static std::string BuildOpenOkLine(const std::string &dbPath);
     static std::string BuildOpenFailLine(const std::string &dbPath, int rc, int osErrno);
     static std::string BuildSqlAuditLine(
         const std::string &dbPath, const std::string &op, const std::string &tbl, int64_t rows);
-    static std::string BuildTransactionLine(const std::string &dbPath, const std::string &op, int rc);
+    std::string BuildCombinedTransactionLine(const std::string &dbPath, const std::string &finalOp, int rc);
     static std::string BuildThrottleLine(
         const std::string &dbPath, const std::string &op, const std::string &tbl, int64_t accumulated);
 
@@ -131,9 +130,9 @@ private:
     std::mutex mutex_;
 
     // Transaction buffering: SQL events inside a transaction are buffered (aggregated
-    // by op+tbl) and only flushed to events.log on successful outermost COMMIT;
-    // discarded on outermost ROLLBACK. BEGIN/ROLLBACK are never written; only the
-    // successful COMMIT produces a TRX line (plus the flushed SQL).
+    // by op+tbl) and emitted as a single combined TRX line on COMMIT or ROLLBACK.
+    // Format: TRX: db=xxx BEGIN>OP(tbl=***,rows=N)>...>COMMIT rc=0
+    // ROLLBACK also emits a combined line showing the discarded ops.
     std::mutex txnMutex_;
     bool inTransaction_ = false;
     std::map<std::pair<std::string, std::string>, int64_t> txnBuffer_;
