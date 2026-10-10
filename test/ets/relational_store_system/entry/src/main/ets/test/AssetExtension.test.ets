@@ -369,7 +369,7 @@ export default function AssetExtensionTest() {
             'data1': asset,
             'data2': [asset],
           }
-          await rdbStore.insert('asset_test', valueBucket);
+          let rowId = await rdbStore.insert('asset_test', valueBucket);
 
           const updatedAsset: relationalStore.Asset = {
             name: 'file1',
@@ -386,7 +386,7 @@ export default function AssetExtensionTest() {
             'data2': [updatedAsset],
           }
           let predicates = new relationalStore.RdbPredicates('asset_test');
-          predicates.equalTo('name', 'file1');
+          predicates.equalTo('id', rowId);
           await rdbStore.update(updateBucket, predicates);
 
           let queryPredicates = new relationalStore.RdbPredicates('asset_test');
