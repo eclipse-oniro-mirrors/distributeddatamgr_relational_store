@@ -386,7 +386,7 @@ export default function AssetExtensionTest() {
             'data2': [updatedAsset],
           }
           let predicates = new relationalStore.RdbPredicates('asset_test');
-          predicates.equalTo('id', 1);
+          predicates.equalTo('name', 'file1');
           await rdbStore.update(updateBucket, predicates);
 
           let queryPredicates = new relationalStore.RdbPredicates('asset_test');
