@@ -562,3 +562,37 @@ HWTEST_F(RdbAuditTxnTest, RateLimit_014, TestSize.Level0)
     EXPECT_NE(content.find("RATE_LIMIT:"), NPOS);
     EXPECT_NE(content.find("dropped=40"), NPOS);
 }
+
+// ===== COMMIT failure audit (stack-based OnTransaction) =====
+
+/**
+ * @tc.name: RdbAuditTxn_OnTransaction_CommitFail_015
+ * @tc.desc: OnTransaction BEGIN + COMMIT(error) emits one combined TRX line
+ *          with buffered ops and rc=err, mirroring RollBack failure behavior.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbAuditTxnTest, OnTransaction_CommitFail_015, TestSize.Level0)
+{
+    RdbAuditLoggerImpl logger;
+    // BEGIN: sets inTransaction_, clears buffer, no emit.
+    logger.OnTransaction(DbPath(), "BEGIN", RC_OK, true);
+    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 0);
+    // Buffer some SQL ops (aggregated, no immediate emit).
+    logger.OnSqlAudit(DbPath(), "INSERT", "tblA", 3);
+    logger.OnSqlAudit(DbPath(), "DELETE", "tblA", 2);
+    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 0);
+    // COMMIT with error: one combined line (BEGIN>DELETE(...)>INSERT(...)>COMMIT rc=14).
+    logger.OnTransaction(DbPath(), "COMMIT", RC_ERR, true);
+    EXPECT_EQ(WaitEventLines(1), 1);
+    auto content = ReadFileContent(EventsLogPath());
+    EXPECT_NE(content.find("TRX:"), NPOS);
+    EXPECT_NE(content.find("BEGIN"), NPOS);
+    EXPECT_NE(content.find("INSERT("), NPOS);
+    EXPECT_NE(content.find("DELETE("), NPOS);
+    EXPECT_NE(content.find(">COMMIT"), NPOS);
+    EXPECT_NE(content.find("rc=" + std::to_string(RC_ERR)), NPOS);
+    EXPECT_EQ(content.find("SQL:"), NPOS); // no separate SQL lines
+    // After COMMIT (even failed), inTransaction_ is false; new SQL goes through throttle.
+    logger.OnSqlAudit(DbPath(), "INSERT", "tblB", 1);
+    EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 1); // 1st in new window, no emit
+}

@@ -30,11 +30,7 @@ using namespace OHOS::Rdb;
 namespace OHOS::NativeRdb {
 using PerfStat = DistributedRdb::PerfStat;
 __attribute__((used))
-const int32_t TransactionImpl::regCreator_ = Transaction::RegisterCreator(
-    [](int32_t type, std::shared_ptr<Connection> conn, const std::string &path, bool auditEnabled)
-        -> std::pair<int32_t, std::shared_ptr<Transaction>> {
-        return TransactionImpl::Create(type, std::move(conn), path, auditEnabled);
-    });
+const int32_t TransactionImpl::regCreator_ = Transaction::RegisterCreator(TransactionImpl::Create);
 
 TransactionImpl::TransactionImpl(std::shared_ptr<Connection> connection, const std::string &path,
     bool auditEnabled)
