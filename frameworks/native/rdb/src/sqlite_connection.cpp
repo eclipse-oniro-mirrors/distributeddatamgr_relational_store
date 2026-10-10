@@ -2199,8 +2199,8 @@ int SqliteConnection::VerifySlaveIntegrity(const bool isForceRestore)
     if (err == E_OK && (static_cast<std::string>(obj) != "ok")) {
         LOG_ERROR("slave corrupt, ret:%{public}s, cRet:%{public}d, %{public}d", static_cast<std::string>(obj).c_str(),
             err, errno);
-        auto corruptedEvent = Reportor::Create(slaveCfg, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL,
-            "Verify Slave Integrity failed", true, true);
+        auto corruptedEvent =
+            Reportor::Create(slaveCfg, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL, "Slave Check", true, true);
         corruptedEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
         Reportor::ReportCorruptedOnce(corruptedEvent);
         SqliteUtils::SetSlaveInvalid(config_.GetPath(), SqliteUtils::SlaveInvalidReason::VERIFY_FAILED);
