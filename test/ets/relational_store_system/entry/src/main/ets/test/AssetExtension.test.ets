@@ -562,6 +562,51 @@ export default function AssetExtensionTest() {
       console.log(TAG + "************* AssetExtensionTest0010 end *************");
     })
 
+    /**
+     * @tc.number AssetExtensionTest0011
+     * @tc.name AssetExtension_ExceedCloudLimit
+     * @tc.desc Insert asset with extension longer than 512 (cloud limit) to verify no length limit on device side
+     */
+    it('AssetExtensionTest0011', 0, async () => {
+      console.log(TAG + "************* AssetExtensionTest0011 start *************");
+      if (rdbStore != undefined) {
+        try {
+          let longExtension = '';
+          for (let i = 0; i < 1024; i++) {
+            longExtension += 'a';
+          }
+          const asset: relationalStore.Asset = {
+            name: 'file1',
+            uri: 'uri1',
+            createTime: '2024-01-01',
+            modifyTime: '2024-01-02',
+            size: '1024',
+            path: '/data/file1',
+            extension: longExtension,
+            status: relationalStore.AssetStatus.ASSET_NORMAL,
+          }
+          const valueBucket: relationalStore.ValuesBucket = {
+            'data1': asset,
+            'data2': [asset],
+          }
+          await rdbStore.insert('asset_test', valueBucket);
+          let predicates = new relationalStore.RdbPredicates('asset_test');
+          let resultSet = await rdbStore.query(predicates) as relationalStore.ResultSet;
+          expect(resultSet.rowCount).assertEqual(1);
+          expect(resultSet.goToFirstRow()).assertTrue();
+          let row = resultSet.getRow();
+          expect(checkAssetEqual(row.data1, asset)).assertTrue();
+          expect(row.data1.extension).assertEqual(longExtension);
+          expect(row.data1.extension.length).assertEqual(1024);
+          resultSet.close();
+        } catch (e) {
+          console.error(`AssetExtensionTest0011 failed, code is ${e.code}, message is ${e.message}`);
+          expect(null).assertFail();
+        }
+      }
+      console.log(TAG + "************* AssetExtensionTest0011 end *************");
+    })
+
     console.log(TAG + "*************Unit Test Begin*************");
   })
 }
