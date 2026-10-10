@@ -1609,8 +1609,10 @@ bool RdbStoreImpl::TryAsyncRepair()
 
     int errCode = Connection::CheckReplicaIntegrity(config_);
     if (errCode != E_OK) {
-        Reportor::ReportCorruptedOnce(Reportor::Create(config_, E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN,
-            std::string(RdbSubCase::TAG) + RdbSubCase::BOTH_FAIL + ",master corrupt and slave corrupt on open", true));
+        auto corruptedEvent = Reportor::Create(config_, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL,
+            "master corrupt and slave corrupt on open", true);
+        corruptedEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+        Reportor::ReportCorruptedOnce(corruptedEvent);
         return false;
     }
 

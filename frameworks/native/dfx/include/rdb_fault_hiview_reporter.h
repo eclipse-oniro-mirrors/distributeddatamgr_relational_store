@@ -43,6 +43,7 @@ struct RdbCorruptedEvent {
     uint32_t integrityCheck;
     uint32_t errorCode;
     int32_t systemErrorNo;
+    std::string subCaseDesc;
     std::string appendix;
     time_t errorOccurTime;
     std::string path;
@@ -56,7 +57,6 @@ struct RdbFaultCode {
 };
 
 struct RdbSubCase {
-    static constexpr const char *TAG = "SubCase:";
     static constexpr const char *FIRST_PAGE = "FirstPage";
     static constexpr const char *NON_FIRST_PAGE = "NonFirstPage";
     static constexpr const char *INODE_MISMATCH = "InodeMismatch";
@@ -90,6 +90,8 @@ public:
     std::string GetFaultType() const { return faultType_; }
     int32_t GetErrCode() const { return errorCode_; }
     std::string GetLogInfo() const { return custLog_; };
+    std::string GetSubCaseDesc() const { return subCaseDesc_; }
+    void SetSubCaseDesc(const std::string &subCase) { subCaseDesc_ = subCase; }
     virtual void Report() const;
     API_EXPORT virtual ~RdbFaultEvent();
 
@@ -100,6 +102,7 @@ private:
     std::string bundleName_;
     std::string faultType_;
     std::string custLog_;
+    std::string subCaseDesc_;
     int32_t errorCode_;
 };
 

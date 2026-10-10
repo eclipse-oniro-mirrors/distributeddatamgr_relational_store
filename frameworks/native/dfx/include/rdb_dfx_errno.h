@@ -151,7 +151,7 @@ static constexpr int E_DFX_WAIT_AFTER_OPEN_TIMEOUT = (E_DFX_BASE + 0x19);
 /**
  * @brief Only use for dfx, master and slave both corrupt (open/restore distinguished by appendix).
  */
-static constexpr int E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN = (E_DFX_BASE + 0x1A);
+static constexpr int E_DFX_MASTER_SLAVE_BOTH_ABNORMAL = (E_DFX_BASE + 0x1A);
 
 /**
  * @brief Only use for dfx, master and slave table or index count inconsistent.

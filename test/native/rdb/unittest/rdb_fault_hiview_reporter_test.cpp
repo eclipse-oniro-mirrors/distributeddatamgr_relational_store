@@ -58,8 +58,6 @@ constexpr const char *TEST_DIR = "/data/test/rdb_fault_reporter";
 constexpr const char *TEST_DB = "/data/test/rdb_fault_reporter/test.db";
 constexpr mode_t TEST_DIR_MODE = 0770;
 constexpr int CORRUPT_HEADER_SIZE = 16;
-constexpr int SQLITE_PAGE_SIZE = 4096;
-constexpr unsigned char CORRUPT_FILL_VALUE = 0xFF;
 constexpr int TEST_DATA_COUNT = 20;
 
 std::shared_ptr<RdbStore> CreateRdbStore(const std::string &path)
@@ -120,7 +118,6 @@ public:
 
 HWTEST_F(RdbFaultHiViewReporterTest, RdbSubCase_Test_001, TestSize.Level1)
 {
-    EXPECT_STREQ(RdbSubCase::TAG, "SubCase:");
     EXPECT_STREQ(RdbSubCase::FIRST_PAGE, "FirstPage");
     EXPECT_STREQ(RdbSubCase::NON_FIRST_PAGE, "NonFirstPage");
     EXPECT_STREQ(RdbSubCase::INODE_MISMATCH, "InodeMismatch");
@@ -212,19 +209,20 @@ HWTEST_F(RdbFaultHiViewReporterTest, ApplyInodeSubCase_Test_001, TestSize.Level1
     di.oldInode_ = 200;
     event.debugInfos["db"] = di;
     RdbFaultHiViewReporter::ApplyInodeSubCase(event);
-    EXPECT_NE(event.appendix.find("SubCase:InodeMismatch,"), std::string::npos);
+    EXPECT_EQ(event.subCaseDesc, RdbSubCase::INODE_MISMATCH);
 }
 
 HWTEST_F(RdbFaultHiViewReporterTest, ApplyInodeSubCase_Test_002, TestSize.Level1)
 {
     RdbCorruptedEvent event;
-    event.appendix = std::string(RdbSubCase::TAG) + RdbSubCase::FIRST_PAGE + ",msg";
+    event.subCaseDesc = RdbSubCase::FIRST_PAGE;
+    event.appendix = "msg";
     DebugInfo di;
     di.inode_ = 100;
     di.oldInode_ = 200;
     event.debugInfos["db"] = di;
     RdbFaultHiViewReporter::ApplyInodeSubCase(event);
-    EXPECT_EQ(event.appendix, std::string(RdbSubCase::TAG) + RdbSubCase::FIRST_PAGE + ",msg");
+    EXPECT_EQ(event.subCaseDesc, RdbSubCase::FIRST_PAGE);
 }
 
 HWTEST_F(RdbFaultHiViewReporterTest, ApplyInodeSubCase_Test_003, TestSize.Level1)
@@ -236,7 +234,7 @@ HWTEST_F(RdbFaultHiViewReporterTest, ApplyInodeSubCase_Test_003, TestSize.Level1
     di.oldInode_ = 100;
     event.debugInfos["db"] = di;
     RdbFaultHiViewReporter::ApplyInodeSubCase(event);
-    EXPECT_EQ(event.appendix, "corrupt msg");
+    EXPECT_TRUE(event.subCaseDesc.empty());
 }
 
 HWTEST_F(RdbFaultHiViewReporterTest, ReportSlaveInconsistent_Test_001, TestSize.Level1)
@@ -263,48 +261,51 @@ HWTEST_F(RdbFaultHiViewReporterTest, CorruptedFlag_Test_001, TestSize.Level1)
 
 HWTEST_F(RdbFaultHiViewReporterTest, DfxErrorCode_Test_001, TestSize.Level1)
 {
-    EXPECT_EQ(E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN, E_DFX_BASE + 0x1A);
+    EXPECT_EQ(E_DFX_MASTER_SLAVE_BOTH_ABNORMAL, E_DFX_BASE + 0x1A);
     EXPECT_EQ(E_DFX_MASTER_SLAVE_INCONSISTENT, E_DFX_BASE + 0x1B);
 }
 
 /*
  * @tc.name: Create_FirstPage_Test_001
- * @tc.desc: Verify Create sets FirstPage sub case in appendix and errorCode
+ * @tc.desc: Verify Create sets FirstPage sub case in subCaseDesc and errorCode
  * @tc.type: FUNC
  */
 HWTEST_F(RdbFaultHiViewReporterTest, Create_FirstPage_Test_001, TestSize.Level1)
 {
     RdbStoreConfig config((std::string(TEST_DB)));
     auto event = RdbFaultHiViewReporter::Create(config, E_SQLITE_CORRUPT,
-        std::string(RdbSubCase::TAG) + RdbSubCase::FIRST_PAGE + ",integrity_check failed", false, true);
+        "integrity_check failed", false, true);
+    event.subCaseDesc = RdbSubCase::FIRST_PAGE;
     EXPECT_EQ(event.errorCode, static_cast<uint32_t>(E_SQLITE_CORRUPT));
-    EXPECT_NE(event.appendix.find("SubCase:FirstPage"), std::string::npos);
+    EXPECT_EQ(event.subCaseDesc, RdbSubCase::FIRST_PAGE);
 }
 
 /*
  * @tc.name: Create_NonFirstPage_Test_001
- * @tc.desc: Verify Create sets NonFirstPage sub case in appendix
+ * @tc.desc: Verify Create sets NonFirstPage sub case in subCaseDesc
  * @tc.type: FUNC
  */
 HWTEST_F(RdbFaultHiViewReporterTest, Create_NonFirstPage_Test_001, TestSize.Level1)
 {
     RdbStoreConfig config((std::string(TEST_DB)));
     auto event = RdbFaultHiViewReporter::Create(config, E_SQLITE_CORRUPT,
-        std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE + ",corrupt index page", false, true);
-    EXPECT_NE(event.appendix.find("SubCase:NonFirstPage"), std::string::npos);
+        "corrupt index page", false, true);
+    event.subCaseDesc = RdbSubCase::NON_FIRST_PAGE;
+    EXPECT_EQ(event.subCaseDesc, RdbSubCase::NON_FIRST_PAGE);
 }
 
 /*
  * @tc.name: Create_FilePermission_Test_001
- * @tc.desc: Verify Create sets FilePermission sub case in appendix
+ * @tc.desc: Verify Create sets FilePermission sub case in subCaseDesc
  * @tc.type: FUNC
  */
 HWTEST_F(RdbFaultHiViewReporterTest, Create_FilePermission_Test_001, TestSize.Level1)
 {
     RdbStoreConfig config((std::string(TEST_DB)));
     auto event = RdbFaultHiViewReporter::Create(config, E_SQLITE_CANTOPEN,
-        std::string(RdbSubCase::TAG) + RdbSubCase::FILE_PERMISSION + ",EISDIR", false, true);
-    EXPECT_NE(event.appendix.find("SubCase:FilePermission"), std::string::npos);
+        "EISDIR", false, true);
+    event.subCaseDesc = RdbSubCase::FILE_PERMISSION;
+    EXPECT_EQ(event.subCaseDesc, RdbSubCase::FILE_PERMISSION);
 }
 
 /*
@@ -315,10 +316,11 @@ HWTEST_F(RdbFaultHiViewReporterTest, Create_FilePermission_Test_001, TestSize.Le
 HWTEST_F(RdbFaultHiViewReporterTest, Create_BothFail_Test_001, TestSize.Level1)
 {
     RdbStoreConfig config((std::string(TEST_DB)));
-    auto event = RdbFaultHiViewReporter::Create(config, E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN,
-        std::string(RdbSubCase::TAG) + RdbSubCase::BOTH_FAIL + ",master and slave corrupt on open", false, true);
-    EXPECT_EQ(event.errorCode, static_cast<uint32_t>(E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN));
-    EXPECT_NE(event.appendix.find("SubCase:MasterSlaveBothFail"), std::string::npos);
+    auto event = RdbFaultHiViewReporter::Create(config, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL,
+        "master and slave corrupt on open", false, true);
+    event.subCaseDesc = RdbSubCase::BOTH_FAIL;
+    EXPECT_EQ(event.errorCode, static_cast<uint32_t>(E_DFX_MASTER_SLAVE_BOTH_ABNORMAL));
+    EXPECT_EQ(event.subCaseDesc, RdbSubCase::BOTH_FAIL);
 }
 
 /*
@@ -330,7 +332,8 @@ HWTEST_F(RdbFaultHiViewReporterTest, ReportCorruptedOnce_SubCase_Test_001, TestS
 {
     RdbStoreConfig config((std::string(TEST_DB)));
     auto event = RdbFaultHiViewReporter::Create(config, E_SQLITE_CORRUPT,
-        std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE + ",test", false, true);
+        "test", false, true);
+    event.subCaseDesc = RdbSubCase::NON_FIRST_PAGE;
     EXPECT_TRUE(RdbFaultHiViewReporter::IsReportCorruptedFault(TEST_DB));
     RdbFaultHiViewReporter::ReportCorruptedOnce(event);
     EXPECT_FALSE(RdbFaultHiViewReporter::IsReportCorruptedFault(TEST_DB));

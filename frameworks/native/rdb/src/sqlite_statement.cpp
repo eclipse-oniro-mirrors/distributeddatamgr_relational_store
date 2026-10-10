@@ -173,9 +173,9 @@ int SqliteStatement::Prepare(sqlite3 *dbHandle, const std::string &newSql)
             (errCode == SQLITE_CORRUPT || (errCode == SQLITE_NOTADB && config_->GetIter() != 0))) {
             std::string detail = errCode == SQLITE_CORRUPT ? SqliteGlobalConfig::GetLastCorruptionMsg()
                 : "SqliteStatement::Prepare";
-            Reportor::ReportCorruptedOnce(Reportor::Create(*config_, ret, std::string(RdbSubCase::TAG) +
-                (errCode == SQLITE_CORRUPT ? RdbSubCase::NON_FIRST_PAGE : RdbSubCase::FIRST_PAGE) + "," + detail,
-                true));
+            auto corruptedEvent = Reportor::Create(*config_, ret, detail, true);
+            corruptedEvent.subCaseDesc = (errCode == SQLITE_CORRUPT ? RdbSubCase::NON_FIRST_PAGE : RdbSubCase::FIRST_PAGE);
+            Reportor::ReportCorruptedOnce(corruptedEvent);
             if (config_->IsAuditEnabled()) {
                 RdbDbLoggerManager::GetInstance().RecordCorrupt(config_->GetPath(), ret, errno, detail);
             }
@@ -429,10 +429,9 @@ int SqliteStatement::InnerStep()
         std::string detail = errCode == SQLITE_CORRUPT
             ? SqliteGlobalConfig::GetLastCorruptionMsg()
             : "SqliteStatement::InnerStep";
-        Reportor::ReportCorruptedOnce(Reportor::Create(*config_, ret,
-            std::string(RdbSubCase::TAG) +
-            (errCode == SQLITE_CORRUPT ? RdbSubCase::NON_FIRST_PAGE : RdbSubCase::FIRST_PAGE) + "," + detail,
-            true));
+        auto corruptedEvent = Reportor::Create(*config_, ret, detail, true);
+        corruptedEvent.subCaseDesc = (errCode == SQLITE_CORRUPT ? RdbSubCase::NON_FIRST_PAGE : RdbSubCase::FIRST_PAGE);
+        Reportor::ReportCorruptedOnce(corruptedEvent);
         if (config_->IsAuditEnabled()) {
             RdbDbLoggerManager::GetInstance().RecordCorrupt(config_->GetPath(), ret, errno, detail);
         }
@@ -823,9 +822,10 @@ int32_t SqliteStatement::FillBlockInfo(SharedBlockInfo *info, int retryTime) con
         }
         auto ret = (config_ != nullptr && errCode == E_SQLITE_CORRUPT);
         if (ret) {
-            Reportor::ReportCorruptedOnce(Reportor::Create(*config_, errCode,
-                std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE + ",FillBlockInfo: " +
-                SqliteGlobalConfig::GetLastCorruptionMsg(), true));
+            auto corruptedEvent = Reportor::Create(*config_, errCode,
+                "FillBlockInfo: " + SqliteGlobalConfig::GetLastCorruptionMsg(), true);
+            corruptedEvent.subCaseDesc = RdbSubCase::NON_FIRST_PAGE;
+            Reportor::ReportCorruptedOnce(corruptedEvent);
             if (config_->IsAuditEnabled()) {
                 RdbDbLoggerManager::GetInstance().RecordCorrupt(config_->GetPath(), errCode, errno,
                     "FillBlockInfo: " + SqliteGlobalConfig::GetLastCorruptionMsg());

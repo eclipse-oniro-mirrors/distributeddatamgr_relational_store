@@ -415,9 +415,10 @@ void SqliteConnection::CheckIntegrityOnOpen(const RdbStoreConfig &config)
         LOG_ERROR("%{public}s integrity check result is %{public}s, sql:%{public}s",
             SqliteUtils::Anonymous(config.GetName()).c_str(), static_cast<std::string>(checkResult).c_str(),
             SqliteUtils::SqlAnonymous(sql).c_str());
-        Reportor::ReportCorruptedOnce(Reportor::Create(config, errCode,
-            std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE + "," + static_cast<std::string>(checkResult),
-            true));
+        auto corruptedEvent = Reportor::Create(config, errCode,
+            static_cast<std::string>(checkResult), true);
+        corruptedEvent.subCaseDesc = RdbSubCase::NON_FIRST_PAGE;
+        Reportor::ReportCorruptedOnce(corruptedEvent);
         if (config.IsAuditEnabled()) {
             RdbDbLoggerManager::GetInstance().RecordCorrupt(
                 config.GetPath(), errCode, 0, static_cast<std::string>(checkResult));
@@ -448,15 +449,16 @@ int32_t SqliteConnection::OpenDatabase(const std::string &dbPath, int openFileFl
                 SqliteUtils::Anonymous(dbPath).c_str(), errno,
                 SqliteUtils::Anonymous(blockedPath).c_str(), diagMsg.c_str(),
                 blockedInfo.second.gid_, blockedInfo.second.uid_, blockedInfo.second.mode_);
-            Reportor::ReportFault(RdbFaultDbFileEvent(RdbFaultType::FT_OPEN, E_SQLITE_CANTOPEN, config_,
-                std::string(RdbSubCase::TAG) + RdbSubCase::FILE_PERMISSION +
-                    ",failed to openDB errno[ " + std::to_string(errno) + "]," +
+            RdbFaultDbFileEvent faultEvent(RdbFaultType::FT_OPEN, E_SQLITE_CANTOPEN, config_,
+                "failed to openDB errno[ " + std::to_string(errno) + "]," +
                     SqliteUtils::GetFileStatInfo(blockedInfo.second) +
                     "blockedPath=" + blockedPath + ", " + diagMsg +
                     ", parent dir modes:" + SqliteUtils::GetParentModes(dbPath) +
                     ", procUid:" + std::to_string(GetUid()) +
                     ", procGid:" + std::to_string(GetGid()) +
-                    ", procUmask:" + std::to_string(SqliteUtils::GetProcUmask()), true));
+                    ", procUmask:" + std::to_string(SqliteUtils::GetProcUmask()), true);
+            faultEvent.SetSubCaseDesc(RdbSubCase::FILE_PERMISSION);
+            Reportor::ReportFault(faultEvent);
         }
 #if !defined(WINDOWS_PLATFORM) && !defined(MAC_PLATFORM)
         auto const pos = dbPath.find_last_of("\\/");
@@ -1711,9 +1713,10 @@ int SqliteConnection::ExchangeSlaverToMaster(bool isRestore, bool verifyDb, std:
     if (err != E_OK) {
         if (isRestore) {
             RdbStoreConfig slaveCfg(SqliteUtils::GetSlavePath(config_));
-            Reportor::ReportCorruptedOnce(Reportor::Create(slaveCfg, E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN,
-                std::string(RdbSubCase::TAG) + RdbSubCase::BOTH_FAIL + ",master corrupt and slave corrupt on restore",
-                true, true));
+            auto corruptedEvent = Reportor::Create(slaveCfg, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL,
+                "master corrupt and slave corrupt on restore", true, true);
+            corruptedEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+            Reportor::ReportCorruptedOnce(corruptedEvent);
         }
         ReleaseTempSlaveConnection();
         *curStatus = SlaveStatus::UNDEFINED;
@@ -2196,8 +2199,10 @@ int SqliteConnection::VerifySlaveIntegrity(const bool isForceRestore)
     if (err == E_OK && (static_cast<std::string>(obj) != "ok")) {
         LOG_ERROR("slave corrupt, ret:%{public}s, cRet:%{public}d, %{public}d", static_cast<std::string>(obj).c_str(),
             err, errno);
-        Reportor::ReportCorruptedOnce(Reportor::Create(slaveCfg, E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN,
-            std::string(RdbSubCase::TAG) + RdbSubCase::BOTH_FAIL + ",Verify Slave Integrity failed", true, true));
+        auto corruptedEvent = Reportor::Create(slaveCfg, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL,
+            "Verify Slave Integrity failed", true, true);
+        corruptedEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+        Reportor::ReportCorruptedOnce(corruptedEvent);
         SqliteUtils::SetSlaveInvalid(config_.GetPath(), SqliteUtils::SlaveInvalidReason::VERIFY_FAILED);
         return E_SQLITE_CORRUPT;
     }
@@ -2258,8 +2263,10 @@ void SqliteConnection::BinlogOnErrFunc(void *pCtx, int errNo, char *errMsg, cons
     std::string dbPathStr(dbPath);
     LOG_WARN("binlog failed, mark invalid %{public}s", SqliteUtils::Anonymous(dbPathStr).c_str());
     RdbStoreConfig cfg(dbPathStr);
-    Reportor::ReportCorruptedOnce(Reportor::Create(cfg, E_DFX_MASTER_SLAVE_BOTH_FAIL_OPEN,
-        std::string(RdbSubCase::TAG) + RdbSubCase::NON_FIRST_PAGE + ",slave binlog replay failed", true, true));
+    auto corruptedEvent = Reportor::Create(cfg, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL,
+        "slave binlog replay failed", true, true);
+    corruptedEvent.subCaseDesc = RdbSubCase::NON_FIRST_PAGE;
+    Reportor::ReportCorruptedOnce(corruptedEvent);
     SqliteUtils::SetSlaveInvalid(dbPathStr, SqliteUtils::SlaveInvalidReason::BINLOG_REPLAY_FAILED);
 }
 
