@@ -2991,6 +2991,29 @@ int RdbStoreImpl::RollBack(int64_t trxId)
     return ExecuteByTrxId(ROLLBACK_TRANSACTION_SQL, trxId, true);
 }
 
+int RdbStoreImpl::ExecuteCommitStatement(const std::string &sqlStr, size_t id, bool outer)
+{
+    auto [err, statement] = GetStatement(sqlStr);
+    if (statement == nullptr) {
+        if (err == E_DATABASE_BUSY) {
+            Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, err, config_.GetBundleName(), "ComBusy"));
+        }
+        LOG_ERROR("statement error. [%{public}zu, %{public}s]", id, SqliteUtils::Anonymous(name_).c_str());
+        auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", E_DATABASE_BUSY, outer);
+        return E_DATABASE_BUSY;
+    }
+    err = statement->Execute();
+    if (err != E_OK) {
+        if (err == E_SQLITE_BUSY || err == E_SQLITE_LOCKED) {
+            Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, err, config_.GetBundleName(), "ComBusy"));
+        }
+        LOG_ERROR("failed. [%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
+        auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", err, outer);
+        return err;
+    }
+    return E_OK;
+}
+
 /**
 * Begins a transaction in EXCLUSIVE mode.
 */
@@ -3021,22 +3044,8 @@ int RdbStoreImpl::Commit()
         auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", E_OK, outer);
         return E_OK;
     }
-    auto [err, statement] = GetStatement(sqlStr);
-    if (statement == nullptr) {
-        if (err == E_DATABASE_BUSY) {
-            Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, err, config_.GetBundleName(), "ComBusy"));
-        }
-        LOG_ERROR("statement error. [%{public}zu, %{public}s]", id, SqliteUtils::Anonymous(name_).c_str());
-        auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", E_DATABASE_BUSY, outer);
-        return E_DATABASE_BUSY;
-    }
-    err = statement->Execute();
+    auto err = ExecuteCommitStatement(sqlStr, id, outer);
     if (err != E_OK) {
-        if (err == E_SQLITE_BUSY || err == E_SQLITE_LOCKED) {
-            Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, err, config_.GetBundleName(), "ComBusy"));
-        }
-        LOG_ERROR("failed. [%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
-        auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", err, outer);
         return err;
     }
     pool->GetTransactionStack().pop();

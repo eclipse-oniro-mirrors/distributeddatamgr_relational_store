@@ -253,6 +253,7 @@ private:
     int32_t SetSecurityLabel(const RdbStoreConfig &config);
     int ExecuteByTrxId(const std::string &sql, int64_t trxId, bool closeConnAfterExecute = false,
         const std::vector<ValueObject> &bindArgs = {});
+    int ExecuteCommitStatement(const std::string &sqlStr, size_t id, bool outer);
     std::pair<int32_t, ValueObject> HandleDifferentSqlTypes(
         std::shared_ptr<Statement> &&statement, const std::string &sql, int32_t code, int sqlType);
     int CheckAttach(const std::string &sql);
