@@ -119,7 +119,7 @@ void RdbFaultHiViewReporter::ReportSlaveInconsistent(const RdbStoreConfig &confi
         return;
     }
     RdbStoreConfig slaveCfg(SqliteUtils::GetSlavePath(config));
-    auto event = Create(slaveCfg, E_DFX_MASTER_SLAVE_INCONSISTENT, msg, true, true);
+    auto event = Create(slaveCfg, E_DFX_MASTER_SLAVE_INCONSISTENT, msg, false, true);
     event.subCaseDesc = RdbSubCase::INCONSISTENT;
     DfxInfo dfxInfo;
     CollectDfxInfo(config, dfxInfo);
