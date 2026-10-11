@@ -78,6 +78,10 @@ constexpr SqliteUtils::SqlType SqliteUtils::SQL_TYPE_MAP[];
 constexpr const char *SqliteUtils::ON_CONFLICT_CLAUSE[];
 constexpr char const *DATABASE = "database";
 
+static constexpr char UMASK_KEY[] = "Umask:";
+static constexpr size_t UMASK_KEY_LEN = sizeof(UMASK_KEY) - 1;
+static constexpr int OCTAL_BASE = 8;
+
 const std::unordered_map<int32_t, int> SqliteUtils::STATUS_MAP = {
     { DBStatus::OK, E_OK },
     { DBStatus::BUSY, E_SQLITE_BUSY },
@@ -879,10 +883,6 @@ std::string SqliteUtils::ReadSlaveInvalidReason(const std::string &dbPath)
     }
     return reasonStr;
 }
-
-static constexpr char UMASK_KEY[] = "Umask:";
-static constexpr size_t UMASK_KEY_LEN = sizeof(UMASK_KEY) - 1;
-static constexpr int OCTAL_BASE = 8;
 
 uint32_t SqliteUtils::GetProcUmask()
 {
