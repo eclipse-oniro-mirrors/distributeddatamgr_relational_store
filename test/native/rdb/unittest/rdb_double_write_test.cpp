@@ -2583,3 +2583,37 @@ HWTEST_F(RdbDoubleWriteTest, ManualTrigger_BackupSuccessReleasesTransConn_011, T
     EXPECT_EQ(ec2, E_OK);
     EXPECT_NE(c2, nullptr);
 }
+
+/**
+ * @tc.name: RdbStore_DoubleWrite_RestoreCorruptSlave
+ * @tc.desc: test restore reports error when slave db file is corrupted
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbDoubleWriteTest, RdbStore_DoubleWrite_RestoreCorruptSlave, TestSize.Level1)
+{
+    InitDb(HAMode::MANUAL_TRIGGER, true, true);
+    int64_t id = 10;
+    int count = 100;
+    Insert(id, count);
+    EXPECT_EQ(store->Backup(std::string(""), {}), E_OK);
+    RdbDoubleWriteTest::CheckNumber(slaveStore, count);
+    slaveStore = nullptr;
+    store = nullptr;
+    std::fstream file(SLAVE_DATABASE_NAME, std::ios::in | std::ios::out | std::ios::binary);
+    ASSERT_TRUE(file.is_open());
+    file.seekp(30, std::ios::beg);
+    ASSERT_TRUE(file.good());
+    char bytes[2] = { 0x6, 0x6 };
+    file.write(bytes, 2);
+    ASSERT_TRUE(file.good());
+    file.close();
+    SqliteUtils::DeleteFile(RdbDoubleWriteTest::DATABASE_NAME + "-dwr");
+    SqliteUtils::DeleteFile(RdbDoubleWriteTest::SLAVE_DATABASE_NAME + "-dwr");
+    int errCode = E_OK;
+    RdbStoreConfig config(RdbDoubleWriteTest::DATABASE_NAME);
+    config.SetHaMode(HAMode::MANUAL_TRIGGER);
+    DoubleWriteTestOpenCallback helper;
+    store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(store, nullptr);
+    EXPECT_NE(store->Restore(std::string(""), {}), E_OK);
+}

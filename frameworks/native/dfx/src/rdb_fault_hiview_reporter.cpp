@@ -105,11 +105,49 @@ void RdbFaultHiViewReporter::ReportCorruptedOnce(const RdbCorruptedEvent &eventI
         RdbCorruptedEvent eventInfoAppend = eventInfo;
         eventInfoAppend.appendix += SqliteUtils::FormatDebugInfo(eventInfoAppend.debugInfos, "");
         eventInfoAppend.appendix += SqliteUtils::FormatDfxInfo(eventInfo.dfxInfo);
-        LOG_WARN("Corrupted %{public}s errCode:0x%{public}x [%{public}s]",
+        LOG_WARN("Corrupted %{public}s errCode:0x%{public}x subCase:%{public}s [%{public}s]",
             SqliteUtils::Anonymous(eventInfoAppend.storeName).c_str(), eventInfoAppend.errorCode,
-            eventInfoAppend.appendix.c_str());
+            eventInfoAppend.subCaseDesc.c_str(), eventInfoAppend.appendix.c_str());
         ReportCorrupted(eventInfoAppend);
         CreateCorruptedFlag(eventInfo.path);
+    }
+}
+
+void RdbFaultHiViewReporter::ReportSlaveInconsistent(const RdbStoreConfig &config, const std::string &msg)
+{
+    if (SqliteUtils::IsSlaveInvalid(config.GetPath())) {
+        return;
+    }
+    RdbStoreConfig slaveCfg(SqliteUtils::GetSlavePath(config));
+    auto event = Create(slaveCfg, E_DFX_MASTER_SLAVE_INCONSISTENT, msg, false, true);
+    event.subCaseDesc = RdbSubCase::INCONSISTENT;
+    DfxInfo dfxInfo;
+    CollectDfxInfo(config, dfxInfo);
+    event.appendix += SqliteUtils::FormatDebugInfo(event.debugInfos, "");
+    event.appendix += SqliteUtils::FormatDfxInfo(dfxInfo);
+    ReportCorrupted(event);
+}
+
+void RdbFaultHiViewReporter::CollectDfxInfo(const RdbStoreConfig &config, DfxInfo &dfxInfo)
+{
+    dfxInfo.procUid_ = GetUid();
+    dfxInfo.procGid_ = GetGid();
+    dfxInfo.procUmask_ = SqliteUtils::GetProcUmask();
+    std::string dbPath = config.GetPath();
+    dfxInfo.slaveInterrupted_ = SqliteUtils::IsSlaveInterrupted(dbPath);
+    dfxInfo.slaveInvalidReason_ = SqliteUtils::ReadSlaveInvalidReason(dbPath);
+}
+
+void RdbFaultHiViewReporter::ApplyInodeSubCase(RdbCorruptedEvent &eventInfo)
+{
+    if (!eventInfo.subCaseDesc.empty()) {
+        return;
+    }
+    for (auto &item : eventInfo.debugInfos) {
+        if (item.second.oldInode_ != 0 && item.second.oldInode_ != item.second.inode_) {
+            eventInfo.subCaseDesc = RdbSubCase::INODE_MISMATCH;
+            return;
+        }
     }
 }
 
@@ -138,6 +176,7 @@ void RdbFaultHiViewReporter::ReportCorrupted(const RdbCorruptedEvent &eventInfo)
     std::string storeName = eventInfo.storeName;
     uint32_t checkType = eventInfo.integrityCheck;
     std::string appendInfo = eventInfo.appendix;
+    std::string subCase = eventInfo.subCaseDesc;
     std::string occurTime = RdbTimeUtils::GetCurSysTimeWithMs();
     HiSysEventParam params[] = {
         { .name = "BUNDLE_NAME", .t = HISYSEVENT_STRING, .v = { .s = bundleName.data() }, .arraySize = 0 },
@@ -150,6 +189,7 @@ void RdbFaultHiViewReporter::ReportCorrupted(const RdbCorruptedEvent &eventInfo)
         { .name = "INTEGRITY_CHECK", .t = HISYSEVENT_UINT32, .v = { .ui32 = checkType }, .arraySize = 0 },
         { .name = "ERROR_CODE", .t = HISYSEVENT_UINT32, .v = { .ui32 = eventInfo.errorCode }, .arraySize = 0 },
         { .name = "ERRNO", .t = HISYSEVENT_INT32, .v = { .i32 = eventInfo.systemErrorNo }, .arraySize = 0 },
+        { .name = "SUB_CASE", .t = HISYSEVENT_STRING, .v = { .s = subCase.data() }, .arraySize = 0 },
         { .name = "APPENDIX", .t = HISYSEVENT_STRING, .v = { .s = appendInfo.data() }, .arraySize = 0 },
         { .name = "ERROR_TIME", .t = HISYSEVENT_STRING, .v = { .s = occurTime.data() }, .arraySize = 0 },
     };
@@ -225,7 +265,8 @@ void RdbFaultHiViewReporter::DeleteCorruptedFlag(const std::string &dbPath)
 }
 
 RdbCorruptedEvent RdbFaultHiViewReporter::Create(
-    const RdbStoreConfig &config, int32_t errCode, const std::string &appendix, bool needSyncParaFromSrv)
+    const RdbStoreConfig &config, int32_t errCode, const std::string &appendix, bool needSyncParaFromSrv,
+    bool skipDfxInfo)
 {
     RdbCorruptedEvent eventInfo;
     eventInfo.bundleName = config.GetBundleName();
@@ -247,6 +288,10 @@ RdbCorruptedEvent RdbFaultHiViewReporter::Create(
         if (collector_(config, serviceDebugInfos, eventInfo.dfxInfo) == E_OK) {
             Update(eventInfo.debugInfos, serviceDebugInfos);
         }
+    }
+    ApplyInodeSubCase(eventInfo);
+    if (!skipDfxInfo) {
+        CollectDfxInfo(config, eventInfo.dfxInfo);
     }
     return eventInfo;
 }
@@ -349,12 +394,14 @@ void RdbFaultEvent::Report() const
     std::string bundleName = GetBundleName();
     std::string faultType = GetFaultType();
     std::string appendInfo = GetLogInfo();
+    std::string subCase = GetSubCaseDesc();
     HiSysEventParam params[] = {
         { .name = "FAULT_TIME", .t = HISYSEVENT_STRING, .v = { .s = occurTime.data() }, .arraySize = 0 },
         { .name = "FAULT_TYPE", .t = HISYSEVENT_STRING, .v = { .s = faultType.data() }, .arraySize = 0 },
         { .name = "BUNDLE_NAME", .t = HISYSEVENT_STRING, .v = { .s = bundleName.data() }, .arraySize = 0 },
         { .name = "ERROR_CODE", .t = HISYSEVENT_INT32, .v = { .ui32 = static_cast<uint32_t>(errorCode_) },
             .arraySize = 0 },
+        { .name = "SUB_CASE", .t = HISYSEVENT_STRING, .v = { .s = subCase.data() }, .arraySize = 0 },
         { .name = "APPENDIX", .t = HISYSEVENT_STRING, .v = { .s = appendInfo.data() }, .arraySize = 0 },
     };
     auto size = sizeof(params) / sizeof(params[0]);
@@ -376,6 +423,7 @@ void RdbFaultDbFileEvent::Report() const
     std::string storeName = config_.GetName();
     std::string businessType = config_.GetDBType() == DB_SQLITE ? "SQLITE" : "VECTOR";
     std::string appendInfo = BuildLogInfo();
+    std::string subCase = GetSubCaseDesc();
 
     HiSysEventParam params[] = {
         { .name = "FAULT_TIME", .t = HISYSEVENT_STRING, .v = { .s = occurTime.data() }, .arraySize = 0 },
@@ -386,6 +434,7 @@ void RdbFaultDbFileEvent::Report() const
         { .name = "BUSINESS_TYPE", .t = HISYSEVENT_STRING, .v = { .s = businessType.data() }, .arraySize = 0 },
         { .name = "ERROR_CODE", .t = HISYSEVENT_INT32, .v = { .ui32 = static_cast<uint32_t>(GetErrCode())},
             .arraySize = 0 },
+        { .name = "SUB_CASE", .t = HISYSEVENT_STRING, .v = { .s = subCase.data() }, .arraySize = 0 },
         { .name = "APPENDIX", .t = HISYSEVENT_STRING, .v = { .s = appendInfo.data() }, .arraySize = 0 },
     };
     auto size = sizeof(params) / sizeof(params[0]);

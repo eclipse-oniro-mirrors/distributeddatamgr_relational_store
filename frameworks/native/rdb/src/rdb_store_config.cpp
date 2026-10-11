@@ -400,6 +400,8 @@ int32_t RdbStoreConfig::GenerateEncryptedKey() const
 
     auto name = bundleName_;
     if (name.empty()) {
+        RdbFaultHiViewReporter::ReportFault(RdbFaultDbFileEvent(RdbFaultType::FT_OPEN, E_ROOT_KEY_FAULT, *this,
+            "bundleName is not configured, fallback to path-based name"));
         name = std::string(path_).substr(0, path_.rfind("/") + 1);
     }
     using KeyFileType = RdbSecurityManager::KeyFileType;

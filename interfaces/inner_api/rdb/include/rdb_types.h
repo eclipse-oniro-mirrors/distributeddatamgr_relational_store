@@ -101,6 +101,12 @@ struct DistributedInfo {
 struct RdbDfxInfo {
     std::string lastOpenTime_;
     int curUserId_;
+    uint32_t procUid_ = 0;
+    uint32_t procGid_ = 0;
+    uint32_t procUmask_ = 0;
+    bool slaveInterrupted_ = false;
+    std::string slaveInvalidReason_;
+    std::string masterSlaveDiff_;
 };
 
 struct QueryOptions {

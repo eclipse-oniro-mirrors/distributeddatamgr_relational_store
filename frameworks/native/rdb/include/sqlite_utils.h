@@ -124,6 +124,8 @@ public:
     static bool IsSupportBinlog(const RdbStoreConfig &config);
     static bool IsSlaveInvalid(const std::string &dbPath);
     static bool IsSlaveInterrupted(const std::string &dbPath);
+    static std::string ReadSlaveInvalidReason(const std::string &dbPath);
+    static uint32_t GetProcUmask();
     static void SetSlaveValid(const std::string &dbPath);
     static const char *HmacAlgoDescription(int32_t hmacAlgo);
     static const char *KdfAlgoDescription(int32_t kdfAlgo);

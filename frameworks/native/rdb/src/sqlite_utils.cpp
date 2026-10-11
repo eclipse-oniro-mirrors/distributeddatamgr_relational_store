@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <charconv>
 #include <climits>
 #include <cstddef>
 #include <cstdio>
@@ -78,6 +79,10 @@ constexpr SqliteUtils::SqlType SqliteUtils::SQL_TYPE_MAP[];
 constexpr const char *SqliteUtils::ON_CONFLICT_CLAUSE[];
 constexpr char const *DATABASE = "database";
 
+static constexpr char UMASK_KEY[] = "Umask:";
+static constexpr size_t UMASK_KEY_LEN = sizeof(UMASK_KEY) - 1;
+static constexpr int OCTAL_BASE = 8;
+
 const std::unordered_map<int32_t, int> SqliteUtils::STATUS_MAP = {
     { DBStatus::OK, E_OK },
     { DBStatus::BUSY, E_SQLITE_BUSY },
@@ -86,7 +91,6 @@ const std::unordered_map<int32_t, int> SqliteUtils::STATUS_MAP = {
     { DBStatus::DB_ERROR, E_SQLITE_ERROR },
     { DBStatus::NOT_SUPPORT, E_NOT_SUPPORT_NEW }
 };
-
 
 int SqliteUtils::ConvertRdbStatusNative(int32_t status)
 {
@@ -855,6 +859,22 @@ bool SqliteUtils::IsSlaveInvalid(const std::string &dbPath)
     if (access(filePath.c_str(), F_OK) != 0) {
         return false;
     }
+    std::string reasonStr = ReadSlaveInvalidReason(dbPath);
+    LOG_WARN("slave is invalid:%{public}s, reason:%{public}s", Anonymous(dbPath).c_str(), reasonStr.c_str());
+    return true;
+}
+
+bool SqliteUtils::IsSlaveInterrupted(const std::string &dbPath)
+{
+    return access((dbPath + SLAVE_INTERRUPT).c_str(), F_OK) == 0;
+}
+
+std::string SqliteUtils::ReadSlaveInvalidReason(const std::string &dbPath)
+{
+    std::string filePath = dbPath + SLAVE_FAILURE;
+    if (access(filePath.c_str(), F_OK) != 0) {
+        return "";
+    }
     std::string timeStr;
     std::string reasonStr;
     std::ifstream file(filePath, std::ios::binary);
@@ -862,14 +882,32 @@ bool SqliteUtils::IsSlaveInvalid(const std::string &dbPath)
         std::getline(file, timeStr);
         std::getline(file, reasonStr);
     }
-    LOG_WARN("slave is invalid:%{public}s, reason:%{public}s, time:%{public}s", Anonymous(dbPath).c_str(),
-        reasonStr.c_str(), timeStr.c_str());
-    return true;
+    return reasonStr;
 }
 
-bool SqliteUtils::IsSlaveInterrupted(const std::string &dbPath)
+uint32_t SqliteUtils::GetProcUmask()
 {
-    return access((dbPath + SLAVE_INTERRUPT).c_str(), F_OK) == 0;
+    std::ifstream file("/proc/self/status", std::ios::binary);
+    if (!file.is_open()) {
+        return 0;
+    }
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.compare(0, UMASK_KEY_LEN, UMASK_KEY) == 0) {
+            const char *start = line.c_str() + UMASK_KEY_LEN;
+            const char *end = line.c_str() + line.size();
+            while (start < end && (*start == '\t' || *start == ' ')) {
+                start++;
+            }
+            unsigned int val = 0;
+            auto [ptr, ec] = std::from_chars(start, end, val, OCTAL_BASE);
+            if (ec == std::errc()) {
+                return static_cast<uint32_t>(val);
+            }
+            break;
+        }
+    }
+    return 0;
 }
 
 bool SqliteUtils::IsFileEmpty(const std::string &filePath)
@@ -1217,7 +1255,12 @@ std::string SqliteUtils::FormatDebugInfoBrief(const std::map<std::string, DebugI
 std::string SqliteUtils::FormatDfxInfo(const DfxInfo &dfxInfo)
 {
     std::stringstream oss;
-    oss << "LastOpen:" << dfxInfo.lastOpenTime_ << "," << "CUR_USER:" << dfxInfo.curUserId_;
+    oss << "LastOpen:" << dfxInfo.lastOpenTime_ << "," << "CUR_USER:" << dfxInfo.curUserId_
+        << ",UID:" << dfxInfo.procUid_ << ",GID:" << dfxInfo.procGid_
+        << ",UMASK:" << std::oct << dfxInfo.procUmask_ << std::dec
+        << ",SLV_INTR:" << dfxInfo.slaveInterrupted_
+        << ",SLV_REASON:" << dfxInfo.slaveInvalidReason_
+        << ",MS_DIFF:" << dfxInfo.masterSlaveDiff_;
     return oss.str();
 }
 

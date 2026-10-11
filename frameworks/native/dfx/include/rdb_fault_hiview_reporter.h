@@ -43,6 +43,7 @@ struct RdbCorruptedEvent {
     uint32_t integrityCheck;
     uint32_t errorCode;
     int32_t systemErrorNo;
+    std::string subCaseDesc;
     std::string appendix;
     time_t errorOccurTime;
     std::string path;
@@ -53,6 +54,15 @@ struct RdbCorruptedEvent {
 struct RdbFaultCode {
     int nativeCode;
     std::atomic<uint8_t> faultCounter;
+};
+
+struct RdbSubCase {
+    static constexpr const char *FIRST_PAGE = "FirstPage";
+    static constexpr const char *NON_FIRST_PAGE = "NonFirstPage";
+    static constexpr const char *INODE_MISMATCH = "InodeMismatch";
+    static constexpr const char *FILE_PERMISSION = "FilePermission";
+    static constexpr const char *BOTH_FAIL = "MasterSlaveBothFail";
+    static constexpr const char *INCONSISTENT = "MasterSlaveInconsistent";
 };
 
 // Fault Type Define
@@ -80,6 +90,8 @@ public:
     std::string GetFaultType() const { return faultType_; }
     int32_t GetErrCode() const { return errorCode_; }
     std::string GetLogInfo() const { return custLog_; };
+    std::string GetSubCaseDesc() const { return subCaseDesc_; }
+    void SetSubCaseDesc(const std::string &subCase) { subCaseDesc_ = subCase; }
     virtual void Report() const;
     API_EXPORT virtual ~RdbFaultEvent();
 
@@ -90,6 +102,7 @@ private:
     std::string bundleName_;
     std::string faultType_;
     std::string custLog_;
+    std::string subCaseDesc_;
     int32_t errorCode_;
 };
 
@@ -114,10 +127,11 @@ public:
     using Collector =  int32_t (*)(const RdbStoreConfig &config, std::map<std::string,
         DistributedRdb::RdbDebugInfo>&, DistributedRdb::RdbDfxInfo&);
     static RdbCorruptedEvent Create(const RdbStoreConfig &config, int32_t errCode, const std::string &appendix = "",
-        bool needSyncParaFromSrv = true);
+        bool needSyncParaFromSrv = true, bool skipDfxInfo = false);
     static bool RegCollector(Collector collector);
     static void ReportCorrupted(const RdbCorruptedEvent &eventInfo);
     static void ReportCorruptedOnce(const RdbCorruptedEvent &eventInfo);
+    static void ReportSlaveInconsistent(const RdbStoreConfig &config, const std::string &msg);
     API_EXPORT static void ReportFault(const RdbFaultEvent &faultEvent);
     static void ReportRestore(const RdbCorruptedEvent &eventInfo, bool repair = true);
     static bool IsReportCorruptedFault(const std::string &dbPath);
@@ -131,6 +145,8 @@ private:
     static void DeleteCorruptedFlag(const std::string &dbPath);
     static bool IsReportFault(int32_t errCode);
     static std::atomic<uint8_t> *GetFaultCounter(int32_t errCode);
+    static void CollectDfxInfo(const RdbStoreConfig &config, DfxInfo &dfxInfo);
+    static void ApplyInodeSubCase(RdbCorruptedEvent &eventInfo);
     static Collector collector_;
     static RdbFaultCode faultCounters_[];
     static bool memCorruptReportedFlg_;

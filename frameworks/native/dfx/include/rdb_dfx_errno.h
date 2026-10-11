@@ -147,6 +147,16 @@ static constexpr int E_DFX_DELETE_RDB_STORE = (E_DFX_BASE + 0x18);
  * @brief Only use for dfx, waiting for async AfterOpen timed out.
  */
 static constexpr int E_DFX_WAIT_AFTER_OPEN_TIMEOUT = (E_DFX_BASE + 0x19);
+
+/**
+ * @brief Only use for dfx, master and slave both corrupt (open/restore distinguished by appendix).
+ */
+static constexpr int E_DFX_MASTER_SLAVE_BOTH_ABNORMAL = (E_DFX_BASE + 0x1A);
+
+/**
+ * @brief Only use for dfx, master and slave table or index count inconsistent.
+ */
+static constexpr int E_DFX_MASTER_SLAVE_INCONSISTENT = (E_DFX_BASE + 0x1B);
 } // namespace NativeRdb
 } // namespace OHOS
 
