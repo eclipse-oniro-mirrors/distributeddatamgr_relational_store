@@ -17,7 +17,6 @@
 #define NATIVE_RDB_SQLITE_UTILS_H
 
 #include <map>
-#include <mutex>
 #include <string>
 #include <sys/stat.h>
 #include <unordered_map>
@@ -184,9 +183,6 @@ private:
     static constexpr const char *ON_CONFLICT_CLAUSE[CONFLICT_CLAUSE_COUNT] = { "", " OR ROLLBACK", " OR ABORT",
         " OR FAIL", " OR IGNORE", " OR REPLACE" };
     static const std::unordered_map<int32_t, int> STATUS_MAP;
-    static std::mutex procUmaskMutex_;
-    static uint32_t procUmaskCached_;
-    static bool procUmaskInitialized_;
 
     static std::string GetAnonymousName(const std::string &fileName);
     static std::string AnonymousDigits(const std::string &digits, bool fullyAnonymize);

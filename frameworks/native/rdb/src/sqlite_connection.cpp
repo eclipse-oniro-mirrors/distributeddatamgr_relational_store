@@ -2555,6 +2555,7 @@ void SqliteConnection::DeleteCorruptSlave(const std::string &path)
 {
     LOG_WARN("slave corrupt, rebuild:%{public}s, handle:%{public}d", SqliteUtils::Anonymous(path).c_str(),
         dbHandle_ != nullptr);
+    Reportor::ReportSlaveInconsistent(config_, "slave exchange failed, delete corrupt slave");
     if (IsRowForSearch()) {
         if (dbHandle_ != nullptr) {
             int err = sqlite3_clean_binlog(dbHandle_, BinlogFileCleanModeE::BINLOG_FILE_CLEAN_DONATED_MODE);
@@ -2567,7 +2568,6 @@ void SqliteConnection::DeleteCorruptSlave(const std::string &path)
         }
         slaveConnection_ = nullptr;
         (void)Delete(path);
-        Reportor::ReportSlaveInconsistent(config_, "slave exchange failed, delete corrupt slave");
         SqliteUtils::SetSlaveInvalid(config_.GetPath(), SqliteUtils::SlaveInvalidReason::EXCHANGE_FAILED);
         return;
     }
