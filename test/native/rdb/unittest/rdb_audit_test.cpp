@@ -182,12 +182,22 @@ void DrainPendingAuditWrites()
 {
     auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(WAIT_TIMEOUT_MS);
     auto observeEnd = std::chrono::steady_clock::now() + std::chrono::milliseconds(DRAIN_OBSERVE_MS);
+    size_t prevLines = CountLines(ReadFileContent(EventsLogPath()));
     while (std::chrono::steady_clock::now() < deadline) {
+        bool changed = false;
         if (FileExists(AuditJsonPath())) {
             unlink(AuditJsonPath().c_str());
+            changed = true;
+        }
+        size_t curLines = CountLines(ReadFileContent(EventsLogPath()));
+        if (curLines != prevLines) {
+            prevLines = curLines;
+            changed = true;
+        }
+        if (changed) {
             observeEnd = std::chrono::steady_clock::now() + std::chrono::milliseconds(DRAIN_OBSERVE_MS);
         } else if (std::chrono::steady_clock::now() >= observeEnd) {
-            return; // stayed absent for the full observation window
+            return;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(POLL_INTERVAL_MS));
     }
@@ -202,9 +212,9 @@ void SetupAudit()
     MakeDirRecursive(AuditDir(), AUDIT_DIR_MODE);
     RdbAuditLoggerManager::GetInstance().Init(AuditDir());
     RdbDbLoggerManager::GetInstance().Init(AuditDir());
+    DrainPendingAuditWrites();
     truncate(EventsLogPath().c_str(), 0);
     unlink(AuditJsonPath().c_str());
-    DrainPendingAuditWrites();
 }
 
 size_t WaitEventLines(size_t expected, int timeoutMs = WAIT_TIMEOUT_MS)
