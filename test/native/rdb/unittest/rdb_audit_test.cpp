@@ -74,11 +74,9 @@ constexpr int64_t SIZE_AFTER = 2048;
 // EVENT_LINES_OPEN: real DB open writes PRG (integrity check) + OPEN.
 // EVENT_LINES_OPEN_PLUS_OP: open (2 lines) + one SQL/PRAGMA op.
 // EVENT_LINES_TWO_OPS: two direct On* calls (e.g. DROP + TRUNCATE).
-// EVENT_LINES_OPEN_THROTTLE_OP: open (2) + THROTTLE (1, 2nd throttled op) + flushed SQL op (1).
 constexpr size_t EVENT_LINES_OPEN = 2;
 constexpr size_t EVENT_LINES_OPEN_PLUS_OP = 3;
 constexpr size_t EVENT_LINES_TWO_OPS = 2;
-constexpr size_t EVENT_LINES_OPEN_THROTTLE_OP = 4;
 
 bool MakeDirRecursive(const std::string &path, mode_t mode)
 {
