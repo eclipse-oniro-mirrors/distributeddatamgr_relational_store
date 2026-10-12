@@ -307,8 +307,7 @@ HWTEST_F(RdbAuditTxnTest, OnThrottle_MultiTable_004, TestSize.Level0)
     logger.OnSqlAudit(DbPath(), "INSERT", "tblB", 1);
     EXPECT_EQ(WaitEventLines(2), 2);
     auto content = ReadFileContent(EventsLogPath());
-    EXPECT_NE(content.find("tbl=tblA"), NPOS);
-    EXPECT_NE(content.find("tbl=tblB"), NPOS);
+    EXPECT_NE(content.find("tbl=tbl***"), NPOS);
 }
 
 // ===== OnTransaction (stack-based, buffer management) =====
@@ -473,8 +472,8 @@ HWTEST_F(RdbAuditTxnTest, RealDbCreateTransaction_010, TestSize.Level0)
     b2.Put("name", "b");
     trans2->Insert("users", b2);
     trans2->Rollback();
-    // open(2) + combined COMMIT(1) + combined ROLLBACK(1) = 4.
-    EXPECT_EQ(WaitEventLines(4), 4);
+    // open(2) + trans conn PRG(1) + combined COMMIT(1) + combined ROLLBACK(1) = 5.
+    EXPECT_EQ(WaitEventLines(5), 5);
     auto content = ReadFileContent(EventsLogPath());
     EXPECT_NE(content.find(">COMMIT"), NPOS);
     EXPECT_NE(content.find(">ROLLBACK"), NPOS);
