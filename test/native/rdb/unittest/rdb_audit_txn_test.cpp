@@ -257,12 +257,12 @@ HWTEST_F(RdbAuditTxnTest, OnThrottle_EarlyFlush_002, TestSize.Level0)
     logger.OnSqlAudit(DbPath(), "INSERT", "tblA", 1);
     // 2nd call: suppressed, emits THROTTLE.
     logger.OnSqlAudit(DbPath(), "INSERT", "tblA", 1);
-    // Calls 3..1000: suppressed silently.
-    for (int i = 0; i < 998; ++i) {
+    // Calls 3..999: suppressed silently (accumulated = 2 + 997 = 999, below threshold).
+    for (int i = 0; i < 997; ++i) {
         logger.OnSqlAudit(DbPath(), "INSERT", "tblA", 1);
     }
     EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), 1); // only THROTTLE so far
-    // 1001st call: accumulated=1001 >= 1000 → early flush.
+    // 1000th call: accumulated = 999 + 1 = 1000 >= 1000 → early flush.
     logger.OnSqlAudit(DbPath(), "INSERT", "tblA", 1);
     EXPECT_EQ(WaitEventLines(2, 10000), 2);
     auto content = ReadFileContent(EventsLogPath());
