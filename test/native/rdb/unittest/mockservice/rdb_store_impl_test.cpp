@@ -18,6 +18,12 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <vector>
+
 #include "common.h"
 #include "connection_mock.h"
 #include "dataobs_mgr_client_mock.h"
@@ -1682,6 +1688,109 @@ HWTEST_F(RdbStoreImplConditionTest, RegisterDataChangeCallback_Test_001, TestSiz
     storeImpl->connectionPool_ = nullptr;
     auto res = storeImpl->RegisterDataChangeCallback();
     EXPECT_EQ(E_ALREADY_CLOSED, res);
+}
+
+namespace {
+struct ConcurrentRegistrationResult {
+    std::vector<int32_t> resultCodes;
+    std::vector<std::shared_ptr<DelayNotify>> notifiers;
+    bool allAttemptsStarted = false;
+    bool registrationLocked = false;
+};
+
+ConcurrentRegistrationResult RunConcurrentRegistration(
+    const std::shared_ptr<RdbStoreImpl> &storeImpl, std::shared_ptr<Connection> &heldConnection)
+{
+    constexpr int32_t THREAD_COUNT = 8;
+    std::mutex startMutex;
+    std::condition_variable startCondition;
+    int32_t readyCount = 0;
+    int32_t attemptCount = 0;
+    bool start = false;
+    ConcurrentRegistrationResult result;
+    result.resultCodes.resize(THREAD_COUNT, E_ERROR);
+    result.notifiers.resize(THREAD_COUNT);
+    std::vector<std::thread> threads;
+    threads.reserve(THREAD_COUNT);
+    for (int32_t i = 0; i < THREAD_COUNT; ++i) {
+        threads.emplace_back(
+            [storeImpl, &startMutex, &startCondition, &readyCount, &attemptCount, &start, &result, i]() {
+                {
+                    std::unique_lock<std::mutex> lock(startMutex);
+                    ++readyCount;
+                    startCondition.notify_one();
+                    startCondition.wait(lock, [&start]() { return start; });
+                    ++attemptCount;
+                }
+                startCondition.notify_one();
+                result.resultCodes[i] = storeImpl->RegisterDataChangeCallback(false);
+                result.notifiers[i] = storeImpl->GetDelayNotifier();
+            });
+    }
+    {
+        std::unique_lock<std::mutex> lock(startMutex);
+        startCondition.wait(lock, [&readyCount]() { return readyCount == THREAD_COUNT; });
+        start = true;
+    }
+    startCondition.notify_all();
+    {
+        std::unique_lock<std::mutex> lock(startMutex);
+        result.allAttemptsStarted = startCondition.wait_for(
+            lock, std::chrono::seconds(2), [&attemptCount]() { return attemptCount == THREAD_COUNT; });
+    }
+    auto lockDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (result.allAttemptsStarted && std::chrono::steady_clock::now() < lockDeadline) {
+        if (!storeImpl->dataChangeMutex_.try_lock()) {
+            result.registrationLocked = true;
+            break;
+        }
+        storeImpl->dataChangeMutex_.unlock();
+        std::this_thread::yield();
+    }
+    heldConnection.reset();
+    for (auto &thread : threads) {
+        thread.join();
+    }
+    return result;
+}
+} // namespace
+
+/**
+ * @tc.name: RegisterDataChangeCallback_ConcurrentInitialization_001
+ * @tc.desc: Concurrent registration initializes and publishes one usable notifier
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbStoreImplConditionTest, RegisterDataChangeCallback_ConcurrentInitialization_001, TestSize.Level2)
+{
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
+    config.SetReadOnly(false);
+    config.SetWriteTime(30);
+    config.SetStorageMode(StorageMode::MODE_DISK);
+    config.SetDBType(DB_SQLITE);
+    RdbStoreImplConditionTestOpenCallback helper;
+    int errCode = E_OK;
+    auto store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
+    ASSERT_NE(nullptr, store);
+    ASSERT_EQ(E_OK, errCode);
+    auto storeImpl = std::static_pointer_cast<RdbStoreImpl>(store);
+    ASSERT_FALSE(storeImpl->config_.GetRegisterInfo(RegisterType::CLIENT_OBSERVER));
+    auto connectionPool = storeImpl->GetPool();
+    ASSERT_NE(nullptr, connectionPool);
+    auto heldConnection = connectionPool->AcquireConnection(false);
+    ASSERT_NE(nullptr, heldConnection);
+
+    constexpr int32_t THREAD_COUNT = 8;
+    auto result = RunConcurrentRegistration(storeImpl, heldConnection);
+    EXPECT_TRUE(result.allAttemptsStarted);
+    EXPECT_TRUE(result.registrationLocked);
+    for (int32_t i = 0; i < THREAD_COUNT; ++i) {
+        EXPECT_EQ(E_OK, result.resultCodes[i]);
+        ASSERT_NE(nullptr, result.notifiers[i]);
+        EXPECT_EQ(result.notifiers[0], result.notifiers[i]);
+    }
+    EXPECT_TRUE(storeImpl->config_.GetRegisterInfo(RegisterType::CLIENT_OBSERVER));
+    EXPECT_NE(nullptr, result.notifiers[0]->pool_);
+    EXPECT_TRUE(result.notifiers[0]->task_);
 }
 
 /**
