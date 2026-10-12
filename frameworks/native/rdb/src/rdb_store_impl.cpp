@@ -682,8 +682,9 @@ void RdbStoreImpl::NotifyDataChange()
         LOG_ERROR("RegisterDataChangeCallback is failed, err is %{public}d.", errCode);
     }
     DistributedRdb::RdbChangedData rdbChangedData;
-    if (delayNotifier_ != nullptr) {
-        delayNotifier_->UpdateNotify(rdbChangedData, true);
+    auto delayNotifier = GetDelayNotifier();
+    if (delayNotifier != nullptr) {
+        delayNotifier->UpdateNotify(rdbChangedData, true);
     }
     if (config_.IsSearchable()) {
         auto [ret, conn] = GetConn(true);
@@ -752,8 +753,8 @@ int RdbStoreImpl::SetDistributedTables(
         LOG_ERROR("Fail to set distributed tables, error=%{public}d.", errorCode);
         return errorCode;
     }
-    if (type == DistributedRdb::DISTRIBUTED_DEVICE && !config_.GetRegisterInfo(RegisterType::CLIENT_OBSERVER)) {
-        RegisterDataChangeCallback();
+    if (type == DistributedRdb::DISTRIBUTED_DEVICE) {
+        RegisterDataChangeCallback(false);
     }
     if (type != DistributedRdb::DISTRIBUTED_CLOUD) {
         return E_OK;
@@ -1358,17 +1359,18 @@ int RdbStoreImpl::UnregisterAutoSyncCallback(std::shared_ptr<DetailProgressObser
 
 void RdbStoreImpl::InitDelayNotifier()
 {
+    std::lock_guard<std::mutex> lock(delayNotifierMutex_);
     if (delayNotifier_ != nullptr) {
         return;
     }
-    delayNotifier_ = std::make_shared<DelayNotify>();
-    if (delayNotifier_ == nullptr) {
+    auto delayNotifier = std::make_shared<DelayNotify>();
+    if (delayNotifier == nullptr) {
         LOG_ERROR("Init delay notifier failed.");
         return;
     }
     std::weak_ptr<NativeRdb::KnowledgeSchemaHelper> helper = GetKnowledgeSchemaHelper();
-    delayNotifier_->SetExecutorPool(TaskExecutor::GetInstance().GetExecutor());
-    delayNotifier_->SetTask(
+    delayNotifier->SetExecutorPool(TaskExecutor::GetInstance().GetExecutor());
+    delayNotifier->SetTask(
         [param = syncerParam_, helper = helper](
             const DistributedRdb::RdbChangedData &rdbChangedData, const RdbNotifyConfig &rdbNotifyConfig) -> int {
             if (IsKnowledgeDataChange(rdbChangedData)) {
@@ -1392,17 +1394,28 @@ void RdbStoreImpl::InitDelayNotifier()
             }
             return service->NotifyDataChange(param, rdbChangedData, rdbNotifyConfig);
         });
+    delayNotifier_ = std::move(delayNotifier);
 }
 
-int RdbStoreImpl::RegisterDataChangeCallback()
+std::shared_ptr<DelayNotify> RdbStoreImpl::GetDelayNotifier() const
 {
+    std::lock_guard<std::mutex> lock(delayNotifierMutex_);
+    return delayNotifier_;
+}
+
+int RdbStoreImpl::RegisterDataChangeCallback(bool force)
+{
+    std::lock_guard<std::mutex> lock(dataChangeMutex_);
+    if (!force && config_.GetRegisterInfo(RegisterType::CLIENT_OBSERVER)) {
+        return E_OK;
+    }
     InitDelayNotifier();
     auto connPool = GetPool();
     if (connPool == nullptr) {
         return E_ALREADY_CLOSED;
     }
 
-    RegisterDataChangeCallback(delayNotifier_, connPool, 0);
+    RegisterDataChangeCallback(GetDelayNotifier(), connPool, 0);
     config_.SetRegisterInfo(RegisterType::CLIENT_OBSERVER, true);
     return E_OK;
 }
@@ -1813,7 +1826,7 @@ std::pair<int, int64_t> RdbStoreImpl::BatchInsert(const std::string &table, cons
     if (executeSqlArgs.empty()) {
         return { E_INVALID_ARGS, -1 };
     }
-    PauseDelayNotify pauseDelayNotify(delayNotifier_);
+    PauseDelayNotify pauseDelayNotify(GetDelayNotifier());
     auto [errCode, result] = ExecuteBatchInsert(pool, conn, executeSqlArgs, table);
     if (result == -1) {
         return { errCode, -1 };
@@ -1893,7 +1906,7 @@ std::pair<int32_t, Results> RdbStoreImpl::ExecuteBatchInsertReturning(const RdbS
         SetLastErrorMsg(conn->GetLastErrorMsg());
         return { errCode, -1 };
     }
-    PauseDelayNotify pauseDelayNotify(delayNotifier_);
+    PauseDelayNotify pauseDelayNotify(GetDelayNotifier());
     std::vector<ValuesBucket> values;
     std::tie(errCode, values) =
         statement->ExecuteForRows(std::ref(bindArgs.front()), config.maxReturningCount);
