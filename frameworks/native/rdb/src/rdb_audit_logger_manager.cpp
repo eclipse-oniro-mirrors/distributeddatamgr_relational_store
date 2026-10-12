@@ -227,7 +227,7 @@ void RdbAuditLoggerManager::MaybeRotateLog()
     if (!rotated) {
         LOG_ERROR("MaybeRotateLog: rename failed, errno=%{public}d", errno);
     }
-    int openFlags = rotated ? (O_CREAT | O_TRUNC | O_RDWR)
+    int openFlags = rotated ? (O_CREAT | O_TRUNC | O_APPEND | O_RDWR)
                             : (O_CREAT | O_APPEND | O_RDWR);
     writeFd_ = open(logPath.c_str(), openFlags, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
     if (writeFd_ < 0) {
