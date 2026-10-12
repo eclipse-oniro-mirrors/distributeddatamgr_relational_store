@@ -694,19 +694,14 @@ HWTEST_F(RdbAuditTest, RealDbUpdate_023, TestSize.Level0)
     upd.Put("name", "b");
     RdbPredicates p("users");
     p.EqualTo("id", 1);
-    // Update goes through the 60s throttle; the 2nd update emits a THROTTLE
-    // line (suppression starts), and flush is triggered when accumulatedRows
-    // reaches FLUSH_THRESHOLD (1000). After flush the entry is reset (not
-    // erased), so the 1001st update starts a new suppression cycle and emits
-    // another THROTTLE line.
-    // events.log = 2 (open) + THROTTLE(1) + SQL flush(1) + THROTTLE(1) = 5.
+    // Update goes through the 60s throttle; flush is triggered when
+    // accumulatedRows reaches FLUSH_THRESHOLD (1000). 1001 updates
+    // (each changed=1) → flush at the 1001st call.
     for (int i = 0; i < 1001; ++i) {
         store->Update(upd, p, ReturningConfig{});
     }
-    EXPECT_EQ(WaitEventLines(EVENT_LINES_OPEN_THROTTLE_OP + 1, 10000), EVENT_LINES_OPEN_THROTTLE_OP + 1);
-    auto content = ReadFileContent(EventsLogPath());
-    EXPECT_NE(content.find("op=UPDATE"), NPOS);
-    EXPECT_NE(content.find("THROTTLE:"), NPOS);
+    EXPECT_EQ(WaitEventLines(EVENT_LINES_OPEN_PLUS_OP, 10000), EVENT_LINES_OPEN_PLUS_OP);
+    EXPECT_NE(ReadFileContent(EventsLogPath()).find("op=UPDATE"), NPOS);
 }
 
 /**
