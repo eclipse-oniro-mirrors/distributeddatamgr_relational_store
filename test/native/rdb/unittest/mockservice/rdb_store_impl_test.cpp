@@ -20,6 +20,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -1698,59 +1699,89 @@ struct ConcurrentRegistrationResult {
     bool registrationLocked = false;
 };
 
-ConcurrentRegistrationResult RunConcurrentRegistration(
-    const std::shared_ptr<RdbStoreImpl> &storeImpl, std::shared_ptr<Connection> &heldConnection)
-{
-    constexpr int32_t THREAD_COUNT = 8;
+struct ConcurrentRegistrationContext {
     std::mutex startMutex;
     std::condition_variable startCondition;
     int32_t readyCount = 0;
     int32_t attemptCount = 0;
     bool start = false;
-    ConcurrentRegistrationResult result;
-    result.resultCodes.resize(THREAD_COUNT, E_ERROR);
-    result.notifiers.resize(THREAD_COUNT);
-    std::vector<std::thread> threads;
-    threads.reserve(THREAD_COUNT);
-    for (int32_t i = 0; i < THREAD_COUNT; ++i) {
-        threads.emplace_back(
-            [storeImpl, &startMutex, &startCondition, &readyCount, &attemptCount, &start, &result, i]() {
-                {
-                    std::unique_lock<std::mutex> lock(startMutex);
-                    ++readyCount;
-                    startCondition.notify_one();
-                    startCondition.wait(lock, [&start]() { return start; });
-                    ++attemptCount;
-                }
-                startCondition.notify_one();
-                result.resultCodes[i] = storeImpl->RegisterDataChangeCallback(false);
-                result.notifiers[i] = storeImpl->GetDelayNotifier();
-            });
+};
+
+void CreateRegistrationThreads(const std::shared_ptr<RdbStoreImpl> &storeImpl, ConcurrentRegistrationResult &result,
+    ConcurrentRegistrationContext &context, std::vector<std::thread> &threads, int32_t threadCount)
+{
+    threads.reserve(threadCount);
+    for (int32_t i = 0; i < threadCount; ++i) {
+        threads.emplace_back([storeImpl, &result, &context, i]() {
+            {
+                std::unique_lock<std::mutex> lock(context.startMutex);
+                ++context.readyCount;
+                context.startCondition.notify_one();
+                context.startCondition.wait(lock, [&context]() { return context.start; });
+                ++context.attemptCount;
+            }
+            context.startCondition.notify_one();
+            result.resultCodes[i] = storeImpl->RegisterDataChangeCallback(false);
+            result.notifiers[i] = storeImpl->GetDelayNotifier();
+        });
     }
+}
+
+void StartRegistrationThreads(ConcurrentRegistrationContext &context, int32_t threadCount)
+{
     {
-        std::unique_lock<std::mutex> lock(startMutex);
-        startCondition.wait(lock, [&readyCount]() { return readyCount == THREAD_COUNT; });
-        start = true;
+        std::unique_lock<std::mutex> lock(context.startMutex);
+        context.startCondition.wait(lock, [&context, threadCount]() { return context.readyCount == threadCount; });
+        context.start = true;
     }
-    startCondition.notify_all();
-    {
-        std::unique_lock<std::mutex> lock(startMutex);
-        result.allAttemptsStarted = startCondition.wait_for(
-            lock, std::chrono::seconds(2), [&attemptCount]() { return attemptCount == THREAD_COUNT; });
-    }
-    auto lockDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (result.allAttemptsStarted && std::chrono::steady_clock::now() < lockDeadline) {
+    context.startCondition.notify_all();
+}
+
+bool WaitForRegistrationAttempts(
+    ConcurrentRegistrationContext &context, int32_t threadCount, std::chrono::seconds timeout)
+{
+    std::unique_lock<std::mutex> lock(context.startMutex);
+    return context.startCondition.wait_for(
+        lock, timeout, [&context, threadCount]() { return context.attemptCount == threadCount; });
+}
+
+bool IsRegistrationBlocked(
+    const std::shared_ptr<RdbStoreImpl> &storeImpl, std::chrono::steady_clock::time_point deadline)
+{
+    while (std::chrono::steady_clock::now() < deadline) {
         if (!storeImpl->dataChangeMutex_.try_lock()) {
-            result.registrationLocked = true;
-            break;
+            return true;
         }
         storeImpl->dataChangeMutex_.unlock();
         std::this_thread::yield();
     }
-    heldConnection.reset();
+    return false;
+}
+
+void JoinRegistrationThreads(std::vector<std::thread> &threads)
+{
     for (auto &thread : threads) {
         thread.join();
     }
+}
+
+ConcurrentRegistrationResult RunConcurrentRegistration(
+    const std::shared_ptr<RdbStoreImpl> &storeImpl, std::shared_ptr<Connection> &heldConnection)
+{
+    constexpr int32_t threadCount = 8;
+    constexpr auto registrationTimeout = std::chrono::seconds(2);
+    ConcurrentRegistrationResult result;
+    result.resultCodes.resize(threadCount, E_ERROR);
+    result.notifiers.resize(threadCount);
+    ConcurrentRegistrationContext context;
+    std::vector<std::thread> threads;
+    CreateRegistrationThreads(storeImpl, result, context, threads, threadCount);
+    StartRegistrationThreads(context, threadCount);
+    result.allAttemptsStarted = WaitForRegistrationAttempts(context, threadCount, registrationTimeout);
+    auto lockDeadline = std::chrono::steady_clock::now() + registrationTimeout;
+    result.registrationLocked = result.allAttemptsStarted && IsRegistrationBlocked(storeImpl, lockDeadline);
+    heldConnection.reset();
+    JoinRegistrationThreads(threads);
     return result;
 }
 } // namespace
@@ -1779,11 +1810,10 @@ HWTEST_F(RdbStoreImplConditionTest, RegisterDataChangeCallback_ConcurrentInitial
     auto heldConnection = connectionPool->AcquireConnection(false);
     ASSERT_NE(nullptr, heldConnection);
 
-    constexpr int32_t THREAD_COUNT = 8;
     auto result = RunConcurrentRegistration(storeImpl, heldConnection);
     EXPECT_TRUE(result.allAttemptsStarted);
     EXPECT_TRUE(result.registrationLocked);
-    for (int32_t i = 0; i < THREAD_COUNT; ++i) {
+    for (std::size_t i = 0; i < result.resultCodes.size(); ++i) {
         EXPECT_EQ(E_OK, result.resultCodes[i]);
         ASSERT_NE(nullptr, result.notifiers[i]);
         EXPECT_EQ(result.notifiers[0], result.notifiers[i]);
