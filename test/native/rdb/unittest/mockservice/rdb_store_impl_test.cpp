@@ -1767,7 +1767,8 @@ ConcurrentRegistrationResult RunConcurrentRegistration(
     const std::shared_ptr<RdbStoreImpl> &storeImpl, std::shared_ptr<Connection> &heldConnection)
 {
     constexpr int32_t threadCount = 8;
-    constexpr auto registrationTimeout = std::chrono::seconds(2);
+    constexpr int32_t registrationTimeoutSeconds = 2;
+    constexpr auto registrationTimeout = std::chrono::seconds(registrationTimeoutSeconds);
     ConcurrentRegistrationResult result;
     result.resultCodes.resize(threadCount, E_ERROR);
     result.notifiers.resize(threadCount);
@@ -1791,9 +1792,10 @@ ConcurrentRegistrationResult RunConcurrentRegistration(
  */
 HWTEST_F(RdbStoreImplConditionTest, RegisterDataChangeCallback_ConcurrentInitialization_001, TestSize.Level2)
 {
+    constexpr int32_t writeConnectionTimeout = 30;
     RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
     config.SetReadOnly(false);
-    config.SetWriteTime(30);
+    config.SetWriteTime(writeConnectionTimeout);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
     RdbStoreImplConditionTestOpenCallback helper;
