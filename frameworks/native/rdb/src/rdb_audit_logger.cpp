@@ -28,6 +28,7 @@
 #include "logger.h"
 #include "rdb_audit_logger_manager.h"
 #include "rdb_audit_utils.h"
+#include "rdb_errno.h"
 #include "rdb_db_info_manager.h"
 #include "rdb_db_logger_manager.h"
 #include "rdb_platform.h"
@@ -267,12 +268,14 @@ void RdbAuditLoggerImpl::OnTransaction(
     if (op == "BEGIN") {
         if (outer) {
             inTransaction_ = true;
+            commitSucceeded_ = false;
             txnBuffer_.clear();
         }
         return;
     }
     if (op == "COMMIT") {
         if (outer) {
+            commitSucceeded_ = (rc == E_OK);
             EmitCombinedTransaction(dbPath, "COMMIT", rc);
             txnBuffer_.clear();
             inTransaction_ = false;
@@ -296,10 +299,12 @@ void RdbAuditLoggerImpl::OnTransactionEvent(const std::string &dbPath, const std
     std::lock_guard<std::mutex> lock(txnMutex_);
     if (op == "BEGIN") {
         inTransaction_ = true;
+        commitSucceeded_ = false;
         txnBuffer_.clear();
         return;
     }
     if (op == "COMMIT") {
+        commitSucceeded_ = (rc == E_OK);
         EmitCombinedTransaction(dbPath, "COMMIT", rc);
         txnBuffer_.clear();
         inTransaction_ = false;
@@ -389,6 +394,17 @@ void RdbAuditLoggerImpl::OnDbDelete(const std::string &dbPath, const std::string
 
 RdbAuditLoggerImpl::~RdbAuditLoggerImpl()
 {
+    // Transaction buffer: if still in a transaction and no successful commit
+    // was recorded (commit failed or was never called), discard the buffered
+    // events without writing. When a commit succeeded, the buffer was already
+    // flushed by OnTransaction/OnTransactionEvent before clearing inTransaction_.
+    {
+        std::lock_guard<std::mutex> txnLock(txnMutex_);
+        if (inTransaction_ && !commitSucceeded_) {
+            txnBuffer_.clear();
+            inTransaction_ = false;
+        }
+    }
     // Flush any accumulated throttle data that was never written (AUD-8).
     std::lock_guard<std::mutex> lock(mutex_);
     for (const auto &entry : throttleMap_) {

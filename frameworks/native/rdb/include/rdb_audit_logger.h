@@ -135,6 +135,7 @@ private:
     // ROLLBACK also emits a combined line showing the discarded ops.
     std::mutex txnMutex_;
     bool inTransaction_ = false;
+    bool commitSucceeded_ = false; // set when OnTransaction/OnTransactionEvent records a successful COMMIT
     std::map<std::pair<std::string, std::string>, int64_t> txnBuffer_;
 };
 

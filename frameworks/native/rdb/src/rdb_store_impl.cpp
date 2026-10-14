@@ -2999,7 +2999,6 @@ int RdbStoreImpl::ExecuteCommitStatement(const std::string &sqlStr, size_t id, b
             Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, err, config_.GetBundleName(), "ComBusy"));
         }
         LOG_ERROR("statement error. [%{public}zu, %{public}s]", id, SqliteUtils::Anonymous(name_).c_str());
-        auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", E_DATABASE_BUSY, outer);
         return E_DATABASE_BUSY;
     }
     err = statement->Execute();
@@ -3008,7 +3007,6 @@ int RdbStoreImpl::ExecuteCommitStatement(const std::string &sqlStr, size_t id, b
             Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, err, config_.GetBundleName(), "ComBusy"));
         }
         LOG_ERROR("failed. [%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
-        auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", err, outer);
         return err;
     }
     return E_OK;
@@ -3046,6 +3044,7 @@ int RdbStoreImpl::Commit()
     }
     auto err = ExecuteCommitStatement(sqlStr, id, outer);
     if (err != E_OK) {
+        auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", err, outer);
         return err;
     }
     pool->GetTransactionStack().pop();

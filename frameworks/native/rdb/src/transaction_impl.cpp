@@ -136,7 +136,6 @@ int32_t TransactionImpl::Commit()
     if (errorCode != E_OK) {
         LOG_ERROR("create statement failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
-        auditLogger_.OnTransactionEvent(path_, "ROLLBACK", errorCode);
         return errorCode;
     }
 
@@ -144,7 +143,6 @@ int32_t TransactionImpl::Commit()
     if (errorCode != E_OK) {
         LOG_ERROR("statement execute failed, errorCode=%{public}d", errorCode);
         CloseInner(false);
-        auditLogger_.OnTransactionEvent(path_, "ROLLBACK", errorCode);
         return errorCode;
     }
     CloseInner();
