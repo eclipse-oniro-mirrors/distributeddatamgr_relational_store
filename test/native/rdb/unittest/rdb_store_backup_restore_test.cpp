@@ -214,3 +214,4 @@ HWTEST_F(RdbStoreBackupRestoreTest, Rdb_BackupRestoreTest_017, TestSize.Level2)
     RdbHelper::DeleteRdbStore(RdbStoreBackupRestoreTest::DATABASE_NAME);
     RdbHelper::DeleteRdbStore(RdbStoreBackupRestoreTest::BACKUP_DATABASE_NAME);
 }
+

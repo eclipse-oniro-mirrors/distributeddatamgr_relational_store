@@ -103,6 +103,7 @@ protected:
     int ExecuteSql(const std::string &sql, const std::vector<ValueObject> &bindArgs = std::vector<ValueObject>());
     int RegisterAlgo(const std::string &clstAlgoName, ClusterAlgoFunc func) override;
     std::string GetLastErrorMsg() const override;
+    static void CleanDonatedBinlogWithoutReplica(const RdbStoreConfig &config);
 
 private:
     struct Suffix {

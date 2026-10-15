@@ -373,7 +373,6 @@ ohos_unittest("NativeRdbTest") {
     "unittest/rdb_security_manager_test.cpp",
     "unittest/rdb_sqlite_shared_result_set_test.cpp",
     "unittest/rdb_step_result_set_test.cpp",
-    "unittest/rdb_store_backup_restore_test.cpp",
     "unittest/rdb_store_impl_test.cpp",
     "unittest/primary_replica_info_test.cpp",
     "unittest/rdb_store_rekey_test.cpp",
@@ -388,8 +387,10 @@ ohos_unittest("NativeRdbTest") {
 
   if (is_ohos) {
     sources += [
+      "unittest/rdb_binlog_no_slave_test.cpp",
       "unittest/rdb_double_write_binlog_test.cpp",
       "unittest/rdb_replica_path_test.cpp",
+      "unittest/rdb_store_backup_restore_test.cpp",
     ]
   }
 

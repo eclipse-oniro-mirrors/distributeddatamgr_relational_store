@@ -2099,6 +2099,16 @@ int SqliteConnection::ExchangeVerify(bool isRestore, const bool isForceRestore)
     return E_OK;
 }
 
+// Whether the replica is optional for the current store config: only
+// MANUAL_TRIGGER + Searchable stores decouple binlog enablement from the
+// replica; other HA modes or non-searchable stores keep the legacy behavior
+// of aborting the replica path.
+static bool IsReplicaOptional(const RdbStoreConfig &config)
+{
+    return config.GetHaMode() == HAMode::MANUAL_TRIGGER && config.IsSearchable() &&
+        SqliteUtils::IsSupportBinlog(config);
+}
+
 std::pair<int32_t, std::shared_ptr<SqliteConnection>> SqliteConnection::InnerCreate(
     const RdbStoreConfig &config, bool isWrite, bool isReusableReplica)
 {
@@ -2119,9 +2129,12 @@ std::pair<int32_t, std::shared_ptr<SqliteConnection>> SqliteConnection::InnerCre
         RdbStoreConfig slaveCfg = connection->GetSlaveRdbStoreConfig(config);
         auto [err, slaveConn] = connection->CreateSlaveConnection(slaveCfg, SlaveOpenPolicy::OPEN_IF_DB_VALID);
         if (err != E_OK) {
-            return result;
+            if (!IsReplicaOptional(config)) {
+                return result;
+            }
+        } else {
+            conn->slaveConnection_ = slaveConn;
         }
-        conn->slaveConnection_ = slaveConn;
         (void)SqliteUtils::MigrateBinlogFolder(config);
         conn->SetBinlog();
         if (!SqliteUtils::IsSupportBinlog(config)) {
@@ -2351,6 +2364,34 @@ Connection::ReplayCallBack SqliteConnection::GetReplayCallback(const std::string
     return callback;
 }
 
+void SqliteConnection::CleanDonatedBinlogWithoutReplica(const RdbStoreConfig &config)
+{
+    // Clean donated segments only when the replica file is truly absent; when the replica
+    // exists but the callback has not been registered (e.g. MAIN_REPLICA before the first
+    // exchange), leave full handling to libarkdata and the eventual replay path to avoid
+    // clearing data that should be replayed.
+    std::string slavePath = SqliteUtils::GetSlavePath(config);
+    if (access(slavePath.c_str(), F_OK) == 0) {
+        LOG_INFO("replica exists but no replay callback yet, skip donated clean.");
+        return;
+    }
+    sqlite3 *dbHandle = nullptr;
+    auto dbPath = config.GetPath();
+    if (BinlogOpenHandle(dbPath, dbHandle, false) != E_OK) {
+        LOG_WARN("open handle failed, skip donated clean. p=%{public}s", SqliteUtils::Anonymous(dbPath).c_str());
+        return;
+    }
+    // Empty dir path keeps the default binlog location (main db sibling).
+    BinlogSetConfig(dbHandle, Sqlite3BinlogMode::ROW_FOR_SEARCH, "");
+    int err = sqlite3_clean_binlog(dbHandle, BinlogFileCleanModeE::BINLOG_FILE_CLEAN_DONATED_MODE);
+    if (err != SQLITE_OK) {
+        LOG_WARN("clean donated binlog failed. err=%{public}d", err);
+    } else {
+        LOG_DEBUG("cleaned donated binlog without replica.");
+    }
+    BinlogCloseHandle(dbHandle);
+}
+
 void SqliteConnection::BinlogOnFullFunc(void *pCtx, unsigned short currentCount, const char *dbPath)
 {
     if (dbPath == nullptr) {
@@ -2462,7 +2503,7 @@ void SqliteConnection::ReplayBinlog(const RdbStoreConfig &config, bool chkBinlog
         return;
     }
     if (slaveConnection_ == nullptr) {
-        LOG_WARN("back up does not exist");
+        CleanDonatedBinlogWithoutReplica(config);
         return;
     }
     if (SqliteConnection::CheckPathExist(config.GetPath()) != E_OK) {
