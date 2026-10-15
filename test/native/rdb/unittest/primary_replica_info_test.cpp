@@ -1556,7 +1556,7 @@ HWTEST_F(PrimaryReplicaInfoTest, CheckpointFailure_002, TestSize.Level1)
     ASSERT_NE(conn, nullptr);
 
     // Act: call diagnostic — checkpoint rebuilds the (now missing) WAL and succeeds.
-    auto [ret, info] = conn->GetPrimaryReplicaInfo({ "test" });
+    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({ "test" });
 
     // Assert: the diagnostic handles the missing slave WAL gracefully (E_OK),
     // and primary data is still intact.
