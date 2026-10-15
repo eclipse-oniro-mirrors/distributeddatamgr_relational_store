@@ -1707,6 +1707,7 @@ int32_t RdbStoreImpl::Init(int version, RdbOpenCallback &openCallback, bool isNe
     if (config_.GetRoleType() == OWNER && !config_.IsReadOnly()) {
         errCode = InitOwner(version, openCallback);
         if (errCode != E_OK) {
+            auditLogger_.OnOpenFail(config_.GetPath(), errCode, 0);
             return errCode;
         }
     }

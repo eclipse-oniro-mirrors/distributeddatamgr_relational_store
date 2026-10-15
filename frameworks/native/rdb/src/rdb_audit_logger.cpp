@@ -453,8 +453,10 @@ RdbAuditLoggerImpl::ThrottleDecision RdbAuditLoggerImpl::AccumulateOrFlush(
             LOG_INFO("Audit throttle window-expired flush: op=%{public}s tbl=%{public}s flushRows=%{public}" PRId64,
                 op.c_str(), SqliteUtils::Anonymous(tbl).c_str(), d.flushRows);
         }
+        it->second = {now, rows, false, op, tbl};
+    } else {
+        throttleMap_[eventKey] = {now, rows, false, op, tbl};
     }
-    throttleMap_[eventKey] = {now, rows, false, op, tbl};
     if (throttleMap_.size() > THROTTLE_MAP_MAX_SIZE) {
         for (auto mapIt = throttleMap_.begin(); mapIt != throttleMap_.end();) {
             if (mapIt->first != eventKey && (now - mapIt->second.timestamp) >= THROTTLE_INTERVAL_MS) {

@@ -126,14 +126,14 @@ RdbDbLoggerManager::~RdbDbLoggerManager() {}
 void RdbDbLoggerManager::Init(const std::string &auditDir)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (initialized_) {
+    if (initialized_.load(std::memory_order_acquire)) {
         return;
     }
     if (auditDir.empty()) {
         return;
     }
     auditDir_ = auditDir;
-    initialized_ = true;
+    initialized_.store(true, std::memory_order_release);
 }
 
 void RdbDbLoggerManager::RecordOpenSync(const std::string &dbPath, const LastOpenDbInfo &lastOpen)
@@ -210,7 +210,7 @@ void RdbDbLoggerManager::RecordIoError(
 void RdbDbLoggerManager::WithAuditRecord(
     const std::string &dbPath, const std::function<void(RdbDbInfoRecord &)> &mutator)
 {
-    if (!initialized_ || dbPath.empty()) {
+    if (!initialized_.load(std::memory_order_acquire) || dbPath.empty()) {
         return;
     }
     std::string jsonPath = BuildAuditPath(dbPath, AUDIT_JSON_SUFFIX);
