@@ -1457,21 +1457,27 @@ HWTEST_F(PrimaryReplicaInfoTest, TryReplayBinlogPath_002, TestSize.Level1)
 
 /**
  * @tc.name: PrimaryReplicaInfo_CheckpointFailure_001
- * @tc.desc: AC-5.2: When CheckpointDatabases fails (e.g., concurrent write lock),
- *           the error code is propagated from GetPrimaryAndReplicaInfo.
- *           This test forces a checkpoint conflict by holding a write lock via a
- *           second connection during the diagnostic call.
+ * @tc.desc: AC-5.2: When the primary DB TRUNCATE checkpoint cannot acquire the
+ *           writer lock (held by a concurrent open write transaction),
+ *           CheckpointDatabases returns SQLITE_BUSY and GetPrimaryAndReplicaInfo
+ *           propagates it instead of swallowing the error. Partial diagnostic
+ *           results collected before checkpoint remain available.
  * @tc.type: FUNC
  */
 HWTEST_F(PrimaryReplicaInfoTest, CheckpointFailure_001, TestSize.Level1)
 {
-    // Arrange: insert data to generate WAL content
+    // Arrange: insert data to generate WAL content on the primary DB.
     InsertRows(store_, 1, 5);
 
-    // Act: hold a write transaction open on the fixture store while calling diagnostic
-    // via a direct connection. The open transaction may cause checkpoint to fail with
-    // SQLITE_BUSY (cannot checkpoint within a transaction or when WAL is locked).
+    // Act: open and hold a write transaction on the fixture store so the primary
+    // writer lock stays held. A second writer's TRUNCATE checkpoint cannot grab
+    // the exclusive writer lock while this transaction is open, so
+    // sqlite3_wal_checkpoint_v2 returns SQLITE_BUSY after the busy handler times out.
     EXPECT_EQ(store_->BeginTransaction(), E_OK);
+    // Roll back the fixture transaction on every exit path (including ASSERT abort),
+    // so a dangling uncommitted transaction never leaks into later test cases.
+    // This mirrors the ScopeGuard RAII convention used in PrimaryDbStatFailure_001.
+    ScopeGuard rollbackTxn([this]() { store_->RollBack(); });
     ValuesBucket values;
     values.PutInt("id", 999);
     values.PutString("name", "lock_holder");
@@ -1480,43 +1486,40 @@ HWTEST_F(PrimaryReplicaInfoTest, CheckpointFailure_001, TestSize.Level1)
     EXPECT_EQ(store_->Insert(rowId, "test", values), E_OK);
     // Transaction is still open — do NOT commit yet.
 
-    // Create a separate direct read connection (no slave) to call diagnostic.
-    // The fixture store's open transaction holds a write lock that may prevent
-    // checkpoint from truncating the WAL.
+    // Create a separate direct WRITE connection. Only a writer enters the
+    // CheckpointDatabases branch (dbHandle_ != nullptr && isWriter_); a read
+    // connection (isWriter_ == false) skips checkpoint entirely and the failure
+    // path under test would be dead code.
     RdbStoreConfig config(dbName);
     config.SetHaMode(HAMode::MAIN_REPLICA);
-    auto [createErr, conn] = SqliteConnection::Create(config, false);
+    auto [createErr, conn] = SqliteConnection::Create(config, true);
     ASSERT_EQ(createErr, E_OK);
     ASSERT_NE(conn, nullptr);
 
-    // The diagnostic call: checkpoint may succeed or fail depending on lock state.
-    // If checkpoint fails, the error must be propagated (not silently swallowed).
+    // The diagnostic call: the second writer's primary TRUNCATE checkpoint fails to
+    // acquire the writer lock held by the fixture store's open transaction and
+    // returns SQLITE_BUSY. GetPrimaryAndReplicaInfo must propagate that error.
     auto [ret, info] = conn->GetPrimaryAndReplicaInfo({});
 
-    // Assert: either checkpoint succeeds (E_OK) or the error is propagated (ret != E_OK).
-    // The key assertion is: if ret != E_OK, it must NOT be E_OK — the error is propagated.
-    // We accept both outcomes because checkpoint behavior under concurrent access is
-    // implementation-dependent, but we verify that the error path does not return
-    // a spurious E_OK with invalid data.
-    if (ret != E_OK) {
-        // Checkpoint failed — error propagated correctly.
-        // Verify partial results are still present (from steps before checkpoint).
-        EXPECT_GT(info.primaryInfo.dbInfo.size, 0)
-            << "Partial results should be present even if checkpoint failed (ret=" << ret << ")";
-    } else {
-        // Checkpoint succeeded despite open transaction — verify results are valid.
-        EXPECT_GE(info.primaryInfo.dbInfo.size, 0) << "Primary DB size should be valid when checkpoint succeeds";
-    }
-
-    // Cleanup: commit and release
-    EXPECT_EQ(store_->Commit(), E_OK);
+    // Assert: the checkpoint failure (SQLITE_BUSY) is propagated, not swallowed as E_OK.
+    EXPECT_EQ(ret, E_SQLITE_BUSY)
+        << "TRUNCATE checkpoint under a concurrent write transaction should fail with SQLITE_BUSY";
+    // Partial results collected by CollectInitialFileInfo before checkpoint are still present.
+    EXPECT_GT(info.primaryInfo.dbInfo.size, 0)
+        << "Partial results should be present even when checkpoint failed (ret=" << ret << ")";
 }
 
 /**
  * @tc.name: PrimaryReplicaInfo_CheckpointFailure_002
- * @tc.desc: AC-5.2: When the replica (slave) DB checkpoint fails, the error is propagated
- *           from GetPrimaryAndReplicaInfo. This test corrupts the slave WAL file to
- *           force a checkpoint failure on the replica side.
+ * @tc.desc: Verify graceful handling when the replica WAL/SHM files are missing:
+ *           SQLite rebuilds the WAL on reopen, checkpoint succeeds, and
+ *           GetPrimaryAndReplicaInfo returns E_OK with primary data intact.
+ *           (Reliably forcing a slave-side checkpoint *failure* via file
+ *           manipulation is not achievable because SQLite recovers from a
+ *           missing/corrupt WAL; the slave-checkpoint error-propagation path is
+ *           structurally identical to the primary one covered by
+ *           CheckpointFailure_001, which exercises the same
+ *           `if (ckptErr != SQLITE_OK) return SQLiteError::ErrNo(ckptErr)` branch.)
  * @tc.type: FUNC
  */
 HWTEST_F(PrimaryReplicaInfoTest, CheckpointFailure_002, TestSize.Level1)
@@ -1531,11 +1534,13 @@ HWTEST_F(PrimaryReplicaInfoTest, CheckpointFailure_002, TestSize.Level1)
     store_ = nullptr;
     RdbHelper::ClearCache();
 
-    // Corrupt the slave WAL file by writing garbage to it
+    // Remove the slave WAL and SHM auxiliary files. Unlike the previous
+    // "corrupt the slave WAL" framing, deleting WAL/SHM while no connection
+    // holds the DB is SQLite's standard recovery scenario: on reopen the WAL is
+    // rebuilt and checkpoint succeeds, so this guards *missing-file tolerance*,
+    // not failure propagation.
     std::string slaveWalPath = slaveDbName + "-wal";
     std::string slaveShmPath = slaveDbName + "-shm";
-
-    // Delete the slave WAL and shm files to create an inconsistent state
     if (access(slaveWalPath.c_str(), F_OK) == 0) {
         EXPECT_EQ(unlink(slaveWalPath.c_str()), 0) << "Should delete slave WAL file";
     }
@@ -1543,28 +1548,22 @@ HWTEST_F(PrimaryReplicaInfoTest, CheckpointFailure_002, TestSize.Level1)
         EXPECT_EQ(unlink(slaveShmPath.c_str()), 0) << "Should delete slave SHM file";
     }
 
-    // Create a new write connection — it will try to open the slave DB
+    // Create a new write connection — it reopens the slave DB and rebuilds the WAL.
     RdbStoreConfig config(dbName);
     config.SetHaMode(HAMode::MAIN_REPLICA);
     auto [createErr, conn] = SqliteConnection::Create(config, true);
-    // If slave DB cannot be opened (WAL deleted), Create may fail or succeed without slave.
-    // Either way, the diagnostic call should handle it gracefully.
+    ASSERT_EQ(createErr, E_OK) << "Reopen after WAL removal should succeed";
+    ASSERT_NE(conn, nullptr);
 
-    if (conn != nullptr) {
-        // Act: call diagnostic — checkpoint may fail on the replica side
-        auto [ret, info] = conn->GetPrimaryAndReplicaInfo({ "test" });
+    // Act: call diagnostic — checkpoint rebuilds the (now missing) WAL and succeeds.
+    auto [ret, info] = conn->GetPrimaryReplicaInfo({ "test" });
 
-        // Assert: the diagnostic should either succeed or propagate the error.
-        // If it fails, the error should be from checkpoint, not from a crash.
-        if (ret == E_OK) {
-            // If checkpoint succeeded (slave may have been recreated), verify data
-            auto pit = info.primaryInfo.tables.find("test");
-            if (pit != info.primaryInfo.tables.end()) {
-                EXPECT_GE(pit->second.count, 5) << "Primary should have at least 5 rows";
-            }
-        } else {
-            // Checkpoint or earlier step failed — error propagated correctly
-            EXPECT_NE(ret, E_OK) << "Error should be propagated when checkpoint fails";
-        }
+    // Assert: the diagnostic handles the missing slave WAL gracefully (E_OK),
+    // and primary data is still intact.
+    EXPECT_EQ(ret, E_OK) << "Missing slave WAL/SHM should be recovered gracefully";
+    auto pit = info.primaryInfo.tables.find("test");
+    EXPECT_NE(pit, info.primaryInfo.tables.end()) << "Primary table info should be present";
+    if (pit != info.primaryInfo.tables.end()) {
+        EXPECT_GE(pit->second.count, 5) << "Primary should have at least 5 rows";
     }
 }
