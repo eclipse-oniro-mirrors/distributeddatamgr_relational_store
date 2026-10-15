@@ -123,7 +123,7 @@ RdbAuditLoggerManager::~RdbAuditLoggerManager()
 void RdbAuditLoggerManager::Init(const std::string &auditDir)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (initialized_) {
+    if (initialized_.load(std::memory_order_acquire)) {
         return;
     }
     if (auditDir.empty()) {
