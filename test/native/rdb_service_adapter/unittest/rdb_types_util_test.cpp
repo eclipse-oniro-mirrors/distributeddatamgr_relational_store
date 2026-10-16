@@ -62,6 +62,45 @@ HWTEST_F(RdbTypesUtilTest, MarshallingSyncerParam_001, TestSize.Level1)
 }
 
 /**
+ * @tc.name: MarshallingSyncerParamDumpStack_001
+ * @tc.desc: Test Marshalling and Unmarshalling for RdbSyncerParam dumpStackOnFileDel field
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbTypesUtilTest, MarshallingSyncerParamDumpStack_001, TestSize.Level1)
+{
+    RdbSyncerParam param;
+    param.dumpStackOnFileDel_ = true;
+
+    MessageParcel data;
+    bool ret = ITypesUtil::Marshalling(param, data);
+    EXPECT_TRUE(ret);
+
+    RdbSyncerParam output;
+    ret = ITypesUtil::Unmarshalling(output, data);
+    EXPECT_TRUE(ret);
+    EXPECT_TRUE(output.dumpStackOnFileDel_);
+}
+
+/**
+ * @tc.name: MarshallingSyncerParamDumpStack_002
+ * @tc.desc: Test default value of RdbSyncerParam dumpStackOnFileDel is false
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbTypesUtilTest, MarshallingSyncerParamDumpStack_002, TestSize.Level1)
+{
+    RdbSyncerParam param;
+
+    MessageParcel data;
+    bool ret = ITypesUtil::Marshalling(param, data);
+    EXPECT_TRUE(ret);
+
+    RdbSyncerParam output;
+    ret = ITypesUtil::Unmarshalling(output, data);
+    EXPECT_TRUE(ret);
+    EXPECT_FALSE(output.dumpStackOnFileDel_);
+}
+
+/**
  * @tc.name: MarshallingValueObject_001
  * @tc.desc: Test Marshalling and Unmarshalling for ValueObject with int value
  * @tc.type: FUNC

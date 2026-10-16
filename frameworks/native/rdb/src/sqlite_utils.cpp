@@ -42,6 +42,7 @@
 #include <iomanip>
 
 #include "acl.h"
+#include "hmfs_tag_util.h"
 #include "logger.h"
 #include "rdb_errno.h"
 #include "rdb_file_system.h"
@@ -406,6 +407,13 @@ const char *SqliteUtils::GetConflictClause(int conflictResolution)
 
 bool SqliteUtils::DeleteFile(const std::string &filePath)
 {
+    // BR-4: clear the dump-stack tag (if any) before deleting, so legitimate deletions
+    // through any lifecycle flow (delete/restore/rebuild/HA switchover/repair) never
+    // trigger the call stack output (AC-2.1~2.5). GETFLAGS failures (non-HMFS file
+    // systems) fall through silently and untagged files are skipped (EX-6).
+    if (HmfsTagUtil::GetKeyFileFlag(filePath) == HmfsTagUtil::FLAG_SET) {
+        (void)HmfsTagUtil::ClearKeyFileFlag(filePath);
+    }
     auto ret = remove(filePath.c_str());
     if (ret == 0 || errno == ENOENT) {
         return true;
@@ -417,6 +425,16 @@ bool SqliteUtils::DeleteFile(const std::string &filePath)
 
 bool SqliteUtils::RenameFile(const std::string &srcFile, const std::string &destFile)
 {
+    // BR-4: rename also triggers the HMFS dump-stack for tagged key files (the source
+    // disappears from its monitored path and the destination is replaced), so tags must
+    // be cleared before renaming. GETFLAGS failures (non-HMFS file systems) fall
+    // through silently and untagged files are skipped (EX-6).
+    if (HmfsTagUtil::GetKeyFileFlag(srcFile) == HmfsTagUtil::FLAG_SET) {
+        (void)HmfsTagUtil::ClearKeyFileFlag(srcFile);
+    }
+    if (HmfsTagUtil::GetKeyFileFlag(destFile) == HmfsTagUtil::FLAG_SET) {
+        (void)HmfsTagUtil::ClearKeyFileFlag(destFile);
+    }
     auto ret = rename(srcFile.c_str(), destFile.c_str());
     if (ret != 0) {
         LOG_WARN("rename failed errno %{public}d ret %{public}d %{public}s -> %{public}s", errno, ret,

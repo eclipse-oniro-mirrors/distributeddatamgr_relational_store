@@ -153,6 +153,7 @@ struct RdbSyncerParam {
     std::string dbPath_ = "";
     bool isLocalOnly_ = false;
     std::string replicaPath_ = "";
+    bool dumpStackOnFileDel_ = false;
     ~RdbSyncerParam()
     {
         password_.assign(password_.size(), 0);

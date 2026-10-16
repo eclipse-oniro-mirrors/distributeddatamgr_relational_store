@@ -251,6 +251,7 @@ DistributedRdb::RdbSyncerParam RdbStoreManager::GetSyncParam(const RdbStoreConfi
     syncerParam.isAutoClean_ = config.GetAutoClean();
     syncerParam.isAutoCleanDevice_ = config.GetAutoCleanDevice();
     syncerParam.isSearchable_ = config.IsSearchable();
+    syncerParam.dumpStackOnFileDel_ = config.IsDumpStackOnFileDelEnabled();
     syncerParam.roleType_ = config.GetRoleType();
     syncerParam.haMode_ = config.GetHaMode();
     syncerParam.tokenIds_ = config.GetPromiseInfo().tokenIds_;

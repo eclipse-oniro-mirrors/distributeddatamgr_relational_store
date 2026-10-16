@@ -19,12 +19,12 @@
 #include <string>
 #include <vector>
 
-static bool SaveBufferToFile(const std::string &filePath, const std::vector<char> &content, bool truncated = true)
+static inline bool SaveBufferToFile(const std::string &filePath, const std::vector<char> &content, bool truncated = true)
 {
     return true;
 }
 
-static bool LoadBufferFromFile(const std::string &filePath, std::vector<char> &content)
+static inline bool LoadBufferFromFile(const std::string &filePath, std::vector<char> &content)
 {
     return true;
 }

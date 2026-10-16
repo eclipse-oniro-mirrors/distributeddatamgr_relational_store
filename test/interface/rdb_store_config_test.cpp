@@ -1472,3 +1472,30 @@ HWTEST_F(RdbStoreConfigTest, RdbStoreConfig_044, TestSize.Level1)
     store = nullptr;
     RdbHelper::DeleteRdbStore(dbPath);
 }
+
+/**
+ * @tc.name: RdbStoreConfig_045
+ * @tc.desc: test RdbStoreConfig dumpStackOnFileDel set/get round-trip, default value and normal open
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbStoreConfigTest, RdbStoreConfig_045, TestSize.Level1)
+{
+    const std::string dbPath = RDB_TEST_PATH + "config_dump_stack_test.db";
+    RdbStoreConfig config(dbPath);
+    EXPECT_FALSE(config.IsDumpStackOnFileDelEnabled());
+
+    config.EnableDumpStackOnFileDel(true);
+    EXPECT_TRUE(config.IsDumpStackOnFileDelEnabled());
+
+    config.EnableDumpStackOnFileDel(false);
+    EXPECT_FALSE(config.IsDumpStackOnFileDelEnabled());
+
+    config.EnableDumpStackOnFileDel(true);
+    ConfigTestOpenCallback helper;
+    int errCode = E_ERROR;
+    std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    EXPECT_NE(store, nullptr);
+    EXPECT_EQ(errCode, E_OK);
+    store = nullptr;
+    RdbHelper::DeleteRdbStore(dbPath);
+}
