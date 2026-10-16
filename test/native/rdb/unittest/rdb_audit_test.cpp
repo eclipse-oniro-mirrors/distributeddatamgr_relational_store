@@ -53,7 +53,10 @@ constexpr int64_t TEST_DELETE_ROWS = 5;
 constexpr int64_t TEST_INSERT_ROWS = 100;
 constexpr int POLL_INTERVAL_MS = 1000;
 const std::string::size_type NPOS = std::string::npos;
-
+// Observation window (ms) to confirm no stale async tasks recreate audit.json
+// after SetupAudit unlinks it. Must be long enough for the TaskExecutor
+// (MAX_THREADS=2) to drain pending writes from preceding test cases.
+constexpr int DRAIN_OBSERVE_MS = 2000;
 // Wait timeout (ms) for async audit output to land.
 constexpr int WAIT_TIMEOUT_MS = 3000;
 
@@ -167,6 +170,37 @@ std::string AuditJsonPath()
         SqliteUtils::RemoveSuffix(StringUtils::ExtractFileName(DbPath())) + "_audit.json";
 }
 
+// After unlinking audit.json, stale async tasks from preceding test cases may
+// still be queued in TaskExecutor (MAX_THREADS=2). When they execute they
+// recreate audit.json via WithAuditRecord's read-modify-write, polluting the
+// next test's baseline. Drain them by observing the file: if it reappears
+// within the observation window, unlink again and restart the window. The file
+// is considered drained only when it stays absent for the full window.
+void DrainPendingAuditWrites()
+{
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(WAIT_TIMEOUT_MS);
+    auto observeEnd = std::chrono::steady_clock::now() + std::chrono::milliseconds(DRAIN_OBSERVE_MS);
+    size_t prevLines = CountLines(ReadFileContent(EventsLogPath()));
+    while (std::chrono::steady_clock::now() < deadline) {
+        bool changed = false;
+        if (FileExists(AuditJsonPath())) {
+            unlink(AuditJsonPath().c_str());
+            changed = true;
+        }
+        size_t curLines = CountLines(ReadFileContent(EventsLogPath()));
+        if (curLines != prevLines) {
+            prevLines = curLines;
+            changed = true;
+        }
+        if (changed) {
+            observeEnd = std::chrono::steady_clock::now() + std::chrono::milliseconds(DRAIN_OBSERVE_MS);
+        } else if (std::chrono::steady_clock::now() >= observeEnd) {
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(POLL_INTERVAL_MS));
+    }
+}
+
 // Initialize both singleton managers via the public idempotent Init() (no private
 // access, no friend). First call opens events.log fd + sets auditDir; later
 // calls are no-ops. Truncate events.log in place so the singleton's O_APPEND fd
@@ -176,6 +210,7 @@ void SetupAudit()
     MakeDirRecursive(AuditDir(), AUDIT_DIR_MODE);
     RdbAuditLoggerManager::GetInstance().Init(AuditDir());
     RdbDbLoggerManager::GetInstance().Init(AuditDir());
+    DrainPendingAuditWrites();
     truncate(EventsLogPath().c_str(), 0);
     unlink(AuditJsonPath().c_str());
 }
@@ -395,6 +430,7 @@ HWTEST_F(RdbAuditTest, AuditDisabled_010, TestSize.Level0)
     logger.OnCorrupt(DbPath(), TEST_CORRUPT_RC, RC_OK, "detail");
     logger.OnIoError("execute", DbPath(), TEST_IO_ERR_CODE, TEST_IO_OS_ERRNO);
     logger.OnDbDelete(DbPath(), "delete_store");
+    logger.OnTransaction(DbPath(), "BEGIN", RC_OK, true);
     EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), linesBefore);
     EXPECT_EQ(ReadFileContent(AuditJsonPath()), jsonBefore);
 }
@@ -488,8 +524,7 @@ HWTEST_F(RdbAuditTest, RealDbDeleteStore_015, TestSize.Level0)
     }
     EXPECT_TRUE(WaitFileExists(AuditJsonPath()));
     RdbHelper::DeleteRdbStore(MakeAuditConfig());
-    EXPECT_TRUE(WaitFileExists(AuditJsonPath()));
-    EXPECT_NE(ReadFileContent(AuditJsonPath()).find("dbDelete"), NPOS);
+    EXPECT_TRUE(WaitJsonContains("dbDelete"));
 }
 
 /**
@@ -613,6 +648,7 @@ HWTEST_F(RdbAuditTest, Create_021, TestSize.Level0)
     disabled->OnOpenOk(DbPath(), false);
     disabled->OnSqlAudit(DbPath(), "DELETE", "", 1);
     disabled->OnPragma(DbPath(), "PRAGMA integrity_check", RC_OK, "ok");
+    disabled->OnTransaction(DbPath(), "BEGIN", RC_OK, true);
     EXPECT_EQ(CountLines(ReadFileContent(EventsLogPath())), before);
 }
 
@@ -656,14 +692,18 @@ HWTEST_F(RdbAuditTest, RealDbUpdate_023, TestSize.Level0)
     upd.Put("name", "b");
     RdbPredicates p("users");
     p.EqualTo("id", 1);
-    // Update goes through the 60s throttle; flush is triggered when
-    // accumulatedRows reaches FLUSH_THRESHOLD (1000). 1001 updates
-    // (each changed=1) → flush at the 1001st call.
-    for (int i = 0; i < 1001; ++i) {
+    // Update goes through the 60s throttle; the 2nd update emits a THROTTLE
+    // line (suppression starts), and flush is triggered when accumulatedRows
+    // reaches FLUSH_THRESHOLD (1000). Exactly 1000 updates so no post-flush
+    // THROTTLE from a reset entry.
+    // events.log = 2 (open) + THROTTLE(1) + SQL flush(1) = 4.
+    for (int i = 0; i < 1000; ++i) {
         store->Update(upd, p, ReturningConfig{});
     }
-    EXPECT_EQ(WaitEventLines(EVENT_LINES_OPEN_PLUS_OP, 10000), EVENT_LINES_OPEN_PLUS_OP);
-    EXPECT_NE(ReadFileContent(EventsLogPath()).find("op=UPDATE"), NPOS);
+    EXPECT_EQ(WaitEventLines(EVENT_LINES_OPEN_PLUS_OP + 1, 10000), EVENT_LINES_OPEN_PLUS_OP + 1);
+    auto content = ReadFileContent(EventsLogPath());
+    EXPECT_NE(content.find("op=UPDATE"), NPOS);
+    EXPECT_NE(content.find("THROTTLE:"), NPOS);
 }
 
 /**

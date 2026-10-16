@@ -25,9 +25,11 @@
 
 namespace OHOS::NativeRdb {
 class RdbStore;
+class RdbAuditLogger;
 class TransactionImpl : public Transaction {
 public:
-    TransactionImpl(std::shared_ptr<Connection> connection, const std::string &path);
+    TransactionImpl(std::shared_ptr<Connection> connection, const std::string &path,
+        bool auditEnabled);
     ~TransactionImpl() override;
 
     int32_t Commit() override;
@@ -56,7 +58,8 @@ public:
     std::pair<int32_t, Results> ExecuteExt(
         const std::string &sql, const Values &args, const ExecuteConfig &config = {}) override;
     static std::pair<int32_t, std::shared_ptr<Transaction>> Create(
-        int32_t type, std::shared_ptr<Connection> connection, const std::string &path);
+        int32_t type, std::shared_ptr<Connection> connection, const std::string &path,
+        bool auditEnabled = false);
 
 private:
     static std::string GetBeginSql(int32_t type);
@@ -66,6 +69,7 @@ private:
     std::shared_ptr<Connection> GetConnection();
     void AddResultSet(std::weak_ptr<ResultSet> resultSet);
     std::unique_ptr<SqlTimeoutGuard> MakeGuard(int64_t timeoutMs);
+    void AuditSql(const std::string &op, const std::string &tbl, int64_t rows);
 
     std::string path_;
     uint32_t seqId_ = 0;
@@ -73,6 +77,8 @@ private:
     std::shared_ptr<RdbStore> store_;
     std::shared_ptr<Connection> connection_;
     std::vector<std::weak_ptr<ResultSet>> resultSets_;
+    const std::unique_ptr<RdbAuditLogger> auditLoggerHolder_;
+    RdbAuditLogger& auditLogger_;
 
     static const int32_t regCreator_;
     static constexpr char COMMIT_SQL[] = "COMMIT;";

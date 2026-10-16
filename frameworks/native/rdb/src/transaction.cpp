@@ -16,10 +16,11 @@
 
 namespace OHOS::NativeRdb {
 std::pair<int32_t, std::shared_ptr<Transaction>> Transaction::Create(
-    int32_t type, std::shared_ptr<Connection> connection, const std::string &path)
+    int32_t type, std::shared_ptr<Connection> connection, const std::string &path,
+    bool auditEnabled)
 {
     if (creator_ != nullptr) {
-        return creator_(type, std::move(connection), path);
+        return creator_(type, std::move(connection), path, auditEnabled);
     }
     return { E_ERROR, nullptr };
 }

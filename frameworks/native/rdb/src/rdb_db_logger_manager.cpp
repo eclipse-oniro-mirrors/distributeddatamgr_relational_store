@@ -54,12 +54,13 @@ public:
         if (fd_ < 0) {
             return;
         }
+        fdsan_exchange_owner_tag(fd_, 0, AUDIT_FD_TAG);
         int rc = -1;
         do {
             rc = flock(fd_, LOCK_EX);
         } while (rc < 0 && errno == EINTR);
         if (rc < 0) {
-            close(fd_);
+            fdsan_close_with_tag(fd_, AUDIT_FD_TAG);
             fd_ = -1;
         }
     }
@@ -70,7 +71,8 @@ public:
             do {
                 rc = flock(fd_, LOCK_UN);
             } while (rc < 0 && errno == EINTR);
-            close(fd_);
+            fdsan_close_with_tag(fd_, AUDIT_FD_TAG);
+            fd_ = -1;
         }
     }
     bool IsLocked() const { return fd_ >= 0; }
@@ -124,14 +126,14 @@ RdbDbLoggerManager::~RdbDbLoggerManager() {}
 void RdbDbLoggerManager::Init(const std::string &auditDir)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (initialized_) {
+    if (initialized_.load(std::memory_order_acquire)) {
         return;
     }
     if (auditDir.empty()) {
         return;
     }
     auditDir_ = auditDir;
-    initialized_ = true;
+    initialized_.store(true, std::memory_order_release);
 }
 
 void RdbDbLoggerManager::RecordOpenSync(const std::string &dbPath, const LastOpenDbInfo &lastOpen)
@@ -208,7 +210,7 @@ void RdbDbLoggerManager::RecordIoError(
 void RdbDbLoggerManager::WithAuditRecord(
     const std::string &dbPath, const std::function<void(RdbDbInfoRecord &)> &mutator)
 {
-    if (!initialized_ || dbPath.empty()) {
+    if (!initialized_.load(std::memory_order_acquire) || dbPath.empty()) {
         return;
     }
     std::string jsonPath = BuildAuditPath(dbPath, AUDIT_JSON_SUFFIX);
@@ -225,6 +227,7 @@ void RdbDbLoggerManager::WithAuditRecord(
         if (fd >= 0) {
             fdsan_exchange_owner_tag(fd, 0, AUDIT_FD_TAG);
             fdsan_close_with_tag(fd, AUDIT_FD_TAG);
+            fd = -1;
         } else {
             LOG_ERROR("create file failed errno:%{public}d", errno);
             return;

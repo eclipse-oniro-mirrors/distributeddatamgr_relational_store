@@ -16,12 +16,14 @@
 #define LOG_TAG "RdbAuditLoggerManager"
 #include "rdb_audit_logger_manager.h"
 
+#include <algorithm>
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <sstream>
 
@@ -47,6 +49,16 @@ constexpr size_t YEAR_PREFIX_LEN = 5;
 constexpr uint64_t AUDIT_FD_TAG_ID = 0xD001650;
 const uint64_t AUDIT_FD_TAG = fdsan_create_owner_tag(FDSAN_OWNER_TYPE_FILE, AUDIT_FD_TAG_ID);
 
+// Hard rate limit: at most 60 lines written to events.log per second.
+constexpr int64_t RATE_LIMIT_WINDOW_MS = 1000;
+constexpr size_t RATE_LIMIT_MAX_LINES = 60;
+
+int64_t NowMs()
+{
+    auto dur = std::chrono::steady_clock::now().time_since_epoch();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(dur).count();
+}
+
 // hilog-style timestamp: "MM-DD HH:MM:SS.mmm" (strip the year prefix).
 std::string TsLog()
 {
@@ -65,6 +77,26 @@ std::string BuildPragmaLine(
        << " db=" << dbName << " sql=" << SqliteUtils::SqlAnonymous(sql)
        << " rc=" << rc << " result=" << result;
     return os.str();
+}
+
+std::string BuildRateLimitLine(size_t dropped)
+{
+    std::string ts = TsLog();
+    auto caller = RdbDbInfoManager::GetInstance().CollectCaller();
+    std::ostringstream os;
+    os << ts << " " << caller.pid << " " << caller.tid << " RATE_LIMIT:"
+       << " dropped=" << dropped;
+    return os.str();
+}
+
+// Replace embedded newlines with spaces so a single events.log line cannot be
+// split into forged lines by field content containing 0x0A / 0x0D (AUD-3).
+std::string SanitizeOneLine(const std::string &line)
+{
+    std::string safe = line;
+    std::replace(safe.begin(), safe.end(), '\n', ' ');
+    std::replace(safe.begin(), safe.end(), '\r', ' ');
+    return safe;
 }
 } // namespace
 
@@ -91,7 +123,7 @@ RdbAuditLoggerManager::~RdbAuditLoggerManager()
 void RdbAuditLoggerManager::Init(const std::string &auditDir)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (initialized_) {
+    if (initialized_.load(std::memory_order_acquire)) {
         return;
     }
     if (auditDir.empty()) {
@@ -99,34 +131,59 @@ void RdbAuditLoggerManager::Init(const std::string &auditDir)
     }
     auditDir_ = auditDir;
     std::string logPath = auditDir_ + EVENTS_LOG;
-    writeFd_ = open(logPath.c_str(), O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+    writeFd_ = open(logPath.c_str(), O_WRONLY | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
     if (writeFd_ < 0) {
         LOG_ERROR("Init: failed to open audit log, path=%{public}s, errno=%{public}d", logPath.c_str(), errno);
         auditDir_.clear();
         return;
     }
     fdsan_exchange_owner_tag(writeFd_, 0, AUDIT_FD_TAG);
-    lockFd_ = open((auditDir_ + EVENTS_LOCK).c_str(), O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+    lockFd_ = open((auditDir_ + EVENTS_LOCK).c_str(),
+        O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
     if (lockFd_ >= 0) {
         fdsan_exchange_owner_tag(lockFd_, 0, AUDIT_FD_TAG);
     }
-    initialized_ = true;
+    initialized_.store(true, std::memory_order_release);
 }
 
 void RdbAuditLoggerManager::AppendEventSync(const std::string &jsonLine)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!initialized_ || writeFd_ < 0 || jsonLine.empty()) {
+    if (!initialized_.load(std::memory_order_acquire) || writeFd_ < 0 || jsonLine.empty()) {
         return;
     }
-    if (lockFd_ >= 0 && flock(lockFd_, LOCK_EX) != 0) {
-        LOG_WARN("AppendEventSync: flock LOCK_EX failed, errno=%{public}d", errno);
+    int64_t now = NowMs();
+    if (now - rateLimitWindowStart_ >= RATE_LIMIT_WINDOW_MS) {
+        // Window expired. If lines were dropped, emit one summary line that
+        // replaces all the dropped lines.
+        if (droppedCount_ > 0) {
+            WriteLineLocked(BuildRateLimitLine(droppedCount_));
+            rateLimitCount_ = 1;
+        } else {
+            rateLimitCount_ = 0;
+        }
+        rateLimitWindowStart_ = now;
+        droppedCount_ = 0;
+    }
+    if (rateLimitCount_ >= RATE_LIMIT_MAX_LINES) {
+        droppedCount_++;
+        return;
+    }
+    rateLimitCount_++;
+    WriteLineLocked(jsonLine);
+}
+
+void RdbAuditLoggerManager::WriteLineLocked(const std::string &line)
+{
+    // Non-blocking flock: never block the TaskExecutor thread (AUD-2).
+    if (lockFd_ >= 0 && flock(lockFd_, LOCK_EX | LOCK_NB) != 0) {
+        LOG_WARN("AppendEventSync: flock LOCK_EX|NB failed, errno=%{public}d", errno);
     }
     MaybeRotateLog();
-    std::string line = jsonLine + "\n";
+    std::string buf = SanitizeOneLine(line) + "\n";
     size_t total = 0;
-    while (total < line.size()) {
-        ssize_t n = write(writeFd_, line.data() + total, line.size() - total);
+    while (total < buf.size()) {
+        ssize_t n = write(writeFd_, buf.data() + total, buf.size() - total);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;
@@ -170,7 +227,8 @@ void RdbAuditLoggerManager::MaybeRotateLog()
     if (!rotated) {
         LOG_ERROR("MaybeRotateLog: rename failed, errno=%{public}d", errno);
     }
-    int openFlags = rotated ? (O_CREAT | O_TRUNC | O_RDWR) : (O_CREAT | O_APPEND | O_RDWR);
+    int openFlags = rotated ? (O_CREAT | O_TRUNC | O_APPEND | O_RDWR)
+                            : (O_CREAT | O_APPEND | O_RDWR);
     writeFd_ = open(logPath.c_str(), openFlags, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
     if (writeFd_ < 0) {
         LOG_ERROR("MaybeRotateLog: reopen events.log failed, errno=%{public}d", errno);

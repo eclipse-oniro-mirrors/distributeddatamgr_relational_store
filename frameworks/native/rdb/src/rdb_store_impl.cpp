@@ -1555,7 +1555,8 @@ int32_t RdbStoreImpl::UnlockCloudContainer()
 RdbStoreImpl::RdbStoreImpl(const RdbStoreConfig &config)
     : isMemoryRdb_(config.IsMemoryRdb()), configHolder_(std::make_shared<RdbStoreConfig>(config)),
       config_(*configHolder_), name_(config.GetName()),
-      auditLogger_(RdbAuditLogger::Create(config_.IsAuditEnabled()))
+      auditLoggerHolder_(RdbAuditLogger::Create(config_.IsAuditEnabled())),
+      auditLogger_(*auditLoggerHolder_)
 {
     SqliteGlobalConfig::GetDbPath(config_, path_);
     isReadOnly_ = config.IsReadOnly() || config.GetRoleType() == VISITOR;
@@ -1696,7 +1697,7 @@ int32_t RdbStoreImpl::Init(int version, RdbOpenCallback &openCallback, bool isNe
         connectionPool_ = nullptr;
         LOG_ERROR("Create connPool failed, err is %{public}d, path:%{public}s", errCode,
             SqliteUtils::Anonymous(path_).c_str());
-        auditLogger_->OnOpenFail(config_.GetPath(), errCode, 0);
+        auditLogger_.OnOpenFail(config_.GetPath(), errCode, 0);
         return errCode;
     }
     if (isNeedSetAcl) {
@@ -1710,11 +1711,12 @@ int32_t RdbStoreImpl::Init(int version, RdbOpenCallback &openCallback, bool isNe
     if (config_.GetRoleType() == OWNER && !config_.IsReadOnly()) {
         errCode = InitOwner(version, openCallback);
         if (errCode != E_OK) {
+            auditLogger_.OnOpenFail(config_.GetPath(), errCode, 0);
             return errCode;
         }
     }
     if (errCode == E_OK) {
-        auditLogger_->OnOpenOk(config_.GetPath(), created);
+        auditLogger_.OnOpenOk(config_.GetPath(), created);
     }
     InnerOpen();
     initStatus_ = errCode;
@@ -1779,7 +1781,7 @@ std::pair<int, int64_t> RdbStoreImpl::Insert(
     int64_t rowid = -1;
     int errCode = ExecuteForLastInsertedRowId(rowid, sqlInfo.sql, sqlInfo.args, config.timeoutMs);
     if (errCode == E_OK && rowid > 0) {
-        auditLogger_->OnSqlAudit(config_.GetPath(), "INSERT", "", 1);
+        auditLogger_.OnSqlAudit(config_.GetPath(), "INSERT", table, 1);
     }
     if (errCode == E_OK) {
         DoCloudSync(table);
@@ -1820,7 +1822,7 @@ std::pair<int, int64_t> RdbStoreImpl::BatchInsert(const std::string &table, cons
     }
     conn = nullptr;
     int64_t insertedRows = int64_t(rows.RowSize());
-    auditLogger_->OnSqlAudit(config_.GetPath(), "BatchInsert", "", insertedRows);
+    auditLogger_.OnSqlAudit(config_.GetPath(), "BatchInsert", table, insertedRows);
     DoCloudSync(table);
     return { E_OK, insertedRows };
 }
@@ -1874,7 +1876,7 @@ std::pair<int32_t, Results> RdbStoreImpl::BatchInsert(
     auto [errCode, result] = ExecuteBatchInsertReturning(sqlArgs, conn, config, cfg.resolution);
     if (result.changed > 0) {
         DoCloudSync(table);
-        auditLogger_->OnSqlAudit(config_.GetPath(), "BatchInsert", "", result.changed);
+        auditLogger_.OnSqlAudit(config_.GetPath(), "BatchInsert", table, result.changed);
     }
     return { errCode, result };
 }
@@ -1927,7 +1929,7 @@ std::pair<int32_t, Results> RdbStoreImpl::Update(const Row &row, const AbsRdbPre
     }
     auto returningSql = SqliteSqlBuilder::GetReturningSql(cfg.returning.columns);
     auto [code, result] = ExecuteForRow(sqlInfo.sql, sqlInfo.args, cfg.returning, returningSql, cfg.timeoutMs);
-    auditLogger_->OnSqlAudit(config_.GetPath(), "UPDATE", "", result.changed);
+    auditLogger_.OnSqlAudit(config_.GetPath(), "UPDATE", predicates.GetTableName(), result.changed);
     if (result.changed > 0) {
         DoCloudSync(predicates.GetTableName());
     }
@@ -1951,7 +1953,7 @@ std::pair<int32_t, Results> RdbStoreImpl::Delete(
     auto returningSql = SqliteSqlBuilder::GetReturningSql(cfg.returning.columns);
     auto [code, result] =
         ExecuteForRow(sqlInfo.sql, predicates.GetBindArgs(), cfg.returning, returningSql, cfg.timeoutMs);
-    auditLogger_->OnSqlAudit(config_.GetPath(), "DELETE", "", result.changed);
+    auditLogger_.OnSqlAudit(config_.GetPath(), "DELETE", predicates.GetTableName(), result.changed);
     if (result.changed > 0) {
         DoCloudSync(predicates.GetTableName());
     }
@@ -2096,12 +2098,12 @@ int RdbStoreImpl::ExecuteSql(const std::string &sql, const Values &args)
     }
     int sqlType = SqliteUtils::GetSqlStatementType(sql);
     if (sqlType == SqliteUtils::STATEMENT_PRAGMA) {
-        auditLogger_->OnPragma(config_.GetPath(), sql, errCode, "");
+        auditLogger_.OnPragma(config_.GetPath(), sql, errCode, "");
     }
     if (sqlType == SqliteUtils::STATEMENT_DDL) {
         // Audit: DROP TABLE / TRUNCATE TABLE always logged, table whitelist checked by logger.
         // Parse table name from SQL for whitelist matching.
-        auditLogger_->OnSqlAudit(config_.GetPath(), "", sql, 0);
+        auditLogger_.OnSqlAudit(config_.GetPath(), "", sql, 0);
         HandleSchemaDDL(std::move(statement), sql);
     }
     statement = nullptr;
@@ -2154,9 +2156,6 @@ std::pair<int32_t, ValueObject> RdbStoreImpl::Execute(
 std::pair<int32_t, ValueObject> RdbStoreImpl::HandleDifferentSqlTypes(
     std::shared_ptr<Statement> &&statement, const std::string &sql, int32_t code, int sqlType)
 {
-    if (sqlType == SqliteUtils::STATEMENT_PRAGMA) {
-        auditLogger_->OnPragma(config_.GetPath(), sql, code, "");
-    }
     if (code != E_OK) {
         LOG_ERROR("failed, error:0x%{public}x app self can check the SQL:%{public}s", code,
             SqliteUtils::SqlAnonymous(sql).c_str());
@@ -2173,6 +2172,7 @@ std::pair<int32_t, ValueObject> RdbStoreImpl::HandleDifferentSqlTypes(
     }
 
     if (sqlType == SqliteUtils::STATEMENT_PRAGMA) {
+        auditLogger_.OnPragma(config_.GetPath(), sql, code, "");
         if (statement->GetColumnCount() == 1) {
             return statement->GetColumn(0);
         }
@@ -2184,7 +2184,7 @@ std::pair<int32_t, ValueObject> RdbStoreImpl::HandleDifferentSqlTypes(
     }
 
     if (sqlType == SqliteUtils::STATEMENT_DDL) {
-        auditLogger_->OnSqlAudit(config_.GetPath(), "", sql, 0);
+        auditLogger_.OnSqlAudit(config_.GetPath(), "", sql, 0);
         HandleSchemaDDL(std::move(statement), sql);
     }
     return { code, ValueObject() };
@@ -2219,8 +2219,11 @@ std::pair<int32_t, Results> RdbStoreImpl::ExecuteExt(const std::string &sql, con
             SqliteUtils::SqlAnonymous(sql).c_str());
         return { errCode, result };
     }
+    if (sqlType == SqliteUtils::STATEMENT_PRAGMA) {
+        auditLogger_.OnPragma(config_.GetPath(), sql, errCode, "");
+    }
     if (sqlType == SqliteUtils::STATEMENT_DDL) {
-        auditLogger_->OnSqlAudit(config_.GetPath(), "", sql, 0);
+        auditLogger_.OnSqlAudit(config_.GetPath(), "", sql, 0);
         HandleSchemaDDL(std::move(statement), sql);
     }
     return { errCode, result };
@@ -2861,7 +2864,7 @@ int RdbStoreImpl::BeginTransaction()
     if (id > 1) {
         LOG_WARN("[%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
     }
-
+    auditLogger_.OnTransaction(config_.GetPath(), "BEGIN", E_OK, id == 1);
     return E_OK;
 }
 
@@ -2915,6 +2918,7 @@ int RdbStoreImpl::RollBack()
     }
     BaseTransaction transaction = pool->GetTransactionStack().top();
     pool->GetTransactionStack().pop();
+    bool outer = pool->GetTransactionStack().empty();
     if (transaction.GetType() != TransType::ROLLBACK_SELF && !pool->GetTransactionStack().empty()) {
         pool->GetTransactionStack().top().SetChildFailure(true);
     }
@@ -2925,6 +2929,7 @@ int RdbStoreImpl::RollBack()
         }
         // size + 1 means the number of transactions in process
         LOG_ERROR("statement err. [%{public}zu, %{public}s]", id + 1, SqliteUtils::Anonymous(name_).c_str());
+        auditLogger_.OnTransaction(config_.GetPath(), "ROLLBACK", E_DATABASE_BUSY, outer);
         return E_DATABASE_BUSY;
     }
     err = statement->Execute();
@@ -2933,6 +2938,7 @@ int RdbStoreImpl::RollBack()
             Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, err, config_.GetBundleName(), "RollBusy"));
         }
         LOG_ERROR("failed. [%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
+        auditLogger_.OnTransaction(config_.GetPath(), "ROLLBACK", err, outer);
         return err;
     }
     if (pool->GetTransactionStack().empty()) {
@@ -2942,6 +2948,7 @@ int RdbStoreImpl::RollBack()
     if (id > 1) {
         LOG_WARN("[%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
     }
+    auditLogger_.OnTransaction(config_.GetPath(), "ROLLBACK", E_OK, outer);
     return E_OK;
 }
 
@@ -2989,6 +2996,27 @@ int RdbStoreImpl::RollBack(int64_t trxId)
     return ExecuteByTrxId(ROLLBACK_TRANSACTION_SQL, trxId, true);
 }
 
+int RdbStoreImpl::ExecuteCommitStatement(const std::string &sqlStr, size_t id, bool outer)
+{
+    auto [err, statement] = GetStatement(sqlStr);
+    if (statement == nullptr) {
+        if (err == E_DATABASE_BUSY) {
+            Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, err, config_.GetBundleName(), "ComBusy"));
+        }
+        LOG_ERROR("statement error. [%{public}zu, %{public}s]", id, SqliteUtils::Anonymous(name_).c_str());
+        return E_DATABASE_BUSY;
+    }
+    err = statement->Execute();
+    if (err != E_OK) {
+        if (err == E_SQLITE_BUSY || err == E_SQLITE_LOCKED) {
+            Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, err, config_.GetBundleName(), "ComBusy"));
+        }
+        LOG_ERROR("failed. [%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
+        return err;
+    }
+    return E_OK;
+}
+
 /**
 * Begins a transaction in EXCLUSIVE mode.
 */
@@ -3010,27 +3038,18 @@ int RdbStoreImpl::Commit()
         return E_OK;
     }
     BaseTransaction transaction = pool->GetTransactionStack().top();
+    bool outer = (id == 1);
     std::string sqlStr = transaction.GetCommitStr();
     if (sqlStr.size() <= 1) {
         LOG_WARN("[%{public}zu, %{public}s, %{public}s]", id, SqliteUtils::Anonymous(name_).c_str(),
             SqliteUtils::SqlAnonymous(sqlStr).c_str());
         pool->GetTransactionStack().pop();
+        auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", E_OK, outer);
         return E_OK;
     }
-    auto [err, statement] = GetStatement(sqlStr);
-    if (statement == nullptr) {
-        if (err == E_DATABASE_BUSY) {
-            Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, err, config_.GetBundleName(), "ComBusy"));
-        }
-        LOG_ERROR("statement error. [%{public}zu, %{public}s]", id, SqliteUtils::Anonymous(name_).c_str());
-        return E_DATABASE_BUSY;
-    }
-    err = statement->Execute();
+    auto err = ExecuteCommitStatement(sqlStr, id, outer);
     if (err != E_OK) {
-        if (err == E_SQLITE_BUSY || err == E_SQLITE_LOCKED) {
-            Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, err, config_.GetBundleName(), "ComBusy"));
-        }
-        LOG_ERROR("failed. [%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
+        auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", err, outer);
         return err;
     }
     pool->GetTransactionStack().pop();
@@ -3039,6 +3058,7 @@ int RdbStoreImpl::Commit()
     } else {
         LOG_WARN("[%{public}zu, %{public}s, %{public}d]", id, SqliteUtils::Anonymous(name_).c_str(), err);
     }
+    auditLogger_.OnTransaction(config_.GetPath(), "COMMIT", E_OK, outer);
     return E_OK;
 }
 
@@ -3690,7 +3710,7 @@ std::pair<int32_t, std::shared_ptr<Transaction>> RdbStoreImpl::CreateTransaction
         return { errCode, nullptr };
     }
     std::shared_ptr<Transaction> trans;
-    std::tie(errCode, trans) = Transaction::Create(type, conn, config_.GetPath());
+    std::tie(errCode, trans) = Transaction::Create(type, conn, config_.GetPath(), config_.IsAuditEnabled());
     if (trans == nullptr) {
         TryDump(errCode, "TRANS");
         return { errCode, nullptr };

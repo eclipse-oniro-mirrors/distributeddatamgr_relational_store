@@ -254,6 +254,7 @@ private:
     int32_t SetSecurityLabel(const RdbStoreConfig &config);
     int ExecuteByTrxId(const std::string &sql, int64_t trxId, bool closeConnAfterExecute = false,
         const std::vector<ValueObject> &bindArgs = {});
+    int ExecuteCommitStatement(const std::string &sqlStr, size_t id, bool outer);
     std::pair<int32_t, ValueObject> HandleDifferentSqlTypes(
         std::shared_ptr<Statement> &&statement, const std::string &sql, int32_t code, int sqlType);
     int CheckAttach(const std::string &sql);
@@ -375,7 +376,8 @@ private:
     mutable std::shared_mutex poolMutex_;
     std::mutex mutex_;
     std::mutex initMutex_;
-    std::unique_ptr<RdbAuditLogger> auditLogger_;
+    const std::unique_ptr<RdbAuditLogger> auditLoggerHolder_;
+    RdbAuditLogger& auditLogger_;
     std::shared_ptr<ConnectionPool> connectionPool_ = nullptr;
     std::shared_ptr<DelayNotify> delayNotifier_ = nullptr;
     std::shared_ptr<CloudTables> cloudInfo_ = std::make_shared<CloudTables>();

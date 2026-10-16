@@ -16,6 +16,7 @@
 #ifndef RDB_DB_LOGGER_MANAGER_H
 #define RDB_DB_LOGGER_MANAGER_H
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -48,7 +49,7 @@ public:
     // Receive the probed audit root directory from the façade. Idempotent.
     void Init(const std::string &auditDir);
 
-    bool IsInitialized() const { return initialized_; }
+    bool IsInitialized() const { return initialized_.load(std::memory_order_acquire); }
 
     // Synchronous audit.json writes. Called from inside an executor task.
     void RecordOpenSync(const std::string &dbPath, const LastOpenDbInfo &lastOpen);
@@ -69,7 +70,7 @@ private:
     std::string BuildAuditPath(const std::string &dbPath, const std::string &suffix) const;
 
     std::string auditDir_;
-    bool initialized_ = false;
+    std::atomic<bool> initialized_ = false;
     mutable std::mutex mutex_;
 };
 

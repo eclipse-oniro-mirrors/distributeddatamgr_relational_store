@@ -21,12 +21,14 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cinttypes>
 #include <cstring>
 #include <sstream>
 
 #include "logger.h"
 #include "rdb_audit_logger_manager.h"
 #include "rdb_audit_utils.h"
+#include "rdb_errno.h"
 #include "rdb_db_info_manager.h"
 #include "rdb_db_logger_manager.h"
 #include "rdb_platform.h"
@@ -103,14 +105,16 @@ std::string ProbeAuditDir()
     struct stat st;
     if (stat(AUDIT_DIR_SA_ROOT, &st) == 0 && S_ISDIR(st.st_mode)) {
         int32_t uid = static_cast<int32_t>(GetUid());
-        return std::string(AUDIT_DIR_SA_ROOT) + "/" + std::to_string(uid) + "/";
+        std::string saDir = std::string(AUDIT_DIR_SA_ROOT) + "/" + std::to_string(uid) + "/";
+        if (MkDirP(saDir)) {
+            return saDir;
+        }
     }
     if (stat(AUDIT_DIR_APP_ROOT, &st) == 0 && S_ISDIR(st.st_mode)) {
         std::string dir = std::string(AUDIT_DIR_APP_ROOT) + "/" + AUDIT_DIR_APP_SUB + "/";
         if (MkDirP(dir)) {
             return dir;
         }
-        return "";
     }
     LOG_INFO("ProbeAuditDir: no audit directory available, audit disabled");
     return "";
@@ -167,9 +171,11 @@ void RdbAuditLoggerImpl::OnOpenOk(const std::string &dbPath, bool created)
     if (executor == nullptr) {
         return;
     }
-    executor->Execute([dbPath, created]() {
-        RdbAuditLoggerManager::GetInstance().AppendEventSync(BuildOpenOkLine(dbPath));
-        LastOpenDbInfo lastOpen = RdbDbInfoManager::GetInstance().BuildLastOpen(dbPath, created);
+    // Collect file info synchronously to avoid TOCTOU with subsequent writes (AUD-5).
+    std::string openLine = BuildOpenOkLine(dbPath);
+    LastOpenDbInfo lastOpen = RdbDbInfoManager::GetInstance().BuildLastOpen(dbPath, created);
+    executor->Execute([openLine = std::move(openLine), dbPath, lastOpen = std::move(lastOpen)]() {
+        RdbAuditLoggerManager::GetInstance().AppendEventSync(openLine);
         RdbDbLoggerManager::GetInstance().RecordOpenSync(dbPath, lastOpen);
     });
 }
@@ -212,39 +218,141 @@ void RdbAuditLoggerImpl::OnSqlAudit(
             return;
         }
         tbl = RdbAuditUtils::ParseDropTruncateTable(sql);
+    } else {
+        // CRUD ops: caller passes the table name via the sql parameter (AUD-9).
+        tbl = sql;
     }
     bool alwaysLog = (auditOp == "DELETE" || auditOp == "DROP" || auditOp == "TRUNCATE" || auditOp == "BatchInsert");
     if (alwaysLog) {
         if (auditOp == "DELETE" && rows <= 0) {
             return;
         }
-        auto executor = TaskExecutor::GetInstance().GetExecutor();
-        if (executor == nullptr) {
-            return;
-        }
-        executor->Execute([dbPath, auditOp, tbl, rows]() {
-            RdbAuditLoggerManager::GetInstance().AppendEventSync(BuildSqlAuditLine(dbPath, auditOp, tbl, rows));
-        });
+    } else if (rows <= 0) {
         return;
     }
-    if (rows <= 0) {
+    // Inside a transaction: buffer the event (aggregated by op+tbl); flush on
+    // successful COMMIT, discard on ROLLBACK. Only non-transaction SQL is
+    // written immediately / throttled.
+    {
+        std::lock_guard<std::mutex> lock(txnMutex_);
+        if (inTransaction_) {
+            txnBuffer_[{auditOp, tbl}] += rows;
+            return;
+        }
+    }
+    if (alwaysLog) {
+        EmitSqlAudit(dbPath, auditOp, tbl, rows);
         return;
     }
     // Throttle stays sync (uses per-instance throttleMap_); only the write is async.
-    std::string eventKey = "SQL_AUDIT:" + auditOp + ":" + tbl;
-    int64_t flushRows = 0;
-    if (AccumulateOrFlush(eventKey, rows, flushRows)) {
+    // dbPath_ is set inside AccumulateOrFlush under mutex_ (AUD-8, destructor reads it under same lock).
+    ThrottleDecision d = AccumulateOrFlush(dbPath, auditOp, tbl, rows);
+    if (d.suppressed) {
+        if (d.throttleStarted) {
+            EmitThrottleLog(dbPath, auditOp, tbl, d.accumulated);
+        }
         return;
     }
-    if (flushRows > 0) {
-        auto executor = TaskExecutor::GetInstance().GetExecutor();
-        if (executor == nullptr) {
-            return;
-        }
-        executor->Execute([dbPath, auditOp, tbl, flushRows]() {
-            RdbAuditLoggerManager::GetInstance().AppendEventSync(BuildSqlAuditLine(dbPath, auditOp, tbl, flushRows));
-        });
+    if (d.flushRows > 0) {
+        EmitSqlAudit(dbPath, auditOp, tbl, d.flushRows);
     }
+}
+
+void RdbAuditLoggerImpl::OnTransaction(
+    const std::string &dbPath, const std::string &op, int rc, bool outer)
+{
+    if (!IsActive()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(txnMutex_);
+    if (op == "BEGIN") {
+        if (outer) {
+            inTransaction_ = true;
+            commitSucceeded_ = false;
+            txnBuffer_.clear();
+        }
+        return;
+    }
+    if (op == "COMMIT") {
+        if (outer) {
+            commitSucceeded_ = (rc == E_OK);
+            EmitCombinedTransaction(dbPath, "COMMIT", rc);
+            txnBuffer_.clear();
+            inTransaction_ = false;
+        }
+        return;
+    }
+    if (op == "ROLLBACK") {
+        if (outer) {
+            EmitCombinedTransaction(dbPath, "ROLLBACK", rc);
+            txnBuffer_.clear();
+            inTransaction_ = false;
+        }
+    }
+}
+
+void RdbAuditLoggerImpl::OnTransactionEvent(const std::string &dbPath, const std::string &op, int rc)
+{
+    if (!IsActive()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(txnMutex_);
+    if (op == "BEGIN") {
+        inTransaction_ = true;
+        commitSucceeded_ = false;
+        txnBuffer_.clear();
+        return;
+    }
+    if (op == "COMMIT") {
+        commitSucceeded_ = (rc == E_OK);
+        EmitCombinedTransaction(dbPath, "COMMIT", rc);
+        txnBuffer_.clear();
+        inTransaction_ = false;
+        return;
+    }
+    if (op == "ROLLBACK") {
+        EmitCombinedTransaction(dbPath, "ROLLBACK", rc);
+        txnBuffer_.clear();
+        inTransaction_ = false;
+    }
+}
+
+void RdbAuditLoggerImpl::EmitSqlAudit(
+    const std::string &dbPath, const std::string &op, const std::string &tbl, int64_t rows)
+{
+    auto executor = TaskExecutor::GetInstance().GetExecutor();
+    if (executor == nullptr) {
+        return;
+    }
+    executor->Execute([dbPath, op, tbl, rows]() {
+        RdbAuditLoggerManager::GetInstance().AppendEventSync(BuildSqlAuditLine(dbPath, op, tbl, rows));
+    });
+}
+
+void RdbAuditLoggerImpl::EmitThrottleLog(
+    const std::string &dbPath, const std::string &op, const std::string &tbl, int64_t accumulated)
+{
+    auto executor = TaskExecutor::GetInstance().GetExecutor();
+    if (executor == nullptr) {
+        return;
+    }
+    executor->Execute([dbPath, op, tbl, accumulated]() {
+        RdbAuditLoggerManager::GetInstance().AppendEventSync(BuildThrottleLine(dbPath, op, tbl, accumulated));
+    });
+}
+
+void RdbAuditLoggerImpl::EmitCombinedTransaction(
+    const std::string &dbPath, const std::string &finalOp, int rc)
+{
+    // Must be called under txnMutex_ — reads txnBuffer_.
+    std::string line = BuildCombinedTransactionLine(dbPath, finalOp, rc);
+    auto executor = TaskExecutor::GetInstance().GetExecutor();
+    if (executor == nullptr) {
+        return;
+    }
+    executor->Execute([line = std::move(line)]() {
+        RdbAuditLoggerManager::GetInstance().AppendEventSync(line);
+    });
 }
 
 void RdbAuditLoggerImpl::OnPragma(
@@ -274,44 +382,93 @@ void RdbAuditLoggerImpl::OnDbDelete(const std::string &dbPath, const std::string
     if (executor == nullptr) {
         return;
     }
-    executor->Execute([dbPath, op]() {
-        DeleteInfo del;
-        del.files = RdbDbInfoManager::GetInstance().CollectDbFileInfo(dbPath);
-        del.callerInfo = RdbDbInfoManager::GetInstance().CollectCaller();
-        del.time = RdbTimeUtils::GetCurSysTimeWithMs();
+    // Collect file info synchronously before deletion takes effect (AUD-5).
+    DeleteInfo del;
+    del.files = RdbDbInfoManager::GetInstance().CollectDbFileInfo(dbPath);
+    del.callerInfo = RdbDbInfoManager::GetInstance().CollectCaller();
+    del.time = RdbTimeUtils::GetCurSysTimeWithMs();
+    executor->Execute([dbPath, del = std::move(del)]() {
         RdbDbLoggerManager::GetInstance().WriteDeleteSync(dbPath, del);
     });
 }
 
-bool RdbAuditLoggerImpl::AccumulateOrFlush(const std::string &eventKey, int64_t rows, int64_t &flushRows)
+RdbAuditLoggerImpl::~RdbAuditLoggerImpl()
+{
+    // Transaction buffer: if still in a transaction and no successful commit
+    // was recorded (commit failed or was never called), discard the buffered
+    // events without writing. When a commit succeeded, the buffer was already
+    // flushed by OnTransaction/OnTransactionEvent before clearing inTransaction_.
+    {
+        std::lock_guard<std::mutex> txnLock(txnMutex_);
+        if (inTransaction_ && !commitSucceeded_) {
+            txnBuffer_.clear();
+            inTransaction_ = false;
+        }
+    }
+    // Flush any accumulated throttle data that was never written (AUD-8).
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto &entry : throttleMap_) {
+        if (entry.second.accumulatedRows > 0) {
+            LOG_INFO("Audit throttle flush on destroy: op=%{public}s tbl=%{public}s rows=%{public}" PRId64,
+                entry.second.op.c_str(), SqliteUtils::Anonymous(entry.second.tbl).c_str(),
+                entry.second.accumulatedRows);
+            EmitSqlAudit(dbPath_, entry.second.op, entry.second.tbl, entry.second.accumulatedRows);
+        }
+    }
+}
+
+RdbAuditLoggerImpl::ThrottleDecision RdbAuditLoggerImpl::AccumulateOrFlush(
+    const std::string &dbPath, const std::string &op, const std::string &tbl, int64_t rows)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    flushRows = 0;
+    dbPath_ = dbPath; // remember for destructor flush (AUD-8)
+    std::string eventKey = "SQL_AUDIT:" + op + ":" + tbl;
+    ThrottleDecision d;
     int64_t now = NowMs();
     auto it = throttleMap_.find(eventKey);
     if (it != throttleMap_.end() && (now - it->second.timestamp) < THROTTLE_INTERVAL_MS) {
         it->second.accumulatedRows += rows;
+        d.accumulated = it->second.accumulatedRows;
         if (it->second.accumulatedRows >= FLUSH_THRESHOLD) {
-            flushRows = it->second.accumulatedRows;
-            it->second = {now, 0};
-            return false;
+            d.flushRows = it->second.accumulatedRows;
+            LOG_INFO("Audit throttle early-flush: op=%{public}s tbl=%{public}s flushRows=%{public}" PRId64,
+                op.c_str(), SqliteUtils::Anonymous(tbl).c_str(), d.flushRows);
+            it->second = {now, 0, false, op, tbl};
+            return d;
         }
-        return true;
+        if (!it->second.throttleLogged) {
+            it->second.throttleLogged = true;
+            d.throttleStarted = true;
+        }
+        d.suppressed = true;
+        LOG_INFO("Audit throttle accumulated: op=%{public}s tbl=%{public}s rows=%{public}" PRId64
+            " accumulated=%{public}" PRId64,
+            op.c_str(), SqliteUtils::Anonymous(tbl).c_str(), rows, d.accumulated);
+        return d;
     }
     if (it != throttleMap_.end()) {
-        flushRows = it->second.accumulatedRows;
+        // Window expired: flush accumulated rows from the previous window.
+        d.flushRows = it->second.accumulatedRows;
+        if (d.flushRows > 0) {
+            LOG_INFO("Audit throttle window-expired flush: op=%{public}s tbl=%{public}s flushRows=%{public}" PRId64,
+                op.c_str(), SqliteUtils::Anonymous(tbl).c_str(), d.flushRows);
+        }
+        it->second = {now, rows, false, op, tbl};
+    } else {
+        throttleMap_[eventKey] = {now, rows, false, op, tbl};
     }
-    throttleMap_[eventKey] = {now, rows};
     if (throttleMap_.size() > THROTTLE_MAP_MAX_SIZE) {
         for (auto mapIt = throttleMap_.begin(); mapIt != throttleMap_.end();) {
             if (mapIt->first != eventKey && (now - mapIt->second.timestamp) >= THROTTLE_INTERVAL_MS) {
+                LOG_INFO("Audit throttle evict expired entry: op=%{public}s accumulated=%{public}" PRId64,
+                    mapIt->second.op.c_str(), mapIt->second.accumulatedRows);
                 mapIt = throttleMap_.erase(mapIt);
             } else {
                 ++mapIt;
             }
         }
     }
-    return false;
+    return d;
 }
 
 std::string RdbAuditLoggerImpl::BuildOpenOkLine(const std::string &dbPath)
@@ -359,6 +516,39 @@ std::string RdbAuditLoggerImpl::BuildSqlAuditLine(
     os << ts << " " << caller.pid << " " << caller.tid << " SQL:"
        << " db=" << dbName << " op=" << op << " tbl=" << SqliteUtils::Anonymous(tbl)
        << " rows=" << rows << " caller=pid:" << caller.pid << ":tid:" << caller.tid;
+    return os.str();
+}
+
+std::string RdbAuditLoggerImpl::BuildCombinedTransactionLine(
+    const std::string &dbPath, const std::string &finalOp, int rc)
+{
+    // Must be called under txnMutex_ — reads txnBuffer_.
+    std::string ts = TsLog();
+    auto caller = RdbDbInfoManager::GetInstance().CollectCaller();
+    std::string dbName = SqliteUtils::Anonymous(StringUtils::ExtractFileName(dbPath));
+    std::ostringstream os;
+    os << ts << " " << caller.pid << " " << caller.tid << " TRX:"
+       << " db=" << dbName << " BEGIN";
+    for (const auto &entry : txnBuffer_) {
+        os << ">" << entry.first.first
+           << "(tbl=" << SqliteUtils::Anonymous(entry.first.second)
+           << ",rows=" << entry.second << ")";
+    }
+    os << ">" << finalOp << " rc=" << rc
+       << " caller=pid:" << caller.pid << ":tid:" << caller.tid;
+    return os.str();
+}
+
+std::string RdbAuditLoggerImpl::BuildThrottleLine(
+    const std::string &dbPath, const std::string &op, const std::string &tbl, int64_t accumulated)
+{
+    std::string ts = TsLog();
+    auto caller = RdbDbInfoManager::GetInstance().CollectCaller();
+    std::string dbName = SqliteUtils::Anonymous(StringUtils::ExtractFileName(dbPath));
+    std::ostringstream os;
+    os << ts << " " << caller.pid << " " << caller.tid << " THROTTLE:"
+       << " db=" << dbName << " op=" << op << " tbl=" << SqliteUtils::Anonymous(tbl)
+       << " accumulated=" << accumulated << " caller=pid:" << caller.pid << ":tid:" << caller.tid;
     return os.str();
 }
 
