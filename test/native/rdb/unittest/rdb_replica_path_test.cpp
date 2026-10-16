@@ -775,3 +775,48 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_013, TestSize.Level0)
     store = nullptr;
     RemoveFolder(customSlaveDirA);
 }
+
+/**
+ * @tc.name: RdbStore_ReplicaPath_014
+ * @tc.desc: Test reopen with different ReplicaPath fails when store already opened
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_014, TestSize.Level0)
+{
+    std::string customSlaveDir = RDB_TEST_PATH + "custom_slave_dir_014";
+    std::string expectedSlaveFile = customSlaveDir + "/dual_write_binlog_test_slave.db";
+    if (CheckFolderExist(customSlaveDir)) {
+        RemoveFolder(customSlaveDir);
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(customSlaveDir, ec);
+
+    LOG_INFO("---- step1 open MAIN_REPLICA with the legacy default slave path and insert rows");
+    RdbStoreConfig config(RdbReplicaPathTest::databaseName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    int errCode = E_OK;
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    int64_t id = 1;
+    int count = 10;
+    Insert(id, count);
+
+    LOG_INFO("---- step2 reopen MAIN_REPLICA with a different custom slave dir while store is alive");
+    config.SetReplicaPath(customSlaveDir);
+    std::shared_ptr<RdbStore> store2 = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+
+    LOG_INFO("---- step3 expect open failed and the old instance still usable");
+    EXPECT_EQ(store2, nullptr) << "reopen with diff replicaPath should fail while store is alive";
+    EXPECT_EQ(errCode, E_CONFIG_INVALID_CHANGE) << "errCode=" << errCode;
+    EXPECT_TRUE(store->IsSlaveAvailable());
+    EXPECT_FALSE(OHOS::FileExists(expectedSlaveFile));
+    ASSERT_TRUE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName));
+    EXPECT_TRUE(CheckFolderExist(binlogDatabaseName));
+    std::string binlogNewPath = customSlaveDir + "/dual_write_binlog_test.db_binlog";
+    EXPECT_FALSE(CheckFolderExist(binlogNewPath));
+    RdbReplicaPathTest::CheckNumber(store, count);
+
+    store = nullptr;
+    RemoveFolder(customSlaveDir);
+}
