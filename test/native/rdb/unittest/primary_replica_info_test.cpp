@@ -13,29 +13,31 @@
  * limitations under the License.
  */
 
+// PrimaryReplicaInfoTest: coverage for the GetPrimaryReplicaInfo diagnostic
+// interface (primary/replica consistency, error paths, replay, checkpoint).
 #define LOG_TAG "PrimaryReplicaInfoTest"
-#include "rdb_types.h"
-#include "rdb_store_impl.h"
-#include "sqlite_connection.h"
-
 #include <gtest/gtest.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <cstdio>
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
+
 #include "common.h"
 #include "rdb_common.h"
 #include "rdb_errno.h"
 #include "rdb_helper.h"
 #include "rdb_open_callback.h"
 #include "rdb_security_manager.h"
+#include "rdb_store_impl.h"
+#include "rdb_types.h"
+#include "sqlite_connection.h"
 #include "sqlite_global_config.h"
 #include "sqlite_utils.h"
 #include "values_bucket.h"
@@ -69,6 +71,7 @@ public:
     void TearDown();
     std::string dbName;
     std::string slaveDbName;
+
 protected:
     std::shared_ptr<RdbStore> store_;
 };
@@ -78,7 +81,7 @@ public:
     int OnCreate(RdbStore &store) override
     {
         return store.ExecuteSql("CREATE TABLE IF NOT EXISTS test "
-            "(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, age INTEGER)");
+                                "(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, age INTEGER)");
     }
     int OnUpgrade(RdbStore &store, int oldVersion, int newVersion) override
     {
@@ -88,8 +91,14 @@ public:
 
 class EmptyCallback : public RdbOpenCallback {
 public:
-    int OnCreate(RdbStore &store) override { return E_OK; }
-    int OnUpgrade(RdbStore &store, int oldVersion, int newVersion) override { return E_OK; }
+    int OnCreate(RdbStore &store) override
+    {
+        return E_OK;
+    }
+    int OnUpgrade(RdbStore &store, int oldVersion, int newVersion) override
+    {
+        return E_OK;
+    }
 };
 
 void PrimaryReplicaInfoTest::SetUpTestCase(void)
@@ -98,7 +107,9 @@ void PrimaryReplicaInfoTest::SetUpTestCase(void)
     RdbSecurityManager::GetInstance().Init("rdb.primary.replica.test");
 }
 
-void PrimaryReplicaInfoTest::TearDownTestCase(void) {}
+void PrimaryReplicaInfoTest::TearDownTestCase(void)
+{
+}
 
 void PrimaryReplicaInfoTest::SetUp()
 {
@@ -264,7 +275,7 @@ HWTEST_F(PrimaryReplicaInfoTest, FileSizes_001, TestSize.Level1)
 HWTEST_F(PrimaryReplicaInfoTest, TableCount_001, TestSize.Level1)
 {
     InsertRows(store_, 1, 3);
-    auto [ret, info] = store_->GetPrimaryReplicaInfo({"test"});
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test" });
     EXPECT_EQ(ret, E_OK);
     auto it = info.primaryInfo.tables.find("test");
     ASSERT_NE(it, info.primaryInfo.tables.end());
@@ -286,8 +297,7 @@ HWTEST_F(PrimaryReplicaInfoTest, TimeFields_001, TestSize.Level1)
     EXPECT_GE(info.primaryInfo.dbInfo.atime, 0);
     // Verify summarized time is set and follows max(DB, WAL) rule (T-04 fix).
     EXPECT_GT(info.GetPrimaryLastModifyTime(), 0);
-    EXPECT_EQ(info.GetPrimaryLastModifyTime(),
-        std::max(info.primaryInfo.dbInfo.mtime, info.primaryInfo.walInfo.mtime));
+    EXPECT_EQ(info.GetPrimaryLastModifyTime(), std::max(info.primaryInfo.dbInfo.mtime, info.primaryInfo.walInfo.mtime));
 }
 
 /**
@@ -360,7 +370,7 @@ HWTEST_F(PrimaryReplicaInfoTest, UserVersion_001, TestSize.Level1)
 HWTEST_F(PrimaryReplicaInfoTest, PartialResults_001, TestSize.Level1)
 {
     InsertRows(store_, 1, 2);
-    auto [ret, info] = store_->GetPrimaryReplicaInfo({"test"});
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test" });
     EXPECT_EQ(ret, E_OK);
     // Primary should have valid data.
     EXPECT_GT(info.primaryInfo.dbInfo.size, 0);
@@ -368,8 +378,7 @@ HWTEST_F(PrimaryReplicaInfoTest, PartialResults_001, TestSize.Level1)
     ASSERT_NE(it, info.primaryInfo.tables.end());
     EXPECT_EQ(it->second.count, 2);
     // Summarized time must be populated (R-03).
-    EXPECT_EQ(info.GetPrimaryLastModifyTime(),
-        std::max(info.primaryInfo.dbInfo.mtime, info.primaryInfo.walInfo.mtime));
+    EXPECT_EQ(info.GetPrimaryLastModifyTime(), std::max(info.primaryInfo.dbInfo.mtime, info.primaryInfo.walInfo.mtime));
 }
 
 /**
@@ -381,12 +390,12 @@ HWTEST_F(PrimaryReplicaInfoTest, InvalidTableName_001, TestSize.Level1)
 {
     InsertRows(store_, 1, 1);
     // Table name with injection attempt must be rejected by IsValidTableName (T-01 fix).
-    auto [ret, info] = store_->GetPrimaryReplicaInfo({"test; DROP TABLE test"});
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test; DROP TABLE test" });
     EXPECT_EQ(ret, E_INVALID_ARGS);
     // Partial results should still be present.
     EXPECT_GT(info.primaryInfo.dbInfo.size, 0);
     // Original table must still exist with its data (no SQL injection).
-    auto [ret2, info2] = store_->GetPrimaryReplicaInfo({"test"});
+    auto [ret2, info2] = store_->GetPrimaryReplicaInfo({ "test" });
     EXPECT_EQ(ret2, E_OK);
     auto it = info2.primaryInfo.tables.find("test");
     ASSERT_NE(it, info2.primaryInfo.tables.end());
@@ -489,7 +498,7 @@ HWTEST_F(PrimaryReplicaInfoTest, VectorDb_001, TestSize.Level1)
  */
 HWTEST_F(PrimaryReplicaInfoTest, EmptyTableCount_001, TestSize.Level1)
 {
-    auto [ret, info] = store_->GetPrimaryReplicaInfo({"test"});
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test" });
     EXPECT_EQ(ret, E_OK);
     auto it = info.primaryInfo.tables.find("test");
     ASSERT_NE(it, info.primaryInfo.tables.end());
@@ -503,7 +512,7 @@ HWTEST_F(PrimaryReplicaInfoTest, EmptyTableCount_001, TestSize.Level1)
  */
 HWTEST_F(PrimaryReplicaInfoTest, TableNotExist_001, TestSize.Level1)
 {
-    auto [ret, info] = store_->GetPrimaryReplicaInfo({"nonexistent_table"});
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "nonexistent_table" });
     EXPECT_EQ(ret, E_OK);
     auto it = info.primaryInfo.tables.find("nonexistent_table");
     ASSERT_NE(it, info.primaryInfo.tables.end());
@@ -520,8 +529,7 @@ HWTEST_F(PrimaryReplicaInfoTest, PrimaryTimeRule_001, TestSize.Level1)
     InsertRows(store_, 1, 3);
     auto [ret, info] = store_->GetPrimaryReplicaInfo({});
     EXPECT_EQ(ret, E_OK);
-    EXPECT_EQ(info.GetPrimaryLastModifyTime(),
-        std::max(info.primaryInfo.dbInfo.mtime, info.primaryInfo.walInfo.mtime));
+    EXPECT_EQ(info.GetPrimaryLastModifyTime(), std::max(info.primaryInfo.dbInfo.mtime, info.primaryInfo.walInfo.mtime));
     EXPECT_GT(info.GetPrimaryLastModifyTime(), 0);
 }
 
@@ -534,9 +542,8 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaTimeRule_001, TestSize.Level1)
 {
     auto [ret, info] = store_->GetPrimaryReplicaInfo({});
     EXPECT_EQ(ret, E_OK);
-    int64_t expected = info.binlogInfo.exist
-        ? info.binlogInfo.lastModifyTime
-        : std::max(info.replicaInfo.dbInfo.mtime, info.replicaInfo.walInfo.mtime);
+    int64_t expected = info.binlogInfo.exist ? info.binlogInfo.lastModifyTime
+                                             : std::max(info.replicaInfo.dbInfo.mtime, info.replicaInfo.walInfo.mtime);
     EXPECT_EQ(info.GetReplicaLastModifyTime(), expected);
 }
 
@@ -548,7 +555,7 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaTimeRule_001, TestSize.Level1)
 HWTEST_F(PrimaryReplicaInfoTest, StatusFieldsDefault_001, TestSize.Level1)
 {
     InsertRows(store_, 1, 2);
-    auto [ret, info] = store_->GetPrimaryReplicaInfo({"test"});
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test" });
     EXPECT_EQ(ret, E_OK);
     auto it = info.primaryInfo.tables.find("test");
     ASSERT_NE(it, info.primaryInfo.tables.end());
@@ -563,9 +570,9 @@ HWTEST_F(PrimaryReplicaInfoTest, StatusFieldsDefault_001, TestSize.Level1)
 HWTEST_F(PrimaryReplicaInfoTest, RepeatedQuery_001, TestSize.Level1)
 {
     InsertRows(store_, 1, 3);
-    auto [ret1, info1] = store_->GetPrimaryReplicaInfo({"test"});
+    auto [ret1, info1] = store_->GetPrimaryReplicaInfo({ "test" });
     EXPECT_EQ(ret1, E_OK);
-    auto [ret2, info2] = store_->GetPrimaryReplicaInfo({"test"});
+    auto [ret2, info2] = store_->GetPrimaryReplicaInfo({ "test" });
     EXPECT_EQ(ret2, E_OK);
     auto it1 = info1.primaryInfo.tables.find("test");
     auto it2 = info2.primaryInfo.tables.find("test");
@@ -594,14 +601,25 @@ HWTEST_F(PrimaryReplicaInfoTest, WalFileStat_001, TestSize.Level1)
 /**
  * @tc.name: PrimaryReplicaInfo_CheckpointStatus_001
  * @tc.desc: AC-5.1: checkpointErr is E_OK on a MAIN_REPLICA writer with slave connection.
+ *           Verify WAL is truncated after checkpoint (TRUNCATE mode).
  * @tc.type: FUNC
  */
 HWTEST_F(PrimaryReplicaInfoTest, CheckpointStatus_001, TestSize.Level1)
 {
     InsertRows(store_, 1, 3);
+    // Arrange: WAL file should exist after inserts (before checkpoint)
+    std::string walPath = dbName + "-wal";
+    struct stat stBefore;
+    ASSERT_EQ(stat(walPath.c_str(), &stBefore), 0) << "WAL file should exist after inserts";
+
+    // Act: diagnostic call triggers CheckpointDatabases with SQLITE_CHECKPOINT_TRUNCATE
     auto [ret, info] = store_->GetPrimaryReplicaInfo({});
-    EXPECT_EQ(ret, E_OK);
-    // Checkpoint success is implied by ret == E_OK (checkpoint failure → overall failure).
+    EXPECT_EQ(ret, E_OK) << "Diagnostic should succeed when checkpoint succeeds";
+
+    // Assert: After TRUNCATE checkpoint, WAL size should be 0 (truncated back to initial size)
+    EXPECT_EQ(info.primaryInfo.walInfo.size, 0) << "WAL should be truncated to 0 after SQLITE_CHECKPOINT_TRUNCATE";
+    // DB size should be positive (data was written and checkpointed into main DB)
+    EXPECT_GT(info.primaryInfo.dbInfo.size, 0) << "Primary DB size should be positive after checkpoint of 3 rows";
 }
 
 /**
@@ -644,8 +662,7 @@ HWTEST_F(PrimaryReplicaInfoTest, TimeValidity_001, TestSize.Level1)
     auto [ret, info] = store_->GetPrimaryReplicaInfo({});
     EXPECT_EQ(ret, E_OK);
     // Both DB and WAL stats succeed → primaryLastModifyTime = max(db.mtime, wal.mtime)
-    EXPECT_EQ(info.GetPrimaryLastModifyTime(),
-        std::max(info.primaryInfo.dbInfo.mtime, info.primaryInfo.walInfo.mtime));
+    EXPECT_EQ(info.GetPrimaryLastModifyTime(), std::max(info.primaryInfo.dbInfo.mtime, info.primaryInfo.walInfo.mtime));
     EXPECT_GT(info.GetPrimaryLastModifyTime(), 0);
 }
 
@@ -660,8 +677,8 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaTimeFallback_001, TestSize.Level1)
     EXPECT_EQ(ret, E_OK);
     // No binlog: replicaLastModifyTime = max(db.mtime, wal.mtime)
     if (!info.binlogInfo.exist) {
-        EXPECT_EQ(info.GetReplicaLastModifyTime(),
-            std::max(info.replicaInfo.dbInfo.mtime, info.replicaInfo.walInfo.mtime));
+        EXPECT_EQ(
+            info.GetReplicaLastModifyTime(), std::max(info.replicaInfo.dbInfo.mtime, info.replicaInfo.walInfo.mtime));
     }
 }
 
@@ -693,7 +710,7 @@ HWTEST_F(PrimaryReplicaInfoTest, SchemaTableQuoting_001, TestSize.Level1)
 {
     InsertRows(store_, 1, 3);
     // "main.test" splits and quotes as "main"."test" — same table in main schema.
-    auto [ret, info] = store_->GetPrimaryReplicaInfo({"main.test"});
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "main.test" });
     EXPECT_EQ(ret, E_OK);
     auto it = info.primaryInfo.tables.find("main.test");
     ASSERT_NE(it, info.primaryInfo.tables.end());
@@ -766,7 +783,7 @@ HWTEST_F(PrimaryReplicaInfoTest, TimeNotOverwrittenByCheckpoint_001, TestSize.Le
     EXPECT_GT(info.primaryInfo.walInfo.mtime, 0);
 
     int64_t mtimeBeforeMs = static_cast<int64_t>(stBefore.st_mtim.tv_sec) * SqliteUtils::MSEC_PER_SEC +
-        stBefore.st_mtim.tv_nsec / SqliteUtils::NSEC_PER_MSEC;
+                            stBefore.st_mtim.tv_nsec / SqliteUtils::NSEC_PER_MSEC;
     EXPECT_EQ(info.primaryInfo.walInfo.mtime, mtimeBeforeMs);
 }
 
@@ -778,8 +795,8 @@ HWTEST_F(PrimaryReplicaInfoTest, TimeNotOverwrittenByCheckpoint_001, TestSize.Le
 HWTEST_F(PrimaryReplicaInfoTest, ConcurrentWrite_001, TestSize.Level1)
 {
     InsertRows(store_, 1, 5);
-    std::atomic<bool> stop{false};
-    std::atomic<int> writeCount{0};
+    std::atomic<bool> stop{ false };
+    std::atomic<int> writeCount{ 0 };
 
     std::mutex mtx;
     std::condition_variable cv;
@@ -821,7 +838,7 @@ HWTEST_F(PrimaryReplicaInfoTest, ConcurrentWrite_001, TestSize.Level1)
     }
 
     // Main thread: call diagnostic while writer is still active.
-    auto [ret, info] = store_->GetPrimaryReplicaInfo({"test"});
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test" });
     // Concurrent writes may cause checkpoint BUSY → overall return may be E_OK or E_SQLITE_BUSY.
     EXPECT_TRUE(ret == E_OK || ret == E_SQLITE_BUSY)
         << "ret=" << ret << " (concurrent write may cause checkpoint BUSY)";
@@ -892,33 +909,45 @@ HWTEST_F(PrimaryReplicaInfoTest, ViewRejection_001, TestSize.Level1)
     EXPECT_EQ(store_->ExecuteSql("CREATE VIEW IF NOT EXISTS test_view AS SELECT id FROM test"), E_OK);
 
     // "test_view" passes IsValidTableName but fails type check in CountTable.
-    auto [ret, info] = store_->GetPrimaryReplicaInfo({"test_view"});
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test_view" });
     EXPECT_EQ(ret, E_OK); // Overall call succeeds; count=-1 for view
     auto it = info.primaryInfo.tables.find("test_view");
     ASSERT_NE(it, info.primaryInfo.tables.end());
     EXPECT_EQ(it->second.count, -1) << "View should be rejected by type check";
 
-    // Verify regular table still counts correctly
-    auto [ret2, info2] = store_->GetPrimaryReplicaInfo({"test"});
+    // Verify regular table still counts correctly on both primary and replica
+    auto [ret2, info2] = store_->GetPrimaryReplicaInfo({ "test" });
     EXPECT_EQ(ret2, E_OK);
     auto it2 = info2.primaryInfo.tables.find("test");
     ASSERT_NE(it2, info2.primaryInfo.tables.end());
-    EXPECT_EQ(it2->second.count, 3);
-    EXPECT_EQ(it2->second.count, 3);
+    EXPECT_EQ(it2->second.count, 3) << "Primary table count should be 3 after view rejection";
+    // Replica side should also count the regular table correctly
+    auto rit2 = info2.replicaInfo.tables.find("test");
+    ASSERT_NE(rit2, info2.replicaInfo.tables.end());
+    EXPECT_EQ(rit2->second.count, 3) << "Replica table count should be 3 after view rejection";
 
     store_->ExecuteSql("DROP VIEW IF EXISTS test_view");
 }
 
 /**
  * @tc.name: PrimaryReplicaInfo_ReplayStatus_001
- * @tc.desc: AC-2.4: Diagnostic succeeds regardless of binlog support status.
+ * @tc.desc: AC-2.4: Diagnostic succeeds; verify binlogInfo.exist matches
+ *           IsSupportBinlog to confirm the replay path is actually exercised.
  * @tc.type: FUNC
  */
 HWTEST_F(PrimaryReplicaInfoTest, ReplayStatus_001, TestSize.Level1)
 {
     InsertRows(store_, 1, 2);
     auto [ret, info] = store_->GetPrimaryReplicaInfo({});
-    EXPECT_EQ(ret, E_OK);
+    EXPECT_EQ(ret, E_OK) << "Diagnostic should succeed";
+
+    // Verify that the binlog info was actually collected — if IsSupportBinlog is true,
+    // the TryReplayBinlog path was taken instead of the early-exit path.
+    RdbStoreConfig checkConfig(dbName);
+    checkConfig.SetHaMode(HAMode::MAIN_REPLICA);
+    bool supportBinlog = SqliteUtils::IsSupportBinlog(checkConfig);
+    EXPECT_EQ(info.binlogInfo.exist, supportBinlog)
+        << "binlogInfo.exist should match IsSupportBinlog (replay path verification)";
 }
 
 /**
@@ -960,7 +989,7 @@ HWTEST_F(PrimaryReplicaInfoTest, EmptyStringInTableNames_001, TestSize.Level1)
     InsertRows(store_, 1, 3);
     // Mixed vector: valid table name followed by empty string.
     // Exercises the `if (tableName.empty()) { continue; }` branch (B7E).
-    auto [ret, info] = store_->GetPrimaryReplicaInfo({"test", ""});
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test", "" });
     EXPECT_EQ(ret, E_OK);
     // "test" should be counted; empty string should be skipped via continue.
     auto it = info.primaryInfo.tables.find("test");
@@ -993,7 +1022,7 @@ HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnectionWithTable_001, TestSize.Level1
 
     // Non-empty tableNames exercises the counting loop with slaveConnection_ == nullptr (B7J).
     // The `if (slaveConnection_ != nullptr)` false branch skips replica CountTable.
-    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({"test"});
+    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({ "test" });
     EXPECT_EQ(ret, E_OK);
 
     // Primary table count is populated.
@@ -1030,7 +1059,7 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaWalStatVerified_001, TestSize.Level1)
 
     // Replica WAL was stat'd in CollectInitialFileInfo — mtime should match pre-call value.
     int64_t expectedMtime = static_cast<int64_t>(stBefore.st_mtim.tv_sec) * SqliteUtils::MSEC_PER_SEC +
-        stBefore.st_mtim.tv_nsec / SqliteUtils::NSEC_PER_MSEC;
+                            stBefore.st_mtim.tv_nsec / SqliteUtils::NSEC_PER_MSEC;
     EXPECT_EQ(info.replicaInfo.walInfo.mtime, expectedMtime)
         << "Replica WAL mtime should match pre-call stat (from CollectInitialFileInfo)";
 
@@ -1065,9 +1094,7 @@ HWTEST_F(PrimaryReplicaInfoTest, PrimaryDbStatFailure_001, TestSize.Level1)
     if (rename(dbName.c_str(), renamedPath.c_str()) != 0) {
         GTEST_SKIP() << "Cannot rename open DB file on this platform";
     }
-    ScopeGuard restore([&renamedPath, this]() {
-        rename(renamedPath.c_str(), dbName.c_str());
-    });
+    ScopeGuard restore([&renamedPath, this]() { rename(renamedPath.c_str(), dbName.c_str()); });
 
     // CollectInitialFileInfo: primary DB stat fails → error propagated immediately.
     auto [ret, info] = conn->GetPrimaryAndReplicaInfo({});
@@ -1106,4 +1133,437 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaDbStatFailure_001, TestSize.Level1)
     EXPECT_EQ(info.replicaInfo.dbInfo.mtime, 0);
     // Primary DB info should still be valid.
     EXPECT_GT(info.primaryInfo.dbInfo.size, 0);
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_PrimaryReplicaConsistency_001
+ * @tc.desc: AC-7.1: Primary and replica table row counts are equal (EQ assertion).
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, PrimaryReplicaConsistency_001, TestSize.Level1)
+{
+    // Arrange: insert rows into primary
+    InsertRows(store_, 1, 5);
+
+    // Act: get diagnostic info with table names
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test" });
+    ASSERT_EQ(ret, E_OK) << "Diagnostic should succeed on healthy MAIN_REPLICA DB";
+
+    // Assert: primary and replica table counts must be equal
+    auto pit = info.primaryInfo.tables.find("test");
+    auto rit = info.replicaInfo.tables.find("test");
+    ASSERT_NE(pit, info.primaryInfo.tables.end()) << "Primary table entry must exist";
+    ASSERT_NE(rit, info.replicaInfo.tables.end()) << "Replica table entry must exist";
+    EXPECT_EQ(pit->second.count, rit->second.count)
+        << "Primary and replica table row counts must be equal (primary=" << pit->second.count
+        << ", replica=" << rit->second.count << ")";
+    EXPECT_EQ(pit->second.count, 5) << "Both sides should have 5 rows";
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_PrimaryReplicaConsistency_002
+ * @tc.desc: AC-7.2: Primary and replica userVersion are equal (EQ assertion).
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, PrimaryReplicaConsistency_002, TestSize.Level1)
+{
+    // Arrange: set a specific user_version
+    EXPECT_EQ(store_->ExecuteSql("PRAGMA user_version = 99"), E_OK);
+    InsertRows(store_, 1, 2);
+
+    // Act
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test" });
+    ASSERT_EQ(ret, E_OK) << "Diagnostic should succeed";
+
+    // Assert: primary and replica userVersion must be equal
+    EXPECT_EQ(info.primaryInfo.userVersion, info.replicaInfo.userVersion)
+        << "Primary and replica userVersion must be equal (primary=" << info.primaryInfo.userVersion
+        << ", replica=" << info.replicaInfo.userVersion << ")";
+    EXPECT_EQ(info.primaryInfo.userVersion, 99) << "userVersion should be 99";
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_PrimaryReplicaConsistency_003
+ * @tc.desc: AC-7.3: Primary and replica DB sizes are equal after checkpoint (EQ assertion).
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, PrimaryReplicaConsistency_003, TestSize.Level1)
+{
+    // Arrange: insert rows so both DBs have data
+    InsertRows(store_, 1, 10);
+
+    // Act: diagnostic triggers checkpoint, after which both DBs should have similar sizes
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({});
+    ASSERT_EQ(ret, E_OK) << "Diagnostic should succeed";
+
+    // Assert: after checkpoint, primary and replica DB sizes should be equal
+    EXPECT_EQ(info.primaryInfo.dbInfo.size, info.replicaInfo.dbInfo.size)
+        << "Primary and replica DB sizes must be equal after checkpoint (primary=" << info.primaryInfo.dbInfo.size
+        << ", replica=" << info.replicaInfo.dbInfo.size << ")";
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_PrimaryReplicaConsistency_004
+ * @tc.desc: AC-7.4: Primary and replica modification times are close (within 60s threshold).
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, PrimaryReplicaConsistency_004, TestSize.Level1)
+{
+    // Arrange
+    InsertRows(store_, 1, 3);
+
+    // Act
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({});
+    ASSERT_EQ(ret, E_OK) << "Diagnostic should succeed";
+
+    // Assert: modification times should be close (within 60 seconds = 60000 ms)
+    int64_t primaryTime = info.GetPrimaryLastModifyTime();
+    int64_t replicaTime = info.GetReplicaLastModifyTime();
+    EXPECT_GT(primaryTime, 0) << "Primary last modify time should be positive";
+    EXPECT_GT(replicaTime, 0) << "Replica last modify time should be positive";
+    int64_t diff = std::abs(primaryTime - replicaTime);
+    EXPECT_LE(diff, 60000) << "Primary and replica modification times should be within 60s (diff=" << diff << " ms)";
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_PrimaryReplicaConsistency_005
+ * @tc.desc: AC-7.5: Multiple tables — primary and replica counts match for each table (EQ assertion).
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, PrimaryReplicaConsistency_005, TestSize.Level1)
+{
+    // Arrange: create a second table and insert data into both
+    EXPECT_EQ(store_->ExecuteSql("CREATE TABLE IF NOT EXISTS test2 (id INTEGER PRIMARY KEY, value TEXT)"), E_OK);
+    InsertRows(store_, 1, 3);
+    for (int i = 0; i < 7; i++) {
+        ValuesBucket values;
+        values.PutInt("id", i);
+        values.PutString("value", "val" + std::to_string(i));
+        int64_t rowId = 0;
+        EXPECT_EQ(store_->Insert(rowId, "test2", values), E_OK);
+    }
+
+    // Act
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test", "test2" });
+    ASSERT_EQ(ret, E_OK) << "Diagnostic should succeed";
+
+    // Assert: each table's count must match between primary and replica
+    for (const auto &tableName : { "test", "test2" }) {
+        auto pit = info.primaryInfo.tables.find(tableName);
+        auto rit = info.replicaInfo.tables.find(tableName);
+        ASSERT_NE(pit, info.primaryInfo.tables.end()) << "Primary table " << tableName << " not found";
+        ASSERT_NE(rit, info.replicaInfo.tables.end()) << "Replica table " << tableName << " not found";
+        EXPECT_EQ(pit->second.count, rit->second.count)
+            << "Table " << tableName << ": primary and replica counts must be equal (primary=" << pit->second.count
+            << ", replica=" << rit->second.count << ")";
+    }
+    // Verify exact counts
+    EXPECT_EQ(info.primaryInfo.tables["test"].count, 3) << "test table should have 3 rows";
+    EXPECT_EQ(info.primaryInfo.tables["test2"].count, 7) << "test2 table should have 7 rows";
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_ParamValidationAfterWriteSideEffect_001
+ * @tc.desc: AC-3.5: Parameter validation (E_INVALID_ARGS) occurs after checkpoint and other
+ *           write side effects; valid tables before the invalid one have counts populated
+ *           in partial results.
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, ParamValidationAfterWriteSideEffect_001, TestSize.Level1)
+{
+    // Arrange: insert rows so checkpoint has work to do
+    InsertRows(store_, 1, 5);
+
+    // Act: pass a vector with a valid table followed by an invalid table name.
+    // The diagnostic pipeline runs steps 1-4 (stat, replay, checkpoint, refresh) before
+    // step 5 (CollectVersionsAndTables) validates table names. So checkpoint side effects
+    // have already occurred when E_INVALID_ARGS is returned.
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test", "test; DROP TABLE test" });
+
+    // Assert: E_INVALID_ARGS returned for the invalid table name
+    EXPECT_EQ(ret, E_INVALID_ARGS) << "Invalid table name in vector should return E_INVALID_ARGS";
+
+    // The valid table "test" before the invalid one should have its count populated
+    // (CollectVersionsAndTables processes tables sequentially — the valid one is counted
+    // before IsValidTableName rejects the invalid one).
+    auto pit = info.primaryInfo.tables.find("test");
+    ASSERT_NE(pit, info.primaryInfo.tables.end())
+        << "Valid table 'test' should have count populated before invalid table rejected";
+    EXPECT_EQ(pit->second.count, 5) << "Valid table count should be 5 (processed before invalid table name)";
+
+    // Replica side should also have the valid table counted
+    auto rit = info.replicaInfo.tables.find("test");
+    ASSERT_NE(rit, info.replicaInfo.tables.end())
+        << "Replica side should also have 'test' counted before invalid table rejected";
+    EXPECT_EQ(rit->second.count, 5) << "Replica table count should be 5 (processed before invalid table name)";
+
+    // Verify that write side effects (checkpoint) actually occurred:
+    // After checkpoint, WAL should be truncated to 0.
+    EXPECT_EQ(info.primaryInfo.walInfo.size, 0)
+        << "WAL should be truncated (checkpoint side effect occurred before param validation)";
+
+    // Verify the table still exists (no SQL injection)
+    auto [ret2, info2] = store_->GetPrimaryReplicaInfo({ "test" });
+    EXPECT_EQ(ret2, E_OK) << "Table should still exist after injection attempt";
+    auto it2 = info2.primaryInfo.tables.find("test");
+    ASSERT_NE(it2, info2.primaryInfo.tables.end());
+    EXPECT_EQ(it2->second.count, 5) << "Data should be intact after injection attempt";
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_SlaveCountTableErrorPath_001
+ * @tc.desc: AC-4.3: When slave CountTable fails (non-existent table), the error is silently
+ *           discarded — overall ret stays E_OK, replica table gets count=-1 sentinel.
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, SlaveCountTableErrorPath_001, TestSize.Level1)
+{
+    // Arrange: insert data into a valid table
+    InsertRows(store_, 1, 3);
+
+    // Act: query both a valid table and a non-existent table.
+    // For the non-existent table, CountTable returns an error on both primary and slave,
+    // but the error codes (pErr/rErr) are discarded in CollectVersionsAndTables.
+    // The overall ret should still be E_OK (error silently discarded, not propagated).
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test", "nonexistent_table" });
+    EXPECT_EQ(ret, E_OK) << "Overall ret should be E_OK even when CountTable fails (error silently discarded)";
+
+    // Assert: valid table has correct count on both primary and replica
+    auto pit = info.primaryInfo.tables.find("test");
+    ASSERT_NE(pit, info.primaryInfo.tables.end()) << "Primary 'test' should be in tables map";
+    EXPECT_EQ(pit->second.count, 3) << "Primary 'test' should have 3 rows";
+
+    auto rit = info.replicaInfo.tables.find("test");
+    ASSERT_NE(rit, info.replicaInfo.tables.end()) << "Replica 'test' should be in tables map";
+    EXPECT_EQ(rit->second.count, 3) << "Replica 'test' should have 3 rows";
+
+    // Assert: non-existent table gets count=-1 sentinel on both sides
+    // (CountTable error is silently discarded, sentinel value stored instead)
+    auto pne = info.primaryInfo.tables.find("nonexistent_table");
+    ASSERT_NE(pne, info.primaryInfo.tables.end()) << "Primary 'nonexistent_table' should be in map";
+    EXPECT_EQ(pne->second.count, -1) << "Primary nonexistent table should have count=-1 sentinel (error discarded)";
+
+    auto rne = info.replicaInfo.tables.find("nonexistent_table");
+    ASSERT_NE(rne, info.replicaInfo.tables.end()) << "Replica 'nonexistent_table' should be in map";
+    EXPECT_EQ(rne->second.count, -1)
+        << "Replica nonexistent table should have count=-1 sentinel (error silently discarded)";
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_SlaveCountTableErrorPath_002
+ * @tc.desc: AC-4.3: When slave DB is missing (stat fails), slave CountTable is skipped —
+ *           replica tables map is empty, but primary tables are still counted correctly.
+ *           This verifies the slave CountTable error path is handled gracefully.
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, SlaveCountTableErrorPath_002, TestSize.Level1)
+{
+    // Arrange: insert data and create a standalone read connection (no slave)
+    InsertRows(store_, 1, 4);
+    store_ = nullptr;
+    RdbHelper::ClearCache();
+
+    RdbStoreConfig config(dbName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    auto [createErr, conn] = SqliteConnection::Create(config, false);
+    ASSERT_EQ(createErr, E_OK);
+    ASSERT_NE(conn, nullptr);
+
+    // Act: call diagnostic with table names — slaveConnection_ is null,
+    // so slave CountTable is never called (the `if (slaveConnection_ != nullptr)` branch is false)
+    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({ "test" });
+    EXPECT_EQ(ret, E_OK) << "Overall ret should be E_OK when slave CountTable is skipped (no slave connection)";
+
+    // Assert: primary table is counted correctly
+    auto pit = info.primaryInfo.tables.find("test");
+    ASSERT_NE(pit, info.primaryInfo.tables.end()) << "Primary 'test' should be counted";
+    EXPECT_EQ(pit->second.count, 4) << "Primary 'test' should have 4 rows";
+
+    // Assert: replica tables map is empty — slave CountTable was not called
+    EXPECT_TRUE(info.replicaInfo.tables.empty()) << "Replica tables should be empty when slave CountTable is skipped";
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_TryReplayBinlogPath_001
+ * @tc.desc: AC-2.4: When binlog is supported and exists, TryReplayBinlog is exercised.
+ *           When binlog is not supported, the early-exit path returns E_OK without replay.
+ *           This test covers both paths deterministically.
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, TryReplayBinlogPath_001, TestSize.Level1)
+{
+    InsertRows(store_, 1, 5);
+
+    // Determine if binlog is supported in this environment
+    RdbStoreConfig checkConfig(dbName);
+    checkConfig.SetHaMode(HAMode::MAIN_REPLICA);
+    bool supportBinlog = SqliteUtils::IsSupportBinlog(checkConfig);
+
+    // Act: call diagnostic — TryReplayBinlog is step 2 in the pipeline
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test" });
+    EXPECT_EQ(ret, E_OK) << "Diagnostic should succeed regardless of whether replay was taken or skipped";
+
+    // Assert: binlogInfo.exist must match IsSupportBinlog
+    EXPECT_EQ(info.binlogInfo.exist, supportBinlog)
+        << "binlogInfo.exist should match IsSupportBinlog (supportBinlog=" << supportBinlog << ")";
+
+    if (supportBinlog) {
+        // When binlog is supported and exists, TryReplayBinlog was actually called.
+        // After replay + checkpoint, primary and replica data should be consistent.
+        EXPECT_GT(info.binlogInfo.lastModifyTime, 0)
+            << "binlogInfo.lastModifyTime should be positive when binlog exists";
+        auto pit = info.primaryInfo.tables.find("test");
+        auto rit = info.replicaInfo.tables.find("test");
+        ASSERT_NE(pit, info.primaryInfo.tables.end());
+        ASSERT_NE(rit, info.replicaInfo.tables.end());
+        EXPECT_EQ(pit->second.count, rit->second.count) << "After replay, primary and replica counts should be equal";
+    } else {
+        // When binlog is not supported, TryReplayBinlog returns E_OK via early exit.
+        // binlogInfo.exist should be false, lastModifyTime should be 0.
+        EXPECT_EQ(info.binlogInfo.lastModifyTime, 0)
+            << "binlogInfo.lastModifyTime should be 0 when binlog not supported";
+    }
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_TryReplayBinlogPath_002
+ * @tc.desc: AC-2.4: TryReplayBinlog early-exit path when binlog directory does not exist.
+ *           Even if IsSupportBinlog is true, if binlogInfo.exist is false (no binlog folder),
+ *           TryReplayBinlog returns E_OK without calling ReplayBinlogSqlite.
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, TryReplayBinlogPath_002, TestSize.Level1)
+{
+    // The fixture already created the DB in SetUp, but no rows have been inserted.
+    RdbStoreConfig checkConfig(dbName);
+    checkConfig.SetHaMode(HAMode::MAIN_REPLICA);
+    bool supportBinlog = SqliteUtils::IsSupportBinlog(checkConfig);
+
+    // Act: call diagnostic on a fresh DB
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({ "test" });
+    EXPECT_EQ(ret, E_OK) << "Diagnostic should succeed on fresh DB (TryReplayBinlog early-exit or no-op)";
+
+    // Assert: the diagnostic call itself should not fail due to replay
+    // Whether binlog exists or not, the early-exit path returns E_OK
+    auto it = info.primaryInfo.tables.find("test");
+    ASSERT_NE(it, info.primaryInfo.tables.end());
+    EXPECT_EQ(it->second.count, 0) << "Fresh table should have 0 rows";
+
+    // Verify binlogInfo.exist is consistent
+    if (!supportBinlog) {
+        EXPECT_EQ(info.binlogInfo.exist, false) << "binlogInfo.exist should be false when binlog not supported";
+    }
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_CheckpointFailure_001
+ * @tc.desc: AC-5.2: When the primary DB TRUNCATE checkpoint cannot acquire the
+ *           writer lock (held by a concurrent open write transaction),
+ *           CheckpointDatabases returns SQLITE_BUSY and GetPrimaryAndReplicaInfo
+ *           propagates it instead of swallowing the error. Partial diagnostic
+ *           results collected before checkpoint remain available.
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, CheckpointFailure_001, TestSize.Level1)
+{
+    // Arrange: insert data to generate WAL content on the primary DB.
+    InsertRows(store_, 1, 5);
+
+    // Act: open and hold a write transaction on the fixture store so the primary
+    // writer lock stays held. A second writer's TRUNCATE checkpoint cannot grab
+    // the exclusive writer lock while this transaction is open, so
+    // sqlite3_wal_checkpoint_v2 returns SQLITE_BUSY after the busy handler times out.
+    EXPECT_EQ(store_->BeginTransaction(), E_OK);
+    // Roll back the fixture transaction on every exit path (including ASSERT abort),
+    // so a dangling uncommitted transaction never leaks into later test cases.
+    // This mirrors the ScopeGuard RAII convention used in PrimaryDbStatFailure_001.
+    ScopeGuard rollbackTxn([this]() { store_->RollBack(); });
+    ValuesBucket values;
+    values.PutInt("id", 999);
+    values.PutString("name", "lock_holder");
+    values.PutInt("age", 99);
+    int64_t rowId = 0;
+    EXPECT_EQ(store_->Insert(rowId, "test", values), E_OK);
+    // Transaction is still open — do NOT commit yet.
+
+    // Create a separate direct WRITE connection. Only a writer enters the
+    // CheckpointDatabases branch (dbHandle_ != nullptr && isWriter_); a read
+    // connection (isWriter_ == false) skips checkpoint entirely and the failure
+    // path under test would be dead code.
+    RdbStoreConfig config(dbName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    auto [createErr, conn] = SqliteConnection::Create(config, true);
+    ASSERT_EQ(createErr, E_OK);
+    ASSERT_NE(conn, nullptr);
+
+    // The diagnostic call: the second writer's primary TRUNCATE checkpoint fails to
+    // acquire the writer lock held by the fixture store's open transaction and
+    // returns SQLITE_BUSY. GetPrimaryAndReplicaInfo must propagate that error.
+    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({});
+
+    // Assert: the checkpoint failure (SQLITE_BUSY) is propagated, not swallowed as E_OK.
+    EXPECT_EQ(ret, E_SQLITE_BUSY)
+        << "TRUNCATE checkpoint under a concurrent write transaction should fail with SQLITE_BUSY";
+    // Partial results collected by CollectInitialFileInfo before checkpoint are still present.
+    EXPECT_GT(info.primaryInfo.dbInfo.size, 0)
+        << "Partial results should be present even when checkpoint failed (ret=" << ret << ")";
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_CheckpointFailure_002
+ * @tc.desc: Verify graceful handling when the replica WAL/SHM files are missing:
+ *           SQLite rebuilds the WAL on reopen, checkpoint succeeds, and
+ *           GetPrimaryAndReplicaInfo returns E_OK with primary data intact.
+ *           (Reliably forcing a slave-side checkpoint *failure* via file
+ *           manipulation is not achievable because SQLite recovers from a
+ *           missing/corrupt WAL; the slave-checkpoint error-propagation path is
+ *           structurally identical to the primary one covered by
+ *           CheckpointFailure_001, which exercises the same
+ *           `if (ckptErr != SQLITE_OK) return SQLiteError::ErrNo(ckptErr)` branch.)
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, CheckpointFailure_002, TestSize.Level1)
+{
+    // Arrange: insert data to generate WAL content on both primary and replica
+    InsertRows(store_, 1, 5);
+    // Force a first checkpoint to ensure slave DB has data
+    auto [preRet, preInfo] = store_->GetPrimaryReplicaInfo({});
+    EXPECT_EQ(preRet, E_OK) << "Pre-diagnostic should succeed";
+
+    // Release the fixture store so we can manipulate files
+    store_ = nullptr;
+    RdbHelper::ClearCache();
+
+    // Remove the slave WAL and SHM auxiliary files. Unlike the previous
+    // "corrupt the slave WAL" framing, deleting WAL/SHM while no connection
+    // holds the DB is SQLite's standard recovery scenario: on reopen the WAL is
+    // rebuilt and checkpoint succeeds, so this guards *missing-file tolerance*,
+    // not failure propagation.
+    std::string slaveWalPath = slaveDbName + "-wal";
+    std::string slaveShmPath = slaveDbName + "-shm";
+    if (access(slaveWalPath.c_str(), F_OK) == 0) {
+        EXPECT_EQ(unlink(slaveWalPath.c_str()), 0) << "Should delete slave WAL file";
+    }
+    if (access(slaveShmPath.c_str(), F_OK) == 0) {
+        EXPECT_EQ(unlink(slaveShmPath.c_str()), 0) << "Should delete slave SHM file";
+    }
+
+    // Create a new write connection — it reopens the slave DB and rebuilds the WAL.
+    RdbStoreConfig config(dbName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    auto [createErr, conn] = SqliteConnection::Create(config, true);
+    ASSERT_EQ(createErr, E_OK) << "Reopen after WAL removal should succeed";
+    ASSERT_NE(conn, nullptr);
+
+    // Act: call diagnostic — checkpoint rebuilds the (now missing) WAL and succeeds.
+    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({ "test" });
+
+    // Assert: the diagnostic handles the missing slave WAL gracefully (E_OK),
+    // and primary data is still intact.
+    EXPECT_EQ(ret, E_OK) << "Missing slave WAL/SHM should be recovered gracefully";
+    auto pit = info.primaryInfo.tables.find("test");
+    EXPECT_NE(pit, info.primaryInfo.tables.end()) << "Primary table info should be present";
+    if (pit != info.primaryInfo.tables.end()) {
+        EXPECT_GE(pit->second.count, 5) << "Primary should have at least 5 rows";
+    }
 }
