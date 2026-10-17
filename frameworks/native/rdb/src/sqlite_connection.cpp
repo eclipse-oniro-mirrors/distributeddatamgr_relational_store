@@ -2250,7 +2250,10 @@ void SqliteConnection::BinlogOnErrFunc(void *pCtx, int errNo, char *errMsg, cons
     auto event = Reportor::Create(cfg, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL,
         "slave binlog replay failed", false, true);
     event.subCaseDesc = RdbSubCase::NON_FIRST_PAGE;
-    Reportor::ReportCorruptedOnce(event);
+    auto pool = TaskExecutor::GetInstance().GetExecutor();
+    if (pool != nullptr) {
+        pool->Execute([event]() { Reportor::ReportCorruptedOnce(event); });
+    }
     SqliteUtils::SetSlaveInvalid(dbPathStr, SqliteUtils::SlaveInvalidReason::BINLOG_REPLAY_FAILED);
 }
 
