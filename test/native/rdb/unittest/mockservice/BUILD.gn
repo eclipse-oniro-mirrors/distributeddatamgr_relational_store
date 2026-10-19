@@ -187,7 +187,10 @@ template("mockservice_unittest") {
 
 ###############################################################################
 mockservice_unittest("NativeRdbConditionTest") {
-  sources = [ "rdb_store_impl_test.cpp" ]
+  sources = [
+    "rdb_store_impl_notifier_test.cpp",
+    "rdb_store_impl_test.cpp",
+  ]
 }
 
 mockservice_unittest("NativeRdbAsyncAfterOpenTest") {

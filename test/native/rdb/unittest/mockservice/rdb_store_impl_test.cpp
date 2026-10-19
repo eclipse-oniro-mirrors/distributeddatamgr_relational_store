@@ -18,13 +18,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <chrono>
-#include <condition_variable>
-#include <cstddef>
-#include <mutex>
-#include <thread>
-#include <vector>
-
 #include "common.h"
 #include "connection_mock.h"
 #include "dataobs_mgr_client_mock.h"
@@ -73,9 +66,9 @@ public:
     void SetUp();
     void TearDown();
     static std::shared_ptr<SubObserver> observer_;
-    static const std::string databaseName;
-    static const std::string databaseBackupName;
-    static const std::string defaultDatabaseName;
+    static const std::string DATABASE_NAME;
+    static const std::string DATABASE_BACKUP_NAME;
+    static const std::string DEFAULT_DATABASE_NAME;
     static inline std::shared_ptr<MockRdbManager> mockRdbManagerImpl = nullptr;
     static inline std::shared_ptr<MockDataObsMgrClient> mockDataObsMgrClient = nullptr;
     static inline std::shared_ptr<MockStatement> mockStatement = nullptr;
@@ -85,10 +78,10 @@ protected:
     std::shared_ptr<RdbStore> store_;
 };
 
-const std::string RdbStoreImplConditionTest::databaseName = RDB_TEST_PATH + "rdb_store_impl_condition_test.db";
-const std::string RdbStoreImplConditionTest::databaseBackupName =
+const std::string RdbStoreImplConditionTest::DATABASE_NAME = RDB_TEST_PATH + "rdb_store_impl_condition_test.db";
+const std::string RdbStoreImplConditionTest::DATABASE_BACKUP_NAME =
     RDB_TEST_PATH + "rdb_store_impl_condition_test_backup.db";
-const std::string RdbStoreImplConditionTest::defaultDatabaseName = RDB_TEST_PATH + "default_condition_test.db";
+const std::string RdbStoreImplConditionTest::DEFAULT_DATABASE_NAME = RDB_TEST_PATH + "default_condition_test.db";
 
 std::shared_ptr<SubObserver> RdbStoreImplConditionTest::observer_ = nullptr;
 
@@ -96,17 +89,17 @@ class RdbStoreImplConditionTestOpenCallback : public RdbOpenCallback {
 public:
     int OnCreate(RdbStore &store) override;
     int OnUpgrade(RdbStore &store, int oldVersion, int newVersion) override;
-    static const std::string createTableTest;
+    static const std::string CREATE_TABLE_TEST;
 };
 
-const std::string RdbStoreImplConditionTestOpenCallback::createTableTest =
+const std::string RdbStoreImplConditionTestOpenCallback::CREATE_TABLE_TEST =
     std::string("CREATE TABLE IF NOT EXISTS employee ") + std::string("(id INTEGER PRIMARY KEY AUTOINCREMENT, "
                                                                       "name TEXT NOT NULL, age INTEGER, salary "
                                                                       "REAL, blobType BLOB)");
 
 int RdbStoreImplConditionTestOpenCallback::OnCreate(RdbStore &store)
 {
-    return store.ExecuteSql(createTableTest);
+    return store.ExecuteSql(CREATE_TABLE_TEST);
 }
 
 int RdbStoreImplConditionTestOpenCallback::OnUpgrade(RdbStore &store, int oldVersion, int newVersion)
@@ -140,7 +133,7 @@ void RdbStoreImplConditionTest::TearDownTestCase(void)
 void RdbStoreImplConditionTest::SetUp(void)
 {
     int errCode;
-    RdbStoreConfig config(RdbStoreImplConditionTest::defaultDatabaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DEFAULT_DATABASE_NAME);
     RdbStoreImplConditionTestOpenCallback helper;
     store_ = RdbHelper::GetRdbStore(config, 0, helper, errCode);
     EXPECT_NE(store_, nullptr);
@@ -151,9 +144,9 @@ void RdbStoreImplConditionTest::TearDown(void)
 {
     store_ = nullptr;
     RdbHelper::ClearCache();
-    int errCode = RdbHelper::DeleteRdbStore(defaultDatabaseName);
+    int errCode = RdbHelper::DeleteRdbStore(DEFAULT_DATABASE_NAME);
     EXPECT_EQ(E_OK, errCode);
-    errCode = RdbHelper::DeleteRdbStore(databaseName);
+    errCode = RdbHelper::DeleteRdbStore(DATABASE_NAME);
     EXPECT_EQ(E_OK, errCode);
 }
 
@@ -168,7 +161,7 @@ HWTEST_F(RdbStoreImplConditionTest, Rdb_RemoteQueryTest_003, TestSize.Level2)
     AbsRdbPredicates predicates("test");
     predicates.EqualTo("id", 1);
 
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetName("RdbStore_impl_test.db");
     config.SetBundleName("com.example.distributed.rdb");
     config.SetDBType(DB_SQLITE);
@@ -182,7 +175,7 @@ HWTEST_F(RdbStoreImplConditionTest, Rdb_RemoteQueryTest_003, TestSize.Level2)
     ASSERT_EQ(nullptr, ret);
 
     store = nullptr;
-    RdbHelper::DeleteRdbStore(RdbStoreImplConditionTest::databaseName);
+    RdbHelper::DeleteRdbStore(RdbStoreImplConditionTest::DATABASE_NAME);
 }
 
 /* *
@@ -199,7 +192,7 @@ HWTEST_F(RdbStoreImplConditionTest, Rdb_RemoteQueryTest_005, TestSize.Level2)
     AbsRdbPredicates predicates("test");
     predicates.EqualTo("id", 1);
 
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetName("RdbStore_impl_test.db");
     config.SetBundleName("com.example.distributed.rdb");
     config.SetDBType(DB_SQLITE);
@@ -213,7 +206,7 @@ HWTEST_F(RdbStoreImplConditionTest, Rdb_RemoteQueryTest_005, TestSize.Level2)
     ASSERT_EQ(nullptr, ret);
 
     store = nullptr;
-    RdbHelper::DeleteRdbStore(RdbStoreImplConditionTest::databaseName);
+    RdbHelper::DeleteRdbStore(RdbStoreImplConditionTest::DATABASE_NAME);
 }
 
 /* *
@@ -223,7 +216,7 @@ HWTEST_F(RdbStoreImplConditionTest, Rdb_RemoteQueryTest_005, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, NotifyDataChangeTest_005, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetDBType(DB_SQLITE);
     config.SetRegisterInfo(RegisterType::CLIENT_OBSERVER, true);
@@ -239,7 +232,7 @@ HWTEST_F(RdbStoreImplConditionTest, NotifyDataChangeTest_005, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, NotifyDataChangeTest_006, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(true);
     config.SetDBType(DB_SQLITE);
     config.SetRegisterInfo(RegisterType::CLIENT_OBSERVER, true);
@@ -258,7 +251,7 @@ HWTEST_F(RdbStoreImplConditionTest, NotifyDataChangeTest_007, TestSize.Level2)
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(true);
     config.SetDBType(DB_VECTOR);
     config.SetRegisterInfo(RegisterType::CLIENT_OBSERVER, true);
@@ -274,7 +267,7 @@ HWTEST_F(RdbStoreImplConditionTest, NotifyDataChangeTest_007, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, NotifyDataChangeTest_009, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(true);
     config.SetDBType(DB_SQLITE);
     config.SetRegisterInfo(RegisterType::OBSERVER_END, true);
@@ -291,7 +284,7 @@ HWTEST_F(RdbStoreImplConditionTest, NotifyDataChangeTest_009, TestSize.Level2)
 HWTEST_F(RdbStoreImplConditionTest, ObtainDistributedTableNameTest_003, TestSize.Level2)
 {
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetDBType(DB_SQLITE);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -309,7 +302,7 @@ HWTEST_F(RdbStoreImplConditionTest, ObtainDistributedTableNameTest_003, TestSize
  */
 HWTEST_F(RdbStoreImplConditionTest, GetUriTest_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetDataGroupId("123");
     auto storeImlp = std::make_shared<RdbStoreImpl>(config);
     auto uri = storeImlp->GetUri("test");
@@ -327,7 +320,7 @@ HWTEST_F(RdbStoreImplConditionTest, Rdb_QuerySharingResourceTest_004, TestSize.L
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, QuerySharingResource(_, _, _)).WillOnce(Return(std::make_pair(E_ERROR, nullptr)));
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetName("RdbStore_impl_test.db");
     config.SetBundleName("com.example.distributed.rdb");
     RdbStoreImplConditionTestOpenCallback helper;
@@ -353,7 +346,7 @@ HWTEST_F(RdbStoreImplConditionTest, Rdb_QuerySharingResourceTest_005, TestSize.L
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, QuerySharingResource(_, _, _)).WillOnce(Return(std::make_pair(E_OK, nullptr)));
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetName("RdbStore_impl_test.db");
     config.SetBundleName("com.example.distributed.rdb");
     RdbStoreImplConditionTestOpenCallback helper;
@@ -376,7 +369,7 @@ HWTEST_F(RdbStoreImplConditionTest, Rdb_QuerySharingResourceTest_005, TestSize.L
 HWTEST_F(RdbStoreImplConditionTest, Abnormal_CleanDirtyDataTest_002, TestSize.Level2)
 {
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetDBType(DB_SQLITE);
     config.SetStorageMode(StorageMode::MODE_DISK);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -400,7 +393,7 @@ HWTEST_F(RdbStoreImplConditionTest, Abnormal_CleanDirtyDataTest_003, TestSize.Le
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(true);
     config.SetDBType(DB_VECTOR);
     config.SetStorageMode(StorageMode::MODE_DISK);
@@ -425,7 +418,7 @@ HWTEST_F(RdbStoreImplConditionTest, Abnormal_CleanDirtyDataTest_006, TestSize.Le
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetDBType(DB_VECTOR);
     config.SetStorageMode(StorageMode::MODE_DISK);
@@ -450,7 +443,7 @@ HWTEST_F(RdbStoreImplConditionTest, Abnormal_CleanDirtyDataTest_007, TestSize.Le
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(true);
     config.SetDBType(DB_VECTOR);
     config.SetStorageMode(StorageMode::MODE_DISK);
@@ -475,7 +468,7 @@ HWTEST_F(RdbStoreImplConditionTest, Abnormal_CleanDirtyDataTest_009, TestSize.Le
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetDBType(DB_VECTOR);
     config.SetStorageMode(StorageMode::MODE_DISK);
@@ -497,7 +490,7 @@ HWTEST_F(RdbStoreImplConditionTest, Abnormal_CleanDirtyDataTest_009, TestSize.Le
 HWTEST_F(RdbStoreImplConditionTest, Abnormal_CleanDirtyDataTest_010, TestSize.Level2)
 {
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetDBType(DB_SQLITE);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
@@ -521,7 +514,7 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStoreSubscribeRemote_001, TestSize.Level2
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetDBType(DB_VECTOR);
     RdbStoreImplConditionTestOpenCallback helper;
     int errCode = E_OK;
@@ -541,7 +534,7 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStoreSubscribeRemote_001, TestSize.Level2
  */
 HWTEST_F(RdbStoreImplConditionTest, RdbStoreSubscribeRemote_002, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetDBType(DB_SQLITE);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -565,7 +558,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDistributedTables_Test_001, TestSize.Leve
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, SetDistributedTables(_, _, _, _, _)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -592,7 +585,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDistributedTables_Test_002, TestSize.Leve
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, SetDistributedTables(_, _, _, _, _)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -619,7 +612,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDistributedTables_Test_003, TestSize.Leve
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, SetDistributedTables(_, _, _, _, _)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -648,7 +641,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDistributedTables_Test_004, TestSize.Leve
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, SetDistributedTables(_, _, _, _, _)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -676,7 +669,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDistributedTables_Test_005, TestSize.Leve
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, SetDistributedTables(_, _, _, _, _)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -704,7 +697,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDistributedTables_Test_006, TestSize.Leve
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, SetDistributedTables(_, _, _, _, _)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -732,7 +725,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDistributedTables_Test_007, TestSize.Leve
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, SetDistributedTables(_, _, _, _, _)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -760,7 +753,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDistributedTables_Test_008, TestSize.Leve
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, SetDistributedTables(_, _, _, _, _)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -788,9 +781,9 @@ HWTEST_F(RdbStoreImplConditionTest, RetainDeviceData_Test_001, TestSize.Level2)
 {
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
-    EXPECT_CALL(*mockRdbService, RetainDeviceData(_, _))
-        .WillOnce(Return(std::make_pair(RdbStatus::RDB_DB_NOT_EXIST, 0)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    EXPECT_CALL(*mockRdbService, RetainDeviceData(_, _)).WillOnce(
+        Return(std::make_pair(RdbStatus::RDB_DB_NOT_EXIST, 0)));
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -817,7 +810,7 @@ HWTEST_F(RdbStoreImplConditionTest, RetainDeviceData_Test_002, TestSize.Level2)
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
@@ -841,7 +834,7 @@ HWTEST_F(RdbStoreImplConditionTest, RetainDeviceData_Test_002, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, RetainDeviceData_Test_003, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     config.SetDBType(DB_SQLITE);
@@ -868,7 +861,7 @@ HWTEST_F(RdbStoreImplConditionTest, RetainDeviceData_Test_004, TestSize.Level2)
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_))
         .WillRepeatedly(Return(std::make_pair(E_SQLITE_ERROR, mockRdbService)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -894,7 +887,7 @@ HWTEST_F(RdbStoreImplConditionTest, RetainDeviceData_Test_005, TestSize.Level2)
 {
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -917,7 +910,7 @@ HWTEST_F(RdbStoreImplConditionTest, RetainDeviceData_Test_006, TestSize.Level2)
 {
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -942,7 +935,7 @@ HWTEST_F(RdbStoreImplConditionTest, RetainDeviceData_Test_007, TestSize.Level2)
 {
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -968,7 +961,7 @@ HWTEST_F(RdbStoreImplConditionTest, RetainDeviceData_Test_008, TestSize.Level2)
 {
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -996,7 +989,7 @@ HWTEST_F(RdbStoreImplConditionTest, RetainDeviceData_Test_009, TestSize.Level2)
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, RetainDeviceData(_, _)).WillOnce(Return(std::make_pair(RdbStatus::RDB_OK, 0)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -1022,7 +1015,7 @@ HWTEST_F(RdbStoreImplConditionTest, RetainDeviceData_Test_010, TestSize.Level2)
 {
     auto mockRdbService = nullptr;
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -1046,7 +1039,7 @@ HWTEST_F(RdbStoreImplConditionTest, UpdateDistributedInfo_Test_001, TestSize.Lev
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
@@ -1069,7 +1062,7 @@ HWTEST_F(RdbStoreImplConditionTest, UpdateDistributedInfo_Test_001, TestSize.Lev
  */
 HWTEST_F(RdbStoreImplConditionTest, UpdateDistributedInfo_Test_002, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     config.SetDBType(DB_SQLITE);
@@ -1094,7 +1087,7 @@ HWTEST_F(RdbStoreImplConditionTest, UpdateDistributedInfo_Test_003, TestSize.Lev
 {
     auto mockRdbService = nullptr;
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -1121,7 +1114,7 @@ HWTEST_F(RdbStoreImplConditionTest, UpdateDistributedInfo_Test_004, TestSize.Lev
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_))
         .WillRepeatedly(Return(std::make_pair(E_SERVICE_NOT_FOUND, mockRdbService)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -1150,7 +1143,7 @@ HWTEST_F(RdbStoreImplConditionTest, UpdateDistributedInfo_Test_005, TestSize.Lev
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, ObtainUuid(_, _))
         .WillOnce(Return(std::make_pair(RdbStatus::RDB_NON_SYSTEM_APP, uuids)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -1178,7 +1171,7 @@ HWTEST_F(RdbStoreImplConditionTest, UpdateDistributedInfo_Test_006, TestSize.Lev
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, ObtainUuid(_, _)).WillOnce(Return(std::make_pair(E_OK, uuids)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -1209,7 +1202,7 @@ HWTEST_F(RdbStoreImplConditionTest, UpdateDistributedInfo_Test_007, TestSize.Lev
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, ObtainUuid(_, _)).WillOnce(Return(std::make_pair(E_OK, uuids)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -1240,7 +1233,7 @@ HWTEST_F(RdbStoreImplConditionTest, UpdateDistributedInfo_Test_008, TestSize.Lev
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, ObtainUuid(_, _)).WillOnce(Return(std::make_pair(E_OK, uuids)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -1278,7 +1271,7 @@ HWTEST_F(RdbStoreImplConditionTest, UpdateDistributedInfo_Test_008, TestSize.Lev
  */
 HWTEST_F(RdbStoreImplConditionTest, UpdateDistributedInfo_Test_009, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -1304,7 +1297,7 @@ HWTEST_F(RdbStoreImplConditionTest, Notify_Test_001, TestSize.Level2)
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -1323,7 +1316,7 @@ HWTEST_F(RdbStoreImplConditionTest, Notify_Test_001, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, Notify_Test_002, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     config.SetDBType(DB_SQLITE);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -1345,7 +1338,7 @@ HWTEST_F(RdbStoreImplConditionTest, Notify_Test_004, TestSize.Level2)
     //mock client->NotifyChange(GetUri(event))
     auto dataObsMgrClient = std::make_shared<DataObsMgrClient>();
     EXPECT_CALL(*mockDataObsMgrClient, GetInstance()).WillOnce(Return(dataObsMgrClient));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -1364,7 +1357,7 @@ HWTEST_F(RdbStoreImplConditionTest, Notify_Test_004, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, SetSearchable_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     config.SetDBType(DB_SQLITE);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -1385,7 +1378,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetSearchable_Test_002, TestSize.Level2)
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -1403,7 +1396,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetSearchable_Test_002, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, RequestFullDataDonation_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     config.SetDBType(DB_SQLITE);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -1425,7 +1418,7 @@ HWTEST_F(RdbStoreImplConditionTest, RequestFullDataDonation_Test_002, TestSize.L
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -1444,7 +1437,7 @@ HWTEST_F(RdbStoreImplConditionTest, RequestFullDataDonation_Test_002, TestSize.L
  */
 HWTEST_F(RdbStoreImplConditionTest, RequestFullDataDonation_Test_003, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -1452,7 +1445,7 @@ HWTEST_F(RdbStoreImplConditionTest, RequestFullDataDonation_Test_003, TestSize.L
     int errCode;
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
     ASSERT_NE(store, nullptr) << "store is null";
-    store->ExecuteSql(RdbStoreImplConditionTestOpenCallback::createTableTest);
+    store->ExecuteSql(RdbStoreImplConditionTestOpenCallback::CREATE_TABLE_TEST);
     store = nullptr;
     RdbHelper::ClearCache();
     config.SetReadOnly(true);
@@ -1471,7 +1464,7 @@ HWTEST_F(RdbStoreImplConditionTest, RequestFullDataDonation_Test_003, TestSize.L
 HWTEST_F(RdbStoreImplConditionTest, RequestFullDataDonation_Test_004, TestSize.Level2)
 {
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_ERROR, nullptr)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -1494,7 +1487,7 @@ HWTEST_F(RdbStoreImplConditionTest, RequestFullDataDonation_Test_005, TestSize.L
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, RequestFullDataDonation(_, _)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -1517,7 +1510,7 @@ HWTEST_F(RdbStoreImplConditionTest, RequestFullDataDonation_Test_006, TestSize.L
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
     EXPECT_CALL(*mockRdbService, RequestFullDataDonation(_, _)).WillOnce(Return(E_DB_NOT_EXIST));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
@@ -1537,17 +1530,17 @@ HWTEST_F(RdbStoreImplConditionTest, RequestFullDataDonation_Test_006, TestSize.L
  */
 HWTEST_F(RdbStoreImplConditionTest, IsProxy_SkipAcl_Test_001, TestSize.Level2)
 {
-    constexpr int32_t serviceGid = 3012;
+    constexpr int32_t SERVICE_GID = 3012;
     EXPECT_CALL(*mockRdbManagerImpl, IsProxy()).WillRepeatedly(Return(false));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetBundleName("com.example.distributed.rdb");
     config.SetSearchable(true);
     RdbStoreImplConditionTestOpenCallback helper;
     int errCode;
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
     ASSERT_NE(store, nullptr) << "store is null";
-    EXPECT_EQ(false, SqliteUtils::HasAccessAcl(RdbStoreImplConditionTest::databaseName, serviceGid));
-    RdbHelper::DeleteRdbStore(RdbStoreImplConditionTest::databaseName);
+    EXPECT_EQ(false, SqliteUtils::HasAccessAcl(RdbStoreImplConditionTest::DATABASE_NAME, SERVICE_GID));
+    RdbHelper::DeleteRdbStore(RdbStoreImplConditionTest::DATABASE_NAME);
 }
 
 /**
@@ -1560,7 +1553,7 @@ HWTEST_F(RdbStoreImplConditionTest, RegisterAutoSyncCallback_Test_001, TestSize.
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -1579,7 +1572,7 @@ HWTEST_F(RdbStoreImplConditionTest, RegisterAutoSyncCallback_Test_001, TestSize.
  */
 HWTEST_F(RdbStoreImplConditionTest, RegisterAutoSyncCallback_Test_002, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     config.SetDBType(DB_SQLITE);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -1599,7 +1592,7 @@ HWTEST_F(RdbStoreImplConditionTest, RegisterAutoSyncCallback_Test_002, TestSize.
 HWTEST_F(RdbStoreImplConditionTest, RegisterAutoSyncCallback_Test_003, TestSize.Level2)
 {
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_ERROR, nullptr)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -1618,7 +1611,7 @@ HWTEST_F(RdbStoreImplConditionTest, RegisterAutoSyncCallback_Test_003, TestSize.
  */
 HWTEST_F(RdbStoreImplConditionTest, UnregisterAutoSyncCallback_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     config.SetDBType(DB_SQLITE);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -1640,7 +1633,7 @@ HWTEST_F(RdbStoreImplConditionTest, UnregisterAutoSyncCallback_Test_002, TestSiz
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -1660,7 +1653,7 @@ HWTEST_F(RdbStoreImplConditionTest, UnregisterAutoSyncCallback_Test_002, TestSiz
 HWTEST_F(RdbStoreImplConditionTest, UnregisterAutoSyncCallback_Test_003, TestSize.Level2)
 {
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_ERROR, nullptr)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -1682,147 +1675,13 @@ HWTEST_F(RdbStoreImplConditionTest, RegisterDataChangeCallback_Test_001, TestSiz
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
     storeImpl->connectionPool_ = nullptr;
     auto res = storeImpl->RegisterDataChangeCallback();
     EXPECT_EQ(E_ALREADY_CLOSED, res);
-}
-
-namespace {
-struct ConcurrentRegistrationResult {
-    std::vector<int32_t> resultCodes;
-    std::vector<std::shared_ptr<DelayNotify>> notifiers;
-    bool allAttemptsStarted = false;
-    bool registrationLocked = false;
-};
-
-struct ConcurrentRegistrationContext {
-    std::mutex startMutex;
-    std::condition_variable startCondition;
-    int32_t readyCount = 0;
-    int32_t attemptCount = 0;
-    bool start = false;
-};
-
-void CreateRegistrationThreads(const std::shared_ptr<RdbStoreImpl> &storeImpl, ConcurrentRegistrationResult &result,
-    ConcurrentRegistrationContext &context, std::vector<std::thread> &threads, int32_t threadCount)
-{
-    threads.reserve(threadCount);
-    for (int32_t i = 0; i < threadCount; ++i) {
-        threads.emplace_back([storeImpl, &result, &context, i]() {
-            {
-                std::unique_lock<std::mutex> lock(context.startMutex);
-                ++context.readyCount;
-                context.startCondition.notify_one();
-                context.startCondition.wait(lock, [&context]() { return context.start; });
-                ++context.attemptCount;
-            }
-            context.startCondition.notify_one();
-            result.resultCodes[i] = storeImpl->RegisterDataChangeCallback(false);
-            result.notifiers[i] = storeImpl->GetDelayNotifier();
-        });
-    }
-}
-
-void StartRegistrationThreads(ConcurrentRegistrationContext &context, int32_t threadCount)
-{
-    {
-        std::unique_lock<std::mutex> lock(context.startMutex);
-        context.startCondition.wait(lock, [&context, threadCount]() { return context.readyCount == threadCount; });
-        context.start = true;
-    }
-    context.startCondition.notify_all();
-}
-
-bool WaitForRegistrationAttempts(
-    ConcurrentRegistrationContext &context, int32_t threadCount, std::chrono::seconds timeout)
-{
-    std::unique_lock<std::mutex> lock(context.startMutex);
-    return context.startCondition.wait_for(
-        lock, timeout, [&context, threadCount]() { return context.attemptCount == threadCount; });
-}
-
-bool IsRegistrationBlocked(
-    const std::shared_ptr<RdbStoreImpl> &storeImpl, std::chrono::steady_clock::time_point deadline)
-{
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (!storeImpl->dataChangeMutex_.try_lock()) {
-            return true;
-        }
-        storeImpl->dataChangeMutex_.unlock();
-        std::this_thread::yield();
-    }
-    return false;
-}
-
-void JoinRegistrationThreads(std::vector<std::thread> &threads)
-{
-    for (auto &thread : threads) {
-        thread.join();
-    }
-}
-
-ConcurrentRegistrationResult RunConcurrentRegistration(
-    const std::shared_ptr<RdbStoreImpl> &storeImpl, std::shared_ptr<Connection> &heldConnection)
-{
-    constexpr int32_t threadCount = 8;
-    constexpr int32_t registrationTimeoutSeconds = 2;
-    constexpr auto registrationTimeout = std::chrono::seconds(registrationTimeoutSeconds);
-    ConcurrentRegistrationResult result;
-    result.resultCodes.resize(threadCount, E_ERROR);
-    result.notifiers.resize(threadCount);
-    ConcurrentRegistrationContext context;
-    std::vector<std::thread> threads;
-    CreateRegistrationThreads(storeImpl, result, context, threads, threadCount);
-    StartRegistrationThreads(context, threadCount);
-    result.allAttemptsStarted = WaitForRegistrationAttempts(context, threadCount, registrationTimeout);
-    auto lockDeadline = std::chrono::steady_clock::now() + registrationTimeout;
-    result.registrationLocked = result.allAttemptsStarted && IsRegistrationBlocked(storeImpl, lockDeadline);
-    heldConnection.reset();
-    JoinRegistrationThreads(threads);
-    return result;
-}
-} // namespace
-
-/**
- * @tc.name: RegisterDataChangeCallback_ConcurrentInitialization_001
- * @tc.desc: Concurrent registration initializes and publishes one usable notifier
- * @tc.type: FUNC
- */
-HWTEST_F(RdbStoreImplConditionTest, RegisterDataChangeCallback_ConcurrentInitialization_001, TestSize.Level2)
-{
-    constexpr int32_t writeConnectionTimeout = 30;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
-    config.SetReadOnly(false);
-    config.SetWriteTime(writeConnectionTimeout);
-    config.SetStorageMode(StorageMode::MODE_DISK);
-    config.SetDBType(DB_SQLITE);
-    RdbStoreImplConditionTestOpenCallback helper;
-    int errCode = E_OK;
-    auto store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
-    ASSERT_NE(nullptr, store);
-    ASSERT_EQ(E_OK, errCode);
-    auto storeImpl = std::static_pointer_cast<RdbStoreImpl>(store);
-    ASSERT_FALSE(storeImpl->config_.GetRegisterInfo(RegisterType::CLIENT_OBSERVER));
-    auto connectionPool = storeImpl->GetPool();
-    ASSERT_NE(nullptr, connectionPool);
-    auto heldConnection = connectionPool->AcquireConnection(false);
-    ASSERT_NE(nullptr, heldConnection);
-
-    auto result = RunConcurrentRegistration(storeImpl, heldConnection);
-    EXPECT_TRUE(result.allAttemptsStarted);
-    EXPECT_TRUE(result.registrationLocked);
-    for (std::size_t i = 0; i < result.resultCodes.size(); ++i) {
-        EXPECT_EQ(E_OK, result.resultCodes[i]);
-        ASSERT_NE(nullptr, result.notifiers[i]);
-        EXPECT_EQ(result.notifiers[0], result.notifiers[i]);
-    }
-    EXPECT_TRUE(storeImpl->config_.GetRegisterInfo(RegisterType::CLIENT_OBSERVER));
-    EXPECT_NE(nullptr, result.notifiers[0]->pool_);
-    EXPECT_TRUE(result.notifiers[0]->task_);
 }
 
 /**
@@ -1834,7 +1693,7 @@ HWTEST_F(RdbStoreImplConditionTest, ModifyLockStatusk_Test_001, TestSize.Level2)
 {
     RdbStoreImplConditionTestOpenCallback helper;
     int errCode;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
     ASSERT_NE(store, nullptr) << "store is null";
     store = nullptr;
@@ -1858,7 +1717,7 @@ HWTEST_F(RdbStoreImplConditionTest, ModifyLockStatusk_Test_002, TestSize.Level2)
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
     config.SetReadOnly(true);
@@ -1881,7 +1740,7 @@ HWTEST_F(RdbStoreImplConditionTest, ModifyLockStatusk_Test_003, TestSize.Level2)
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
     config.SetReadOnly(false);
@@ -1902,7 +1761,7 @@ HWTEST_F(RdbStoreImplConditionTest, ModifyLockStatusk_Test_003, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, ModifyLockStatusk_Test_004, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     config.SetDBType(DB_SQLITE);
     config.SetReadOnly(false);
@@ -1922,7 +1781,7 @@ HWTEST_F(RdbStoreImplConditionTest, ModifyLockStatusk_Test_004, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, ModifyLockStatusk_Test_005, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
     config.SetReadOnly(false);
@@ -1942,7 +1801,7 @@ HWTEST_F(RdbStoreImplConditionTest, ModifyLockStatusk_Test_005, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, ModifyLockStatusk_Test_006, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
     config.SetReadOnly(false);
@@ -1962,7 +1821,7 @@ HWTEST_F(RdbStoreImplConditionTest, ModifyLockStatusk_Test_006, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, ModifyLockStatusk_Test_007, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
     config.SetReadOnly(false);
@@ -1982,7 +1841,7 @@ HWTEST_F(RdbStoreImplConditionTest, ModifyLockStatusk_Test_007, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, LockCloudContainer_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     config.SetDBType(DB_SQLITE);
     config.SetReadOnly(false);
@@ -2006,7 +1865,7 @@ HWTEST_F(RdbStoreImplConditionTest, LockCloudContainer_Test_002, TestSize.Level2
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
     config.SetReadOnly(false);
@@ -2031,7 +1890,7 @@ HWTEST_F(RdbStoreImplConditionTest, LockCloudContainer_Test_003, TestSize.Level2
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
     config.SetReadOnly(true);
@@ -2054,7 +1913,7 @@ HWTEST_F(RdbStoreImplConditionTest, LockCloudContainer_Test_004, TestSize.Level2
 {
     RdbStoreImplConditionTestOpenCallback helper;
     int errCode;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
     ASSERT_NE(store, nullptr) << "store is null";
     store = nullptr;
@@ -2077,7 +1936,7 @@ HWTEST_F(RdbStoreImplConditionTest, LockCloudContainer_Test_004, TestSize.Level2
 HWTEST_F(RdbStoreImplConditionTest, LockCloudContainer_Test_005, TestSize.Level2)
 {
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_NOT_SUPPORT, nullptr)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
     config.SetReadOnly(false);
@@ -2101,7 +1960,7 @@ HWTEST_F(RdbStoreImplConditionTest, Vector_Test_001, TestSize.Level2)
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetDBType(DB_VECTOR);
     RdbStoreImplConditionTestOpenCallback helper;
     int errCode;
@@ -2127,7 +1986,7 @@ HWTEST_F(RdbStoreImplConditionTest, Vector_Test_001, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, ExecuteForChangedRowCount_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     RdbStoreImplConditionTestOpenCallback helper;
     int errCode;
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
@@ -2154,7 +2013,7 @@ HWTEST_F(RdbStoreImplConditionTest, ExecuteForChangedRowCount_Test_002, TestSize
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetDBType(DB_VECTOR);
     config.SetReadOnly(true);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -2178,7 +2037,7 @@ HWTEST_F(RdbStoreImplConditionTest, ExecuteForChangedRowCount_Test_003, TestSize
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetDBType(DB_VECTOR);
     config.SetReadOnly(false);
     RdbStoreImplConditionTestOpenCallback helper;
@@ -2200,7 +2059,7 @@ HWTEST_F(RdbStoreImplConditionTest, ExecuteForChangedRowCount_Test_003, TestSize
 HWTEST_F(RdbStoreImplConditionTest, SetDefaultEncryptSql_Test_001, TestSize.Level2)
 {
     EXPECT_CALL(*mockStatement, Prepare(_)).WillOnce(Return(E_ERROR));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
     const std::string sql = "SELECT * FROM employee";
     auto res = storeImpl->SetDefaultEncryptSql(mockStatement, sql, config);
@@ -2217,7 +2076,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDefaultEncryptSql_Test_002, TestSize.Leve
     std::vector<ValueObject> args;
     EXPECT_CALL(*mockStatement, Prepare(_)).WillOnce(Return(E_OK));
     EXPECT_CALL(*mockStatement, Execute(args)).WillOnce(Return(E_SQLITE_BUSY));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
     const std::string sql = "SELECT * FROM employee";
     auto res = storeImpl->SetDefaultEncryptSql(mockStatement, sql, config);
@@ -2231,7 +2090,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDefaultEncryptSql_Test_002, TestSize.Leve
  */
 HWTEST_F(RdbStoreImplConditionTest, SetDefaultEncryptAlgo_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
     auto res = storeImpl->SetDefaultEncryptAlgo(nullptr, config);
     EXPECT_EQ(E_DATABASE_BUSY, res);
@@ -2244,7 +2103,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDefaultEncryptAlgo_Test_001, TestSize.Lev
  */
 HWTEST_F(RdbStoreImplConditionTest, SetDefaultEncryptAlgo_Test_002, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     RdbStoreConfig::CryptoParam cryptoParam;
     config.SetCryptoParam(cryptoParam);
     config.SetIter(-1);
@@ -2262,7 +2121,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDefaultEncryptAlgo_Test_003, TestSize.Lev
 {
     EXPECT_CALL(*mockConnection, CreateStatement(_, _, _)).WillOnce(Return(std::make_pair(E_OK, mockStatement)));
     EXPECT_CALL(*mockStatement, Prepare(_)).WillOnce(Return(E_ERROR));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     RdbStoreConfig::CryptoParam cryptoParam;
     config.SetCryptoParam(cryptoParam);
     config.SetIter(1);
@@ -2282,7 +2141,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDefaultEncryptAlgo_Test_004, TestSize.Lev
     std::vector<ValueObject> args;
     EXPECT_CALL(*mockStatement, Prepare(_)).WillOnce(Return(E_OK)).WillOnce(Return(E_ERROR));
     EXPECT_CALL(*mockStatement, Execute(args)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     RdbStoreConfig::CryptoParam cryptoParam;
     config.SetCryptoParam(cryptoParam);
     config.SetIter(1);
@@ -2302,7 +2161,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDefaultEncryptAlgo_Test_005, TestSize.Lev
     std::vector<ValueObject> args;
     EXPECT_CALL(*mockStatement, Prepare(_)).WillOnce(Return(E_OK)).WillOnce(Return(E_OK)).WillOnce(Return(E_ERROR));
     EXPECT_CALL(*mockStatement, Execute(args)).WillOnce(Return(E_OK)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     RdbStoreConfig::CryptoParam cryptoParam;
     config.SetCryptoParam(cryptoParam);
     config.SetIter(1);
@@ -2326,7 +2185,7 @@ HWTEST_F(RdbStoreImplConditionTest, SetDefaultEncryptAlgo_Test_006, TestSize.Lev
         .WillOnce(Return(E_OK))
         .WillOnce(Return(E_ERROR));
     EXPECT_CALL(*mockStatement, Execute(args)).WillOnce(Return(E_OK)).WillOnce(Return(E_OK)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     RdbStoreConfig::CryptoParam cryptoParam;
     config.SetCryptoParam(cryptoParam);
     config.SetIter(1);
@@ -2344,7 +2203,7 @@ HWTEST_F(RdbStoreImplConditionTest, Backup_Test_001, TestSize.Level2)
 {
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetReadOnly(false);
     config.SetHaMode(HAMode::SINGLE);
@@ -2355,7 +2214,7 @@ HWTEST_F(RdbStoreImplConditionTest, Backup_Test_001, TestSize.Level2)
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
     ASSERT_NE(store, nullptr) << "store is null";
     std::vector<uint8_t> encryptKey;
-    auto res = store->Backup(RdbStoreImplConditionTest::databaseBackupName, encryptKey);
+    auto res = store->Backup(RdbStoreImplConditionTest::DATABASE_BACKUP_NAME, encryptKey);
     EXPECT_EQ(E_OK, res);
 }
 
@@ -2367,7 +2226,7 @@ HWTEST_F(RdbStoreImplConditionTest, Backup_Test_001, TestSize.Level2)
 HWTEST_F(RdbStoreImplConditionTest, Backup_Test_002, TestSize.Level2)
 {
     std::vector<ValueObject> args;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetReadOnly(false);
     config.SetHaMode(HAMode::SINGLE);
@@ -2376,7 +2235,7 @@ HWTEST_F(RdbStoreImplConditionTest, Backup_Test_002, TestSize.Level2)
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
     ASSERT_NE(store, nullptr) << "store is null";
     std::vector<uint8_t> encryptKey;
-    auto res = store->Backup(RdbStoreImplConditionTest::databaseBackupName, encryptKey);
+    auto res = store->Backup(RdbStoreImplConditionTest::DATABASE_BACKUP_NAME, encryptKey);
     EXPECT_EQ(E_OK, res);
 }
 
@@ -2387,13 +2246,13 @@ HWTEST_F(RdbStoreImplConditionTest, Backup_Test_002, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, Attach_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetEncryptStatus(true);
     RdbStoreImplConditionTestOpenCallback helper;
     int errCode;
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
     ASSERT_NE(store, nullptr) << "store is null";
-    RdbStoreConfig config1(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config1(RdbStoreImplConditionTest::DATABASE_NAME);
     config1.SetReadOnly(false);
     config1.SetDBType(DB_SQLITE);
     config1.SetHaMode(HAMode::SINGLE);
@@ -2410,7 +2269,7 @@ HWTEST_F(RdbStoreImplConditionTest, Attach_Test_001, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, ExecuteByTrxId_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetIsVector(true);
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
@@ -2426,7 +2285,7 @@ HWTEST_F(RdbStoreImplConditionTest, ExecuteByTrxId_Test_001, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, ExecuteByTrxId_Test_002, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetIsVector(true);
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
@@ -2443,7 +2302,7 @@ HWTEST_F(RdbStoreImplConditionTest, ExecuteByTrxId_Test_002, TestSize.Level2)
 HWTEST_F(RdbStoreImplConditionTest, Restore_Test_001, TestSize.Level2)
 {
     std::vector<uint8_t> newKey;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(true);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
@@ -2459,7 +2318,7 @@ HWTEST_F(RdbStoreImplConditionTest, Restore_Test_001, TestSize.Level2)
 HWTEST_F(RdbStoreImplConditionTest, Restore_Test_002, TestSize.Level2)
 {
     std::vector<uint8_t> newKey;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(false);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
@@ -2475,7 +2334,7 @@ HWTEST_F(RdbStoreImplConditionTest, Restore_Test_002, TestSize.Level2)
 HWTEST_F(RdbStoreImplConditionTest, Restore_Test_003, TestSize.Level2)
 {
     std::vector<uint8_t> newKey;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetReadOnly(true);
     config.SetStorageMode(StorageMode::MODE_DISK);
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
@@ -2490,7 +2349,7 @@ HWTEST_F(RdbStoreImplConditionTest, Restore_Test_003, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, GetStatement_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
     const std::string sql = "ATTACH DATABASE 'database.db';";
     auto res = storeImpl->GetStatement(sql, nullptr);
@@ -2504,7 +2363,7 @@ HWTEST_F(RdbStoreImplConditionTest, GetStatement_Test_001, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, InterruptBackup_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetHaMode(HAMode::SINGLE);
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
     auto res = storeImpl->InterruptBackup();
@@ -2519,7 +2378,7 @@ HWTEST_F(RdbStoreImplConditionTest, InterruptBackup_Test_001, TestSize.Level2)
 HWTEST_F(RdbStoreImplConditionTest, InterruptBackup_Test_003, TestSize.Level2)
 {
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetHaMode(HAMode::MANUAL_TRIGGER);
     RdbStoreImplConditionTestOpenCallback helper;
     auto store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
@@ -2530,7 +2389,7 @@ HWTEST_F(RdbStoreImplConditionTest, InterruptBackup_Test_003, TestSize.Level2)
     auto res = storeImpl->InterruptBackup();
     EXPECT_EQ(E_OK, res);
     store = nullptr;
-    RdbHelper::DeleteRdbStore(RdbStoreImplConditionTest::databaseName);
+    RdbHelper::DeleteRdbStore(RdbStoreImplConditionTest::DATABASE_NAME);
 }
 
 /**
@@ -2540,7 +2399,7 @@ HWTEST_F(RdbStoreImplConditionTest, InterruptBackup_Test_003, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, GetBackupStatus_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetHaMode(HAMode::SINGLE);
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
     auto res = storeImpl->GetBackupStatus();
@@ -2554,7 +2413,7 @@ HWTEST_F(RdbStoreImplConditionTest, GetBackupStatus_Test_001, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, GetBackupStatus_Test_002, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetHaMode(HAMode::MANUAL_TRIGGER);
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
     *(storeImpl->slaveStatus_) = BACKING_UP;
@@ -2569,7 +2428,7 @@ HWTEST_F(RdbStoreImplConditionTest, GetBackupStatus_Test_002, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, CleanDirtyLog_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     config.SetDBType(DB_SQLITE);
     config.SetReadOnly(false);
@@ -2592,7 +2451,7 @@ HWTEST_F(RdbStoreImplConditionTest, CleanDirtyLog_Test_002, TestSize.Level2)
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
     config.SetReadOnly(false);
@@ -2614,7 +2473,7 @@ HWTEST_F(RdbStoreImplConditionTest, CleanDirtyLog_Test_004, TestSize.Level2)
 {
     RdbStoreImplConditionTestOpenCallback helper;
     int errCode;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
     ASSERT_NE(store, nullptr) << "store is null";
     store = nullptr;
@@ -2635,7 +2494,7 @@ HWTEST_F(RdbStoreImplConditionTest, CleanDirtyLog_Test_004, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, ArchiveSyncedData_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     config.SetDBType(DB_SQLITE);
     config.SetReadOnly(false);
@@ -2658,7 +2517,7 @@ HWTEST_F(RdbStoreImplConditionTest, ArchiveSyncedData_Test_002, TestSize.Level2)
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
     config.SetReadOnly(false);
@@ -2680,7 +2539,7 @@ HWTEST_F(RdbStoreImplConditionTest, ArchiveSyncedData_Test_003, TestSize.Level2)
 {
     RdbStoreImplConditionTestOpenCallback helper;
     int errCode;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
     ASSERT_NE(store, nullptr) << "store is null";
     store = nullptr;
@@ -2701,7 +2560,7 @@ HWTEST_F(RdbStoreImplConditionTest, ArchiveSyncedData_Test_003, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, DeleteSyncedData_Test_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_MEMORY);
     config.SetDBType(DB_SQLITE);
     config.SetReadOnly(false);
@@ -2724,7 +2583,7 @@ HWTEST_F(RdbStoreImplConditionTest, DeleteSyncedData_Test_002, TestSize.Level2)
     if (!IsUsingArkData()) {
         GTEST_SKIP() << "Current testcase is not compatible from current rdb";
     }
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_VECTOR);
     config.SetReadOnly(false);
@@ -2746,7 +2605,7 @@ HWTEST_F(RdbStoreImplConditionTest, DeleteSyncedData_Test_003, TestSize.Level2)
 {
     RdbStoreImplConditionTestOpenCallback helper;
     int errCode;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
     ASSERT_NE(store, nullptr) << "store is null";
     store = nullptr;
@@ -2790,7 +2649,7 @@ HWTEST_F(RdbStoreImplConditionTest, CloudTables_Change_Test_001, TestSize.Level2
  */
 HWTEST_F(RdbStoreImplConditionTest, RdbStore_Transaction_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetTransactionTime(1);
     RdbStoreImplConditionTestOpenCallback helper;
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
@@ -2807,7 +2666,7 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_Transaction_001, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, RdbStore_Transaction_002, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetTransactionTime(1);
     RdbStoreImplConditionTestOpenCallback helper;
     auto storeImpl1 = std::make_shared<RdbStoreImpl>(config);
@@ -2829,7 +2688,7 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_Transaction_002, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, RdbStore_RollBack_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetTransactionTime(1);
     RdbStoreImplConditionTestOpenCallback helper;
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
@@ -2848,7 +2707,7 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_RollBack_001, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, RdbStore_RollBack_002, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetTransactionTime(1);
     RdbStoreImplConditionTestOpenCallback helper;
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
@@ -2866,7 +2725,7 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_RollBack_002, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, RdbStore_RollBack_003, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetTransactionTime(1);
     RdbStoreImplConditionTestOpenCallback helper;
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
@@ -2886,7 +2745,7 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_RollBack_003, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, RdbStore_Commit_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetTransactionTime(1);
     RdbStoreImplConditionTestOpenCallback helper;
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
@@ -2905,7 +2764,7 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_Commit_001, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, RdbStore_Commit_002, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetTransactionTime(1);
     RdbStoreImplConditionTestOpenCallback helper;
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
@@ -2923,7 +2782,7 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_Commit_002, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, RdbStore_Commit_003, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetTransactionTime(1);
     RdbStoreImplConditionTestOpenCallback helper;
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
@@ -2943,7 +2802,7 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_Commit_003, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, Dump_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     RdbStoreImplConditionTestOpenCallback helper;
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
     storeImpl->Init(0, helper);
@@ -2959,7 +2818,7 @@ HWTEST_F(RdbStoreImplConditionTest, Dump_001, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, Dump_002, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     RdbStoreImplConditionTestOpenCallback helper;
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
     storeImpl->Init(0, helper);
@@ -2975,7 +2834,7 @@ HWTEST_F(RdbStoreImplConditionTest, Dump_002, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, Dump_003, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetTransactionTime(1);
     RdbStoreImplConditionTestOpenCallback helper;
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
@@ -2998,13 +2857,13 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_SyncEx_011, TestSize.Level2)
         .WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
 
     EXPECT_CALL(*mockRdbService, Sync(_, _, _, _))
-        .WillOnce([](const auto &, const auto &, const auto &, const auto &async) {
+        .WillOnce([](const auto&, const auto&, const auto&, const auto& async) {
             async({});
             return RdbStatus::RDB_PERMISSION_DENIED;
         });
 
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetBundleName("com.example.test");
     config.SetName("test_db");
     RdbStoreImplConditionTestOpenCallback helper;
@@ -3027,13 +2886,13 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_SyncEx_012, TestSize.Level2)
         .WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
 
     EXPECT_CALL(*mockRdbService, Sync(_, _, _, _))
-        .WillOnce([](const auto &, const auto &, const auto &, const auto &async) {
+        .WillOnce([](const auto&, const auto&, const auto&, const auto& async) {
             async({});
             return E_ERROR;
         });
 
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetBundleName("com.example.test");
     config.SetName("test_db");
     RdbStoreImplConditionTestOpenCallback helper;
@@ -3056,11 +2915,11 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_SyncEx_013, TestSize.Level2)
         .WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
 
     EXPECT_CALL(*mockRdbService, Sync(_, _, _, _))
-        .WillOnce([](const auto &, const auto &, const auto &, const auto &async) {
+        .WillOnce([](const auto&, const auto&, const auto&, const auto& async) {
             async({});
             return E_OK;
         })
-        .WillOnce([](const auto &, const auto &, const auto &, const auto &async) {
+        .WillOnce([](const auto&, const auto&, const auto&, const auto& async) {
             OHOS::DistributedRdb::Details details;
             OHOS::DistributedRdb::ProgressDetail detail1;
             detail1.progress = 100;
@@ -3079,7 +2938,7 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_SyncEx_013, TestSize.Level2)
         });
 
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetBundleName("com.example.test");
     config.SetName("test_db");
     RdbStoreImplConditionTestOpenCallback helper;
@@ -3120,13 +2979,13 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_SyncEx_014, TestSize.Level2)
         .WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
 
     EXPECT_CALL(*mockRdbService, Sync(_, _, _, _))
-        .WillOnce([](const auto &, const auto &, const auto &, const auto &async) {
+        .WillOnce([](const auto&, const auto&, const auto&, const auto& async) {
             async({});
             return RdbStatus::RDB_INVALID_ARGS;
         });
 
     int errCode = E_OK;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetBundleName("com.example.test");
     config.SetName("test_db");
     RdbStoreImplConditionTestOpenCallback helper;
@@ -3144,7 +3003,7 @@ HWTEST_F(RdbStoreImplConditionTest, RdbStore_SyncEx_014, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, UpdateMatrixTest_001, TestSize.Level2)
 {
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetDBType(DB_SQLITE);
     config.SetSearchable(true);
     config.SetRegisterInfo(RegisterType::CLIENT_OBSERVER, true);
@@ -3155,7 +3014,7 @@ HWTEST_F(RdbStoreImplConditionTest, UpdateMatrixTest_001, TestSize.Level2)
     storeImpl->NotifyDataChange();
     EXPECT_EQ(storeImpl->config_.GetRegisterInfo(RegisterType::CLIENT_OBSERVER), true);
 }
-
+ 
 /**
  * @tc.name: UpdateMatrixTest_002
  * @tc.desc: Test update matrix when conn is normal
@@ -3165,13 +3024,14 @@ HWTEST_F(RdbStoreImplConditionTest, UpdateMatrixTest_002, TestSize.Level2)
 {
     auto mockRdbService = std::make_shared<MockRdbService>();
     EXPECT_CALL(*mockRdbService, RegisterMatrix(_, _)).WillRepeatedly(Return(E_OK));
-    EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
-
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_))
+        .WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
+ 
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     config.SetDBType(DB_SQLITE);
     config.SetSearchable(true);
     config.SetRegisterInfo(RegisterType::CLIENT_OBSERVER, true);
-
+ 
     RdbStoreImplConditionTestOpenCallback helper;
     auto storeImpl = std::make_shared<RdbStoreImpl>(config);
     storeImpl->Init(0, helper);
@@ -3187,10 +3047,11 @@ HWTEST_F(RdbStoreImplConditionTest, UpdateMatrixTest_002, TestSize.Level2)
  */
 HWTEST_F(RdbStoreImplConditionTest, RegisterMatrix_GetServiceInvalidArgs_Test, TestSize.Level2)
 {
-    EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_INVALID_ARGS, nullptr)));
+    EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_))
+        .WillRepeatedly(Return(std::make_pair(E_INVALID_ARGS, nullptr)));
 
     OHOS::DistributedRdb::RdbSyncerParam param;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     RdbStoreImpl::RegisterMatrix(config, param, 0);
 }
 
@@ -3208,6 +3069,6 @@ HWTEST_F(RdbStoreImplConditionTest, RegisterMatrix_PoolExpired_Test, TestSize.Le
     EXPECT_CALL(*mockRdbService, RegisterMatrix(_, _)).WillRepeatedly(Return(E_OK));
 
     OHOS::DistributedRdb::RdbSyncerParam param;
-    RdbStoreConfig config(RdbStoreImplConditionTest::databaseName);
+    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
     RdbStoreImpl::RegisterMatrix(config, param, 0); // no pool passed: connection creation is skipped
 }
