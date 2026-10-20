@@ -1767,7 +1767,7 @@ HWTEST_F(RdbDoubleWriteTest, RdbStore_DoubleWrite_Huge_DB_008, TestSize.Level3)
     LOG_INFO("---- step 2: corrupt both slave and master db ----");
     store = nullptr;
     slaveStore = nullptr;
-    EXPECT_TRUE(SqliteUtils::CopyFile(DATABASE_NAME + "-dwr", DATABASE_NAME));
+    EXPECT_TRUE(SqliteUtils::CopyFile(DATABASE_NAME + "-dwr", DATABASE_NAME, "common"));
     std::fstream file(SLAVE_DATABASE_NAME, std::ios::in | std::ios::out | std::ios::binary);
     file.seekp(1, std::ios::beg);
     std::vector<char> null_buffer(count, '\0');
@@ -1810,7 +1810,7 @@ HWTEST_F(RdbDoubleWriteTest, RdbStore_DoubleWrite_Huge_DB_009, TestSize.Level3)
     LOG_INFO("---- step 2: corrupt master db ----");
     store = nullptr;
     slaveStore = nullptr;
-    EXPECT_TRUE(SqliteUtils::CopyFile(DATABASE_NAME + "-dwr", DATABASE_NAME));
+    EXPECT_TRUE(SqliteUtils::CopyFile(DATABASE_NAME + "-dwr", DATABASE_NAME, "common"));
     SqliteUtils::DeleteFile(RdbDoubleWriteTest::DATABASE_NAME + "-dwr");
     SqliteUtils::DeleteFile(RdbDoubleWriteTest::SLAVE_DATABASE_NAME + "-dwr");
     LOG_INFO("---- step 3: reopen should give ok ----");
@@ -1938,7 +1938,7 @@ HWTEST_F(RdbDoubleWriteTest, CreateReplicaStatement_Test_002, TestSize.Level2)
 HWTEST_F(RdbDoubleWriteTest, CreateReplicaStatement_Test_003, TestSize.Level2)
 {
     InitDb();
-    EXPECT_TRUE(SqliteUtils::CopyFile(SLAVE_DATABASE_NAME + "-dwr", SLAVE_DATABASE_NAME));
+    EXPECT_TRUE(SqliteUtils::CopyFile(SLAVE_DATABASE_NAME + "-dwr", SLAVE_DATABASE_NAME, "common"));
 
     RdbStoreConfig config(RdbDoubleWriteTest::DATABASE_NAME);
     config.SetHaMode(HAMode::MANUAL_TRIGGER);

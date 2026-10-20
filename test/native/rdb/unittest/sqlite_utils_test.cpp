@@ -799,7 +799,7 @@ HWTEST_F(SqliteUtilsTest, CopyFile001, TestSize.Level1)
     EXPECT_NE(desFd, -1) << "open des file failed." << std::strerror(errno);
     close(desFd);
 
-    bool res = SqliteUtils::CopyFile(srcFilename, desFilename);
+    bool res = SqliteUtils::CopyFile(srcFilename, desFilename, "common");
     EXPECT_EQ(res, true);
 
     std::remove(srcFilename.c_str());
