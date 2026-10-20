@@ -1,5 +1,5 @@
-/*
- * Copyright (c) 2022 Huawei Device Co., Ltd.
+/**
+ * Copyright (c) 2022-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -22,12 +22,20 @@
 #include <securec.h>
 #include <sstream>
 #include <iomanip>
-#include <openssl/hmac.h>
+#include <algorithm>
+#include <array>
+#include <limits>
+#include <memory>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <string>
+
+#if !defined(WINDOWS_PLATFORM) && !defined(MAC_PLATFORM)
+#include "crypt_eal_mac.h"
+#include "crypt_errno.h"
+#endif
 
 #include "directory_ex.h"
 #include "file_ex.h"
@@ -191,25 +199,36 @@ bool RdbSecurityManager::SaveSecretKeyToFile(const std::string &keyFile, const s
 
 std::vector<char> RdbSecurityManager::GenerateHMAC(std::vector<char> &data)
 {
-    unsigned char hmacResult[EVP_MAX_MD_SIZE] = {0};
-    unsigned int hmacLen = 0;
-    std::string key = "";
-    std::vector<char> result;
-    result.resize(HMAC_SIZE, 0);
-
-    HMAC(EVP_sha256(),
-         key.c_str(), static_cast<int>(key.length()),
-         reinterpret_cast<const unsigned char*>(data.data()), static_cast<int>(data.size()),
-         hmacResult, &hmacLen);
-    if (hmacLen == 0) {
-        LOG_ERROR("hmac generate failed");
-        Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_HMAC_FILE, E_DFX_HMAC_KEY_FAIL,
-            GetBundleName(), "hmac generate failed" + std::to_string(hmacLen)));
+    constexpr uint32_t SHA256_SIZE = 32;
+    std::vector<char> result(HMAC_SIZE, 0);
+    std::array<uint8_t, SHA256_SIZE> digest{};
+    uint32_t length = digest.size();
+    int32_t ret = E_ERROR;
+#if !defined(WINDOWS_PLATFORM) && !defined(MAC_PLATFORM)
+    std::unique_ptr<CRYPT_EAL_MacCtx, decltype(&CRYPT_EAL_MacFreeCtx)> ctx(
+        CRYPT_EAL_MacNewCtx(CRYPT_MAC_HMAC_SHA256), CRYPT_EAL_MacFreeCtx);
+    const uint8_t emptyKey = 0;
+    ret = ctx == nullptr ? CRYPT_MEM_ALLOC_FAIL : CRYPT_EAL_MacInit(ctx.get(), &emptyKey, 0);
+    if (ret == CRYPT_SUCCESS) {
+        ret = data.size() > std::numeric_limits<uint32_t>::max()
+                  ? CRYPT_INVALID_ARG
+                  : CRYPT_EAL_MacUpdate(
+                        ctx.get(), reinterpret_cast<const uint8_t *>(data.data()), static_cast<uint32_t>(data.size()));
+    }
+    if (ret == CRYPT_SUCCESS) {
+        ret = CRYPT_EAL_MacFinal(ctx.get(), digest.data(), &length);
+    }
+#else
+    // Preserve the failure fallback of the former Windows/macOS HMAC mock.
+    (void)data;
+#endif
+    if (ret != E_OK || length != digest.size()) {
+        LOG_ERROR("GenerateHMAC failed, ret:%{public}d, len:%{public}u", ret, length);
+        Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_HMAC_FILE, E_DFX_HMAC_KEY_FAIL, GetBundleName(),
+            "hmac generate failed " + std::to_string(ret)));
         return result;
     }
-    for (unsigned int i = 0; i < HMAC_SIZE && i < hmacLen; ++i) {
-        result[i] = static_cast<char>(hmacResult[i]);
-    }
+    std::copy_n(digest.begin(), HMAC_SIZE, result.begin());
     return result;
 }
 

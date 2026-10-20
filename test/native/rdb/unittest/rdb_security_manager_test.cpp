@@ -1,5 +1,5 @@
-/*
- * Copyright (c) 2024 Huawei Device Co., Ltd.
+/**
+ * Copyright (c) 2024-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -18,6 +18,8 @@
 #include <block_data.h>
 #include <gtest/gtest.h>
 
+#include <array>
+#include <future>
 #include <thread>
 
 #include "common.h"
@@ -223,6 +225,111 @@ HWTEST_F(RdbSecurityManagerTest, KeyFilesLockTest001, TestSize.Level1)
     RdbSecurityManager::KeyFiles keyFiles(filePath);
     keyFiles.lock_ = "";
     EXPECT_EQ(keyFiles.Lock(false), E_INVALID_FILE_PATH);
+}
+
+/**
+ * @brief Preserve the eight-byte empty-key HMAC-SHA256 file checksum.
+ * @tc.name: Rdb_Hmac_TruncatedDigest_001
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbSecurityManagerTest, Rdb_Hmac_TruncatedDigest_001, TestSize.Level1)
+{
+    // Arrange: fixed OpenSSL baseline for the binary payload below.
+    std::vector<char> data = { 2, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+    const std::string cipher = "work-key-ciphertext";
+    data.insert(data.end(), cipher.begin(), cipher.end());
+    const std::vector<uint8_t> baseline = { 0x0b, 0xe8, 0xb9, 0x5e, 0x9b, 0xb9, 0x18, 0xaf };
+    const std::vector<char> expected(baseline.begin(), baseline.end());
+    // Act.
+    const auto actual = RdbSecurityManager::GetInstance().GenerateHMAC(data);
+    // Assert.
+    EXPECT_EQ(actual, expected) << "key file checksum must preserve its first eight bytes";
+}
+
+/**
+ * @brief Parse old payloads and retain the existing mismatch and short-file behavior.
+ * @tc.name: Rdb_Hmac_UnpackCompatibility_001
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbSecurityManagerTest, Rdb_Hmac_UnpackCompatibility_001, TestSize.Level1)
+{
+    // Arrange: fixed payload and old OpenSSL checksum; no device-bound key material.
+    std::vector<char> content = { 2, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+    const std::string cipher = "work-key-ciphertext";
+    content.insert(content.end(), cipher.begin(), cipher.end());
+    const std::vector<uint8_t> baseline = { 0x0b, 0xe8, 0xb9, 0x5e, 0x9b, 0xb9, 0x18, 0xaf };
+    content.insert(content.end(), baseline.begin(), baseline.end());
+    auto &manager = RdbSecurityManager::GetInstance();
+    // Act and Assert: both matching and mismatching checksums retain their parsed payload.
+    for (const bool mismatch : { false, true }) {
+        if (mismatch) {
+            content.back() ^= 1;
+        }
+        const auto [ok, parsed] = manager.Unpack(content);
+        ASSERT_TRUE(ok) << "checksum mismatch=" << mismatch;
+        EXPECT_EQ(parsed.version, 2) << "checksum mismatch=" << mismatch;
+        EXPECT_EQ(parsed.nonce_, (std::vector<uint8_t>{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }))
+            << "nonce must be preserved";
+        EXPECT_EQ(parsed.encrypt_, std::vector<uint8_t>(cipher.begin(), cipher.end())) << "cipher payload";
+    }
+    EXPECT_FALSE(manager.Unpack(std::vector<char>(manager.HMAC_SIZE, 0)).first) << "short file";
+}
+
+/**
+ * @brief Match fixed OpenSSL checksums for empty, short and SHA256 block-boundary inputs.
+ * @tc.name: Rdb_Hmac_KnownVectors_001
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbSecurityManagerTest, Rdb_Hmac_KnownVectors_001, TestSize.Level1)
+{
+    // Arrange: independently generated empty-key HMAC-SHA256 prefixes.
+    const std::vector<std::pair<size_t, std::array<uint8_t, 8>>> vectors = {
+        { 0, { 0xb6, 0x13, 0x67, 0x9a, 0x08, 0x14, 0xd9, 0xec } },
+        { 63, { 0x37, 0x36, 0xd9, 0xd7, 0x8b, 0x4a, 0xb6, 0x03 } },
+        { 64, { 0x34, 0xa7, 0xbf, 0x3d, 0xf3, 0xb7, 0xac, 0x1c } },
+        { 65, { 0x06, 0x78, 0x75, 0x53, 0x5a, 0x92, 0x02, 0xee } },
+    };
+    for (const auto &[size, bytes] : vectors) {
+        std::vector<char> data(size);
+        for (size_t i = 0; i < size; ++i) {
+            data[i] = static_cast<char>(i);
+        }
+        // Act.
+        const auto actual = RdbSecurityManager::GetInstance().GenerateHMAC(data);
+        // Assert.
+        EXPECT_EQ(actual, std::vector<char>(bytes.begin(), bytes.end())) << "input bytes=" << size;
+    }
+}
+
+/**
+ * @brief Concurrent calls compute separate message digests without sharing a MAC context.
+ * @tc.name: Rdb_Hmac_ConcurrentMessages_001
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbSecurityManagerTest, Rdb_Hmac_ConcurrentMessages_001, TestSize.Level2)
+{
+    // Arrange: release all workers with a shared future; no timing assumptions.
+    const std::vector<std::vector<char>> inputs = { {}, { 'a', 'b', 'c' } };
+    const std::vector<std::vector<uint8_t>> baselines = {
+        { 0xb6, 0x13, 0x67, 0x9a, 0x08, 0x14, 0xd9, 0xec },
+        { 0xfd, 0x7a, 0xdb, 0x15, 0x2c, 0x05, 0xef, 0x80 },
+    };
+    std::promise<void> start;
+    const auto ready = start.get_future().share();
+    std::vector<std::future<std::vector<char>>> workers;
+    for (size_t i = 0; i < 8; ++i) {
+        workers.emplace_back(std::async(std::launch::async, [ready, data = inputs[i % inputs.size()]]() mutable {
+            ready.wait();
+            return RdbSecurityManager::GetInstance().GenerateHMAC(data);
+        }));
+    }
+    // Act.
+    start.set_value();
+    // Assert.
+    for (size_t i = 0; i < workers.size(); ++i) {
+        const auto &bytes = baselines[i % baselines.size()];
+        EXPECT_EQ(workers[i].get(), std::vector<char>(bytes.begin(), bytes.end())) << "worker=" << i;
+    }
 }
 
 } // namespace Test

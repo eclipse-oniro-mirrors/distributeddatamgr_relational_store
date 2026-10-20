@@ -1,4 +1,4 @@
-# Copyright (c) 2021 Huawei Device Co., Ltd.
+# Copyright (c) 2021-2026 Huawei Device Co., Ltd.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -103,7 +103,8 @@ ohos_unittest("NativeRdbMultiProcessTest") {
   defines = [ "RELATIONAL_STORE" ]
 
   external_deps = [
-    "openssl:libcrypto_shared",
+    "openhitls:openhitls_bsl",
+    "openhitls:openhitls_crypto",
     "c_utils:utils",
     "googletest:gtest_main",
     "json:nlohmann_json_static",
@@ -295,7 +296,8 @@ ohos_unittest("SilentProxyTest") {
     "googletest:gtest",
     "googletest:gtest_main",
     "json:nlohmann_json_static",
-    "openssl:libcrypto_shared",
+    "openhitls:openhitls_bsl",
+    "openhitls:openhitls_crypto",
     "sqlite:sqlite",
     "sqlite:sqliteicu",
   ]
@@ -472,7 +474,8 @@ ohos_unittest("NativeRdbTest") {
     "c_utils:utils",
     "googletest:gtest_main",
     "json:nlohmann_json_static",
-    "openssl:libcrypto_shared",
+    "openhitls:openhitls_bsl",
+    "openhitls:openhitls_crypto",
     "sqlite:sqlite",
   ]
   external_deps += external_deps_file_api
@@ -601,7 +604,8 @@ ohos_unittest("RdbAuditTest") {
     "c_utils:utils",
     "googletest:gtest_main",
     "json:nlohmann_json_static",
-    "openssl:libcrypto_shared",
+    "openhitls:openhitls_bsl",
+    "openhitls:openhitls_crypto",
     "sqlite:sqlite",
     "sqlite:sqliteicu",
   ]
@@ -743,7 +747,8 @@ ohos_unittest("RdbAuditTxnTest") {
     "c_utils:utils",
     "googletest:gtest_main",
     "json:nlohmann_json_static",
-    "openssl:libcrypto_shared",
+    "openhitls:openhitls_bsl",
+    "openhitls:openhitls_crypto",
     "sqlite:sqlite",
     "sqlite:sqliteicu",
   ]

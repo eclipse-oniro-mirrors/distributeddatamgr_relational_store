@@ -1,5 +1,5 @@
-/*
- * Copyright (c) 2025 Huawei Device Co., Ltd.
+/**
+ * Copyright (c) 2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,24 +12,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#ifndef MOCK_RDB_HMAC_H
+#define MOCK_RDB_HMAC_H
 
-#include "hmac.h"
+#include <cstdint>
 
-#include <cstring>
-unsigned char *HMAC(const EVP_MD *evp_md, const void *key, int key_len, const unsigned char *d, size_t n,
-    unsigned char *md, unsigned int *md_len)
-{
-    (void) evp_md;
-    (void) key;
-    (void) key_len;
-    (void) d;
-    (void) n;
-    (void) md;
-    *md_len = 0;
-    return nullptr;
+namespace Test {
+enum class HmacFailure { NONE, ALLOCATE, INIT, UPDATE, FINAL, LENGTH };
+struct HmacState {
+    HmacFailure failure = HmacFailure::NONE;
+    uint32_t created = 0;
+    uint32_t freed = 0;
+    uint32_t keyLength = 1;
 };
-
-const EVP_MD *EVP_sha256()
-{
-    return nullptr;
-}
+HmacState &GetHmacState();
+} // namespace Test
+#endif // MOCK_RDB_HMAC_H

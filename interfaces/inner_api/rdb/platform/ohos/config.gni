@@ -100,7 +100,8 @@ native_rdb_platform_external_deps = [
   "kv_store:database_utils",
   "kv_store:datamgr_common",
   "kv_store:distributeddb_client",
-  "openssl:libcrypto_shared",
+  "openhitls:openhitls_bsl",
+  "openhitls:openhitls_crypto",
   "sqlite:sqlite",
   "sqlite:sqliteicu",
 ]
