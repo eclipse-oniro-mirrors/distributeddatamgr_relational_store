@@ -32,10 +32,8 @@
 
 #include <string>
 
-#if !defined(WINDOWS_PLATFORM) && !defined(MAC_PLATFORM)
 #include "crypt_eal_mac.h"
 #include "crypt_errno.h"
-#endif
 
 #include "directory_ex.h"
 #include "file_ex.h"
@@ -203,12 +201,10 @@ std::vector<char> RdbSecurityManager::GenerateHMAC(std::vector<char> &data)
     std::vector<char> result(HMAC_SIZE, 0);
     std::array<uint8_t, SHA256_SIZE> digest{};
     uint32_t length = digest.size();
-    int32_t ret = E_ERROR;
-#if !defined(WINDOWS_PLATFORM) && !defined(MAC_PLATFORM)
     std::unique_ptr<CRYPT_EAL_MacCtx, decltype(&CRYPT_EAL_MacFreeCtx)> ctx(
         CRYPT_EAL_MacNewCtx(CRYPT_MAC_HMAC_SHA256), CRYPT_EAL_MacFreeCtx);
     const uint8_t emptyKey = 0;
-    ret = ctx == nullptr ? CRYPT_MEM_ALLOC_FAIL : CRYPT_EAL_MacInit(ctx.get(), &emptyKey, 0);
+    auto ret = ctx == nullptr ? CRYPT_MEM_ALLOC_FAIL : CRYPT_EAL_MacInit(ctx.get(), &emptyKey, 0);
     if (ret == CRYPT_SUCCESS) {
         ret = data.size() > std::numeric_limits<uint32_t>::max()
                   ? CRYPT_INVALID_ARG
@@ -218,10 +214,6 @@ std::vector<char> RdbSecurityManager::GenerateHMAC(std::vector<char> &data)
     if (ret == CRYPT_SUCCESS) {
         ret = CRYPT_EAL_MacFinal(ctx.get(), digest.data(), &length);
     }
-#else
-    // Preserve the failure fallback of the former Windows/macOS HMAC mock.
-    (void)data;
-#endif
     if (ret != E_OK || length != digest.size()) {
         LOG_ERROR("GenerateHMAC failed, ret:%{public}d, len:%{public}u", ret, length);
         Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_HMAC_FILE, E_DFX_HMAC_KEY_FAIL, GetBundleName(),
