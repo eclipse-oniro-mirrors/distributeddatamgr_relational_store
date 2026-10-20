@@ -120,8 +120,15 @@ HWTEST_F(MockRdbSecurityManagerTest, Rdb_Hmac_BackendFailures_001, TestSize.Leve
         const auto result = manager.GenerateHMAC(data);
         // Assert: the mock writes nonzero output, which must never escape on failure.
         EXPECT_EQ(result, std::vector<char>(manager.HMAC_SIZE, 0)) << "stage=" << static_cast<int>(failure);
-        EXPECT_EQ(::Test::GetHmacState().created, ::Test::GetHmacState().freed)
-            << "context leak at stage=" << static_cast<int>(failure);
+        const auto &state = ::Test::GetHmacState();
+        const uint32_t allocated = failure == ::Test::HmacFailure::ALLOCATE ? 0U : 1U;
+        const uint32_t updated = allocated != 0 && failure != ::Test::HmacFailure::INIT ? 1U : 0U;
+        const uint32_t finalized = updated != 0 && failure != ::Test::HmacFailure::UPDATE ? 1U : 0U;
+        EXPECT_EQ(state.created, allocated) << "allocation stage=" << static_cast<int>(failure);
+        EXPECT_EQ(state.freed, allocated) << "release stage=" << static_cast<int>(failure);
+        EXPECT_EQ(state.initCalls, allocated) << "initialization stage=" << static_cast<int>(failure);
+        EXPECT_EQ(state.updateCalls, updated) << "update stage=" << static_cast<int>(failure);
+        EXPECT_EQ(state.finalCalls, finalized) << "finalization stage=" << static_cast<int>(failure);
     }
 }
 

@@ -24,6 +24,9 @@ struct HmacState {
     uint32_t created = 0;
     uint32_t freed = 0;
     uint32_t keyLength = 1;
+    uint32_t initCalls = 0;
+    uint32_t updateCalls = 0;
+    uint32_t finalCalls = 0;
 };
 HmacState &GetHmacState();
 } // namespace Test

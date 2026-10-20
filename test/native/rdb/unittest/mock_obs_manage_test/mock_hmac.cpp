@@ -54,6 +54,7 @@ void CRYPT_EAL_MacFreeCtx(CRYPT_EAL_MacCtx *ctx)
 int32_t CRYPT_EAL_MacInit(CRYPT_EAL_MacCtx *ctx, const uint8_t *key, uint32_t len)
 {
     auto &state = GetHmacState();
+    ++state.initCalls;
     state.keyLength = len;
     return ctx != nullptr && key != nullptr && len == 0 && state.failure != HmacFailure::INIT ? CRYPT_SUCCESS
                                                                                               : CRYPT_NULL_INPUT;
@@ -61,6 +62,7 @@ int32_t CRYPT_EAL_MacInit(CRYPT_EAL_MacCtx *ctx, const uint8_t *key, uint32_t le
 
 int32_t CRYPT_EAL_MacUpdate(CRYPT_EAL_MacCtx *ctx, const uint8_t *data, uint32_t len)
 {
+    ++GetHmacState().updateCalls;
     return ctx != nullptr && (data != nullptr || len == 0) && GetHmacState().failure != HmacFailure::UPDATE
                ? CRYPT_SUCCESS
                : CRYPT_NULL_INPUT;
@@ -69,10 +71,14 @@ int32_t CRYPT_EAL_MacUpdate(CRYPT_EAL_MacCtx *ctx, const uint8_t *data, uint32_t
 int32_t CRYPT_EAL_MacFinal(CRYPT_EAL_MacCtx *ctx, uint8_t *output, uint32_t *len)
 {
     auto &state = GetHmacState();
-    if (ctx == nullptr || output == nullptr || len == nullptr || state.failure == HmacFailure::FINAL) {
+    ++state.finalCalls;
+    if (ctx == nullptr || output == nullptr || len == nullptr || *len < SHA256_SIZE) {
         return CRYPT_NULL_INPUT;
     }
     std::fill_n(output, SHA256_SIZE, 0xa5);
+    if (state.failure == HmacFailure::FINAL) {
+        return CRYPT_NULL_INPUT;
+    }
     *len = state.failure == HmacFailure::LENGTH ? 0 : SHA256_SIZE;
     return CRYPT_SUCCESS;
 }
