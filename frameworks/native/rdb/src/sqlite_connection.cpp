@@ -2022,6 +2022,29 @@ int SqliteConnection::UpdateTrackerMatrix(const DistributedRdb::RdbChangedData &
 
 int32_t SqliteConnection::Repair(const RdbStoreConfig &config)
 {
+    if (config.GetReplicaPath().empty()) {
+        return InnerRepair(config);
+    }
+    std::string defaultSlavePath = SqliteUtils::GetSlavePath(config.GetPath());
+    std::string customSlavePath = SqliteUtils::GetSlavePath(config);
+    if (defaultSlavePath != customSlavePath &&
+        access(defaultSlavePath.c_str(), F_OK) == 0 && access(customSlavePath.c_str(), F_OK) != 0) {
+        RdbStoreConfig defaultConfig = config;
+        defaultConfig.SetReplicaPath("");
+        int32_t errCode = InnerRepair(defaultConfig);
+        if (errCode == E_OK) {
+            return errCode;
+        }
+        LOG_WARN("repair by default replica failed:%{public}d, default replica:%{public}s, "
+                 "replicaPath:%{public}s, continue by replicaPath, may end in rebuild",
+            errCode, SqliteUtils::Anonymous(defaultSlavePath).c_str(),
+            SqliteUtils::Anonymous(config.GetReplicaPath()).c_str());
+    }
+    return InnerRepair(config);
+}
+
+int32_t SqliteConnection::InnerRepair(const RdbStoreConfig &config)
+{
     std::shared_ptr<SqliteConnection> connection = std::make_shared<SqliteConnection>(config, true);
     if (connection == nullptr) {
         return E_ERROR;

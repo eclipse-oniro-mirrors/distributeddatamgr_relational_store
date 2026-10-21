@@ -820,3 +820,117 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_014, TestSize.Level0)
     store = nullptr;
     RemoveFolder(customSlaveDir);
 }
+
+/**
+ * @tc.name: RdbStore_ReplicaPath_015
+ * @tc.desc: Test ReplicaPath from empty to path A, corrupt master, reopen and repair from the default replica
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_015, TestSize.Level1)
+{
+    std::string customSlaveDirA = RDB_TEST_PATH + "custom_slave_dir_a_015";
+    std::string expectedSlaveA = customSlaveDirA + "/dual_write_binlog_test_slave.db";
+    if (CheckFolderExist(customSlaveDirA)) {
+        RemoveFolder(customSlaveDirA);
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(customSlaveDirA, ec);
+
+    LOG_INFO("---- step1 open MAIN_REPLICA with the legacy default slave path and insert rows");
+    RdbStoreConfig config(RdbReplicaPathTest::databaseName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    config.SetAllowRebuild(true);
+    int errCode = E_OK;
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    store->ExecuteSql("DELETE FROM test");
+    int64_t id = 1;
+    int count = 10;
+    Insert(id, count);
+    ASSERT_TRUE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName));
+    ASSERT_FALSE(OHOS::FileExists(expectedSlaveA)) << "no replica should exist at dir A before the switch";
+    store = nullptr;
+
+    LOG_INFO("---- step2 corrupt the master db file");
+    std::fstream file(RdbReplicaPathTest::databaseName, std::ios::in | std::ios::out | std::ios::binary);
+    ASSERT_TRUE(file.is_open()) << "open master db file failed";
+    file.seekp(30, std::ios::beg);
+    char bytes[2] = { 0x6, 0x6 };
+    file.write(bytes, 2);
+    ASSERT_TRUE(file.good()) << "corrupt master db header failed";
+    file.close();
+    SqliteUtils::DeleteFile(RdbReplicaPathTest::databaseName + "-dwr");
+    SqliteUtils::DeleteFile(RdbReplicaPathTest::slaveDatabaseName + "-dwr");
+
+    LOG_INFO("---- step3 switch ReplicaPath to A and reopen, repair should use the default replica first");
+    config.SetReplicaPath(customSlaveDirA);
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr) << "reopen after corrupt should succeed";
+    EXPECT_EQ(errCode, E_OK) << "errCode=" << errCode;
+    RdbReplicaPathTest::CheckNumber(store, count);
+
+    store = nullptr;
+    RemoveFolder(customSlaveDirA);
+}
+
+/**
+ * @tc.name: RdbStore_ReplicaPath_016
+ * @tc.desc: Test ReplicaPath from empty to path A with replica present at dir A, corrupt master, reopen and
+ *           repair from the replica at path A
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_016, TestSize.Level1)
+{
+    std::string customSlaveDirA = RDB_TEST_PATH + "custom_slave_dir_a_016";
+    std::string expectedSlaveA = customSlaveDirA + "/dual_write_binlog_test_slave.db";
+    if (CheckFolderExist(customSlaveDirA)) {
+        RemoveFolder(customSlaveDirA);
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(customSlaveDirA, ec);
+
+    LOG_INFO("---- step1 open MAIN_REPLICA with the legacy default slave path and insert rows");
+    RdbStoreConfig config(RdbReplicaPathTest::databaseName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    config.SetAllowRebuild(true);
+    int errCode = E_OK;
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    store->ExecuteSql("DELETE FROM test");
+    int64_t id = 1;
+    int count = 10;
+    Insert(id, count);
+    id += count;
+    store = nullptr;
+
+    LOG_INFO("---- step2 switch ReplicaPath to dir A and insert incremental rows");
+    config.SetReplicaPath(customSlaveDirA);
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    Insert(id, 2); // incremental rows only exist in the replica at dir A
+    count += 2;
+    WaitForBackupFinish(BACKUP_FINISHED);
+    ASSERT_TRUE(OHOS::FileExists(expectedSlaveA));
+    store = nullptr;
+
+    LOG_INFO("---- step3 corrupt the master db file");
+    std::fstream file(RdbReplicaPathTest::databaseName, std::ios::in | std::ios::out | std::ios::binary);
+    ASSERT_TRUE(file.is_open()) << "open master db file failed";
+    file.seekp(30, std::ios::beg);
+    char bytes[2] = { 0x6, 0x6 };
+    file.write(bytes, 2);
+    ASSERT_TRUE(file.good()) << "corrupt master db header failed";
+    file.close();
+    SqliteUtils::DeleteFile(RdbReplicaPathTest::databaseName + "-dwr");
+    SqliteUtils::DeleteFile(expectedSlaveA + "-dwr");
+
+    LOG_INFO("---- step4 reopen, repair should use the replica at dir A");
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr) << "reopen after corrupt should succeed";
+    RdbReplicaPathTest::CheckNumber(store, count);
+
+    store = nullptr;
+    RemoveFolder(customSlaveDirA);
+}
