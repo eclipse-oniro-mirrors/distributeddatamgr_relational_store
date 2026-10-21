@@ -14,7 +14,7 @@
  */
 #include "mock_hmac.h"
 
-#include <algorithm>
+#include <numeric>
 
 #include "crypt_eal_mac.h"
 #include "crypt_errno.h"
@@ -75,7 +75,7 @@ int32_t CRYPT_EAL_MacFinal(CRYPT_EAL_MacCtx *ctx, uint8_t *output, uint32_t *len
     if (ctx == nullptr || output == nullptr || len == nullptr || *len < SHA256_SIZE) {
         return CRYPT_NULL_INPUT;
     }
-    std::fill_n(output, SHA256_SIZE, 0xa5);
+    std::iota(output, output + SHA256_SIZE, uint8_t{ 0xa5 });
     if (state.failure == HmacFailure::FINAL) {
         return CRYPT_NULL_INPUT;
     }

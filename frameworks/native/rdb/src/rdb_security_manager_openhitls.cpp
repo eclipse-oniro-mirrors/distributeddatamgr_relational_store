@@ -48,10 +48,10 @@ std::vector<char> RdbSecurityManager::GenerateHMAC(std::vector<char> &data)
     if (ret == CRYPT_SUCCESS) {
         ret = CRYPT_EAL_MacFinal(ctx.get(), digest.data(), &length);
     }
-    if (ret != E_OK || length != digest.size()) {
+    if (ret != CRYPT_SUCCESS || length != digest.size()) {
         LOG_ERROR("GenerateHMAC failed, ret:%{public}d, len:%{public}u", ret, length);
         Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_HMAC_FILE, E_DFX_HMAC_KEY_FAIL, GetBundleName(),
-            "hmac generate failed " + std::to_string(ret)));
+            "hmac generate failed, ret=" + std::to_string(ret) + ", len=" + std::to_string(length)));
         return result;
     }
     std::copy_n(digest.begin(), HMAC_SIZE, result.begin());

@@ -73,7 +73,7 @@ HWTEST_F(MockRdbHmacTest, Rdb_Hmac_EmptyKeyLifecycle_001, TestSize.Level1)
     // Arrange.
     RdbSecurityManager manager;
     std::vector<char> data;
-    const std::vector<uint8_t> bytes(manager.HMAC_SIZE, 0xa5);
+    const std::vector<uint8_t> bytes = { 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac };
     // Act.
     const auto result = manager.GenerateHMAC(data);
     // Assert.
