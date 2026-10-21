@@ -30,8 +30,6 @@ native_rdb_platform_include_dirs = [
   "//foundation/distributeddatamgr/kv_store/frameworks/common",
   "//third_party/sqlite/include",
   "//third_party/json/single_include",
-  "//third_party/openhitls/include/bsl",
-  "//third_party/openhitls/include/crypto",
 ]
 
 native_rdb_platform_cflags = [
@@ -59,8 +57,8 @@ native_rdb_platform_libs = [ "//prebuilts/mingw-w64/ohos/linux-x86_64/clang-ming
 
 native_rdb_platform_sources = [
   "${relational_store_mock_path}/frameworks/native/win32/directory_ex.cpp",
-  "${relational_store_mock_path}/frameworks/native/win32/openhitls/mock_hmac.cpp",
   "${relational_store_mock_path}/frameworks/native/win32/dlfcn.cpp",
+  "${relational_store_mock_path}/frameworks/native/win32/openssl/hmac.cpp",
   "${relational_store_mock_path}/frameworks/native/rdb/fdsan/fdsan_mock.cpp",
   "${relational_store_mock_path}/frameworks/native/rdb/mock.cpp",
   "${relational_store_mock_path}/frameworks/native/rdb/shared_block_mock.cpp",

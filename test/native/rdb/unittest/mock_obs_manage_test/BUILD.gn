@@ -61,9 +61,15 @@ ohos_unittest("GlobalResourceTest") {
     "${relational_store_native_path}/rdb/src/sqlite_shared_result_set.cpp",
     "global_resource_test.cpp",
     "mock_global_resource.cpp",
-    "mock_hmac.cpp",
     "mock_rdb_security_manager_test.cpp",
   ]
+
+  if (relational_store_use_openhitls) {
+    sources += [
+      "mock_hmac.cpp",
+      "mock_rdb_hmac_test.cpp",
+    ]
+  }
 
   configs = [ ":module_private_config" ]
 
@@ -72,11 +78,10 @@ ohos_unittest("GlobalResourceTest") {
     "googletest:gmock",
     "googletest:gtest",
     "json:nlohmann_json_static",
-    "openhitls:openhitls_bsl",
-    "openhitls:openhitls_crypto",
     "sqlite:sqlite",
     "sqlite:sqliteicu",
   ]
+  external_deps += external_deps_rdb_hmac
   external_deps += external_deps_file_api
   external_deps += external_deps_hilog
   external_deps += external_deps_hisysevent

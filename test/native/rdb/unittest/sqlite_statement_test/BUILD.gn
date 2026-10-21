@@ -88,6 +88,7 @@ ohos_unittest("SqliteStatementTest") {
     "${relational_store_native_path}/rdb/src/rdb_perfStat.cpp",
     "${relational_store_native_path}/rdb/src/rdb_predicates.cpp",
     "${relational_store_native_path}/rdb/src/rdb_security_manager.cpp",
+    relational_store_hmac_source,
     "${relational_store_native_path}/rdb/src/rdb_sql_log.cpp",
     "${relational_store_native_path}/rdb/src/rdb_sql_statistic.cpp",
     "${relational_store_native_path}/rdb/src/rdb_sql_utils.cpp",
@@ -130,11 +131,10 @@ ohos_unittest("SqliteStatementTest") {
     "googletest:gmock",
     "googletest:gtest",
     "json:nlohmann_json_static",
-    "openhitls:openhitls_bsl",
-    "openhitls:openhitls_crypto",
     "sqlite:sqlite",
     "sqlite:sqliteicu",
   ]
+  external_deps += external_deps_rdb_hmac
   external_deps += external_deps_file_api
   external_deps += external_deps_hilog
   external_deps += external_deps_ability_base_zuri

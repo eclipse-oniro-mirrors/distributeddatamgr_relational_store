@@ -58,11 +58,10 @@ ohos_unittest("RdbManagerImplTest") {
     "c_utils:utils",
     "googletest:gtest_main",
     "json:nlohmann_json_static",
-    "openhitls:openhitls_bsl",
-    "openhitls:openhitls_crypto",
     "sqlite:sqlite",
     "sqlite:sqliteicu",
   ]
+  external_deps += external_deps_rdb_hmac
   external_deps += external_deps_hilog
   external_deps += external_deps_ability_base_zuri
   external_deps += external_deps_ability_runtime_dataobs_manager
@@ -186,11 +185,10 @@ ohos_unittest("RdbServiceProxyTest") {
     "c_utils:utils",
     "googletest:gtest_main",
     "json:nlohmann_json_static",
-    "openhitls:openhitls_bsl",
-    "openhitls:openhitls_crypto",
     "sqlite:sqlite",
     "sqlite:sqliteicu",
   ]
+  external_deps += external_deps_rdb_hmac
   external_deps += external_deps_hilog
   external_deps += external_deps_ability_base_zuri
   external_deps += external_deps_ability_runtime_dataobs_manager

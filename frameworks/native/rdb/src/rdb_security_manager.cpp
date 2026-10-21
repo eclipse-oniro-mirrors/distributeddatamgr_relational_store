@@ -22,18 +22,11 @@
 #include <securec.h>
 #include <sstream>
 #include <iomanip>
-#include <algorithm>
-#include <array>
-#include <limits>
-#include <memory>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <string>
-
-#include "crypt_eal_mac.h"
-#include "crypt_errno.h"
 
 #include "directory_ex.h"
 #include "file_ex.h"
@@ -193,35 +186,6 @@ bool RdbSecurityManager::SaveSecretKeyToFile(const std::string &keyFile, const s
         return false;
     }
     return SaveSecretKeyToDisk(keyFile, secretContent);
-}
-
-std::vector<char> RdbSecurityManager::GenerateHMAC(std::vector<char> &data)
-{
-    constexpr uint32_t SHA256_SIZE = 32;
-    std::vector<char> result(HMAC_SIZE, 0);
-    std::array<uint8_t, SHA256_SIZE> digest{};
-    uint32_t length = digest.size();
-    std::unique_ptr<CRYPT_EAL_MacCtx, decltype(&CRYPT_EAL_MacFreeCtx)> ctx(
-        CRYPT_EAL_MacNewCtx(CRYPT_MAC_HMAC_SHA256), CRYPT_EAL_MacFreeCtx);
-    const uint8_t emptyKey = 0;
-    auto ret = ctx == nullptr ? CRYPT_MEM_ALLOC_FAIL : CRYPT_EAL_MacInit(ctx.get(), &emptyKey, 0);
-    if (ret == CRYPT_SUCCESS) {
-        ret = data.size() > std::numeric_limits<uint32_t>::max()
-                  ? CRYPT_INVALID_ARG
-                  : CRYPT_EAL_MacUpdate(
-                      ctx.get(), reinterpret_cast<const uint8_t *>(data.data()), static_cast<uint32_t>(data.size()));
-    }
-    if (ret == CRYPT_SUCCESS) {
-        ret = CRYPT_EAL_MacFinal(ctx.get(), digest.data(), &length);
-    }
-    if (ret != E_OK || length != digest.size()) {
-        LOG_ERROR("GenerateHMAC failed, ret:%{public}d, len:%{public}u", ret, length);
-        Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_HMAC_FILE, E_DFX_HMAC_KEY_FAIL, GetBundleName(),
-            "hmac generate failed " + std::to_string(ret)));
-        return result;
-    }
-    std::copy_n(digest.begin(), HMAC_SIZE, result.begin());
-    return result;
 }
 
 bool RdbSecurityManager::SaveSecretKeyToDisk(const std::string &keyPath, const RdbSecretContent &secretContent)

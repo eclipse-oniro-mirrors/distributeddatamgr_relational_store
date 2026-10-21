@@ -76,6 +76,7 @@
                 "ets_frontend",
                 "api_metrics",
                 "openhitls",
+                "openssl",
                 "taihe_ffi_gen",
                 "node"
             ],

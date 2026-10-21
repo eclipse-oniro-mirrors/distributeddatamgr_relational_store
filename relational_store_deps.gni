@@ -16,6 +16,15 @@ import("//foundation/distributeddatamgr/relational_store/relational_store.gni")
 relational_store_mock_external_kit_path =
     "${relational_store_mock_path}/external_inner_kit"
 
+if (relational_store_use_openhitls) {
+  external_deps_rdb_hmac = [
+    "openhitls:openhitls_bsl",
+    "openhitls:openhitls_crypto",
+  ]
+} else {
+  external_deps_rdb_hmac = [ "openssl:libcrypto_shared" ]
+}
+
 declare_args() {
   if (defined(global_parts_info) &&
       defined(global_parts_info.ability_ability_base)) {

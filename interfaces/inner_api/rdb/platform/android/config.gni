@@ -62,10 +62,7 @@ native_rdb_platform_deps = [
   "//base/hiviewdfx/hilog/interfaces/native/innerkits:libhilog_android",
 ]
 
-native_rdb_platform_external_deps = [
-  "openhitls:openhitls_bsl",
-  "openhitls:openhitls_crypto",
-]
+native_rdb_platform_external_deps = []
 
 native_rdb_platform_public_include_dirs = [
   "include",
