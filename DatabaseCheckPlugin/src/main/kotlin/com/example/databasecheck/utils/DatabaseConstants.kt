@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Device Co., Ltd.
+ * Copyright (c) 2024-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -101,7 +101,7 @@ object DatabaseConstants {
     
     // Rule 9: Database error codes that need special handling
     val DATABASE_ERROR_CODES = setOf(
-        14800047, 14800024, 14800025, 14800028, 14800029
+        14800011, 14800047, 14800024, 14800025, 14800028, 14800029
     )
     
     // Rule 12: Prohibited pragma operations

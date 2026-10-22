@@ -76,7 +76,7 @@ DatabaseCheck_Release/
 | **Rule 5** | 事务嵌套和线程安全 | 防止事务嵌套，确保事务的线程安全性 | WARNING |
 | **Rule 6** | 数据库删除句柄关闭 | 在删除数据库前确保所有数据库句柄已关闭 | WARNING |
 | **Rule 7** | 数据库权限验证 | 确保数据库目录和文件具有正确的权限设置（DAC/ACL） | WARNING |
-| **Rule 9** | 错误码处理和重试 | 检测特定数据库错误码（14800047、14800024等）的正确处理和重试逻辑 | WARNING |
+| **Rule 9** | 错误码处理和重试 | 检查 busy/locked 重试、corrupt 恢复、磁盘满清理及 WAL 超限处理（详见 Rule9 文档） | WARNING |
 | **Rule 12** | SQLite Pragma限制 | 禁止修改 SQLite 的 `synchronous` 等敏感 pragma 设置 | WARNING |
 | **Rule 14** | 配置一致性检查 | 确保同一 HAP 包内相同数据库名称的配置参数保持一致 | WARNING |
 
