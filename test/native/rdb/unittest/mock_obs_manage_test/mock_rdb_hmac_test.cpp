@@ -14,6 +14,7 @@
  */
 #include <gtest/gtest.h>
 
+#include "hmac/rdb_hmac.h"
 #include "mock_hmac.h"
 #include "rdb_security_manager.h"
 
@@ -61,6 +62,26 @@ HWTEST_F(MockRdbHmacTest, Rdb_Hmac_BackendFailures_001, TestSize.Level3)
         EXPECT_EQ(state.updateCalls, updated) << "update stage=" << static_cast<int>(failure);
         EXPECT_EQ(state.finalCalls, finalized) << "finalization stage=" << static_cast<int>(failure);
     }
+}
+
+/**
+ * @brief Report invalid digest length even when the crypto backend returned success.
+ * @tc.name: Rdb_Hmac_InvalidLengthDetails_001
+ * @tc.type: RELI
+ */
+HWTEST_F(MockRdbHmacTest, Rdb_Hmac_InvalidLengthDetails_001, TestSize.Level3)
+{
+    // Arrange.
+    ::Test::GetHmacState().failure = ::Test::HmacFailure::LENGTH;
+    const std::vector<char> data = { 'a' };
+    HmacSha256Digest digest{};
+    std::string error;
+    // Act.
+    const bool success = GenerateHmacSha256(data, digest, error);
+    // Assert.
+    EXPECT_FALSE(success) << "successful status alone cannot validate a digest";
+    EXPECT_NE(error.find("ret=0"), std::string::npos) << error;
+    EXPECT_NE(error.find("len=0"), std::string::npos) << error;
 }
 
 /**

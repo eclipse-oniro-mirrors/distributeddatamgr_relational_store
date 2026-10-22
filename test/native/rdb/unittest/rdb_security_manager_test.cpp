@@ -24,6 +24,7 @@
 
 #include "common.h"
 #include "file_ex.h"
+#include "hmac/rdb_hmac.h"
 #include "rdb_errno.h"
 #include "rdb_helper.h"
 #include "relational_store_crypt.h"
@@ -225,6 +226,28 @@ HWTEST_F(RdbSecurityManagerTest, KeyFilesLockTest001, TestSize.Level1)
     RdbSecurityManager::KeyFiles keyFiles(filePath);
     keyFiles.lock_ = "";
     EXPECT_EQ(keyFiles.Lock(false), E_INVALID_FILE_PATH);
+}
+
+/**
+ * @brief Return the complete empty-key HMAC-SHA256 and clear stale error information.
+ * @tc.name: Rdb_Hmac_FullDigest_001
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbSecurityManagerTest, Rdb_Hmac_FullDigest_001, TestSize.Level1)
+{
+    // Arrange: independently generated full digest for the empty key and "abc".
+    const std::vector<char> data = { 'a', 'b', 'c' };
+    const HmacSha256Digest expected = { 0xfd, 0x7a, 0xdb, 0x15, 0x2c, 0x05, 0xef, 0x80, 0xdc, 0xcf, 0x50, 0xa1, 0xfa,
+        0x4c, 0x05, 0xd5, 0xa3, 0xec, 0x6d, 0xa9, 0x55, 0x75, 0xfc, 0x31, 0x2a, 0xe7, 0xc5, 0xd0, 0x91, 0x83, 0x63,
+        0x51 };
+    HmacSha256Digest digest{};
+    std::string error = "previous error";
+    // Act.
+    const bool success = GenerateHmacSha256(data, digest, error);
+    // Assert.
+    ASSERT_TRUE(success) << error;
+    EXPECT_EQ(digest, expected) << "all 32 bytes must match the baseline";
+    EXPECT_TRUE(error.empty()) << "successful calls must clear previous errors";
 }
 
 /**

@@ -12,28 +12,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#define LOG_TAG "RdbSecurityManager"
-#include <algorithm>
-#include <array>
+#include "rdb_hmac.h"
+
 #include <limits>
 #include <memory>
 
 #include "crypt_eal_mac.h"
 #include "crypt_errno.h"
-#include "logger.h"
-#include "rdb_errno.h"
-#include "rdb_fault_hiview_reporter.h"
-#include "rdb_security_manager.h"
 
 namespace OHOS::NativeRdb {
-using OHOS::Rdb::LogLabel;
-using Reportor = RdbFaultHiViewReporter;
-
-std::vector<char> RdbSecurityManager::GenerateHMAC(std::vector<char> &data)
+bool GenerateHmacSha256(const std::vector<char> &data, HmacSha256Digest &digest, std::string &error)
 {
-    constexpr uint32_t SHA256_SIZE = 32;
-    std::vector<char> result(HMAC_SIZE, 0);
-    std::array<uint8_t, SHA256_SIZE> digest{};
+    digest = {};
+    error.clear();
     uint32_t length = digest.size();
     std::unique_ptr<CRYPT_EAL_MacCtx, decltype(&CRYPT_EAL_MacFreeCtx)> ctx(
         CRYPT_EAL_MacNewCtx(CRYPT_MAC_HMAC_SHA256), CRYPT_EAL_MacFreeCtx);
@@ -43,18 +34,15 @@ std::vector<char> RdbSecurityManager::GenerateHMAC(std::vector<char> &data)
         ret = data.size() > std::numeric_limits<uint32_t>::max()
                   ? CRYPT_INVALID_ARG
                   : CRYPT_EAL_MacUpdate(
-                      ctx.get(), reinterpret_cast<const uint8_t *>(data.data()), static_cast<uint32_t>(data.size()));
+                        ctx.get(), reinterpret_cast<const uint8_t *>(data.data()), static_cast<uint32_t>(data.size()));
     }
     if (ret == CRYPT_SUCCESS) {
         ret = CRYPT_EAL_MacFinal(ctx.get(), digest.data(), &length);
     }
     if (ret != CRYPT_SUCCESS || length != digest.size()) {
-        LOG_ERROR("GenerateHMAC failed, ret:%{public}d, len:%{public}u", ret, length);
-        Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_HMAC_FILE, E_DFX_HMAC_KEY_FAIL, GetBundleName(),
-            "hmac generate failed, ret=" + std::to_string(ret) + ", len=" + std::to_string(length)));
-        return result;
+        error = "hmac generate failed, ret=" + std::to_string(ret) + ", len=" + std::to_string(length);
+        return false;
     }
-    std::copy_n(digest.begin(), HMAC_SIZE, result.begin());
-    return result;
+    return true;
 }
 } // namespace OHOS::NativeRdb

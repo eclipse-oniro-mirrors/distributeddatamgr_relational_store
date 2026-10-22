@@ -12,40 +12,27 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#define LOG_TAG "RdbSecurityManager"
+#include "rdb_hmac.h"
+
+#include <algorithm>
 #include <cstddef>
 #include <openssl/hmac.h>
 
-#include <string>
-
-#include "logger.h"
-#include "rdb_errno.h"
-#include "rdb_fault_hiview_reporter.h"
-#include "rdb_security_manager.h"
-
 namespace OHOS::NativeRdb {
-using OHOS::Rdb::LogLabel;
-using Reportor = RdbFaultHiViewReporter;
-
-std::vector<char> RdbSecurityManager::GenerateHMAC(std::vector<char> &data)
+bool GenerateHmacSha256(const std::vector<char> &data, HmacSha256Digest &digest, std::string &error)
 {
+    digest = {};
+    error.clear();
     unsigned char hmacResult[EVP_MAX_MD_SIZE] = { 0 };
     unsigned int hmacLen = 0;
     std::string key = "";
-    std::vector<char> result;
-    result.resize(HMAC_SIZE, 0);
-
     HMAC(EVP_sha256(), key.c_str(), static_cast<int>(key.length()),
         reinterpret_cast<const unsigned char *>(data.data()), static_cast<int>(data.size()), hmacResult, &hmacLen);
     if (hmacLen == 0) {
-        LOG_ERROR("hmac generate failed");
-        Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_HMAC_FILE, E_DFX_HMAC_KEY_FAIL, GetBundleName(),
-            "hmac generate failed" + std::to_string(hmacLen)));
-        return result;
+        error = "hmac generate failed" + std::to_string(hmacLen);
+        return false;
     }
-    for (unsigned int i = 0; i < HMAC_SIZE && i < hmacLen; ++i) {
-        result[i] = static_cast<char>(hmacResult[i]);
-    }
-    return result;
+    std::copy_n(hmacResult, std::min(digest.size(), static_cast<size_t>(hmacLen)), digest.begin());
+    return true;
 }
 } // namespace OHOS::NativeRdb

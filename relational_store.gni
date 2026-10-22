@@ -102,10 +102,11 @@ relational_store_use_openhitls =
     is_ohos && (!defined(global_parts_info) ||
                 defined(global_parts_info.thirdparty_openhitls))
 if (relational_store_use_openhitls) {
-  relational_store_hmac_source = "${relational_store_native_path}/rdb/src/rdb_security_manager_openhitls.cpp"
+  relational_store_hmac_source =
+      "${relational_store_native_path}/rdb_crypt/hmac/rdb_hmac_openhitls.cpp"
 } else {
   relational_store_hmac_source =
-      "${relational_store_native_path}/rdb/src/rdb_security_manager_openssl.cpp"
+      "${relational_store_native_path}/rdb_crypt/hmac/rdb_hmac_openssl.cpp"
 }
 
 base_sources = [
