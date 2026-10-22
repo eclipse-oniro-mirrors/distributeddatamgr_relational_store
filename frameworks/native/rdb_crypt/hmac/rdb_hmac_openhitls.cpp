@@ -34,7 +34,7 @@ bool GenerateHmacSha256(const std::vector<char> &data, HmacSha256Digest &digest,
         ret = data.size() > std::numeric_limits<uint32_t>::max()
                   ? CRYPT_INVALID_ARG
                   : CRYPT_EAL_MacUpdate(
-                        ctx.get(), reinterpret_cast<const uint8_t *>(data.data()), static_cast<uint32_t>(data.size()));
+                      ctx.get(), reinterpret_cast<const uint8_t *>(data.data()), static_cast<uint32_t>(data.size()));
     }
     if (ret == CRYPT_SUCCESS) {
         ret = CRYPT_EAL_MacFinal(ctx.get(), digest.data(), &length);
