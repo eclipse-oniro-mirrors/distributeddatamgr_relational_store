@@ -18,13 +18,15 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace OHOS::NativeRdb {
 constexpr uint32_t HMAC_SHA256_SIZE = 32;
 using HmacSha256Digest = std::array<uint8_t, HMAC_SHA256_SIZE>;
 
-// Compute an empty-key HMAC-SHA256. The digest is valid only on success; error is cleared on success.
-bool GenerateHmacSha256(const std::vector<char> &data, HmacSha256Digest &digest, std::string &error);
+// Compute an empty-key HMAC-SHA256. Return an empty error and the complete digest on success,
+// or an error and a zero digest on failure.
+std::pair<std::string, HmacSha256Digest> GenerateHmacSha256(const std::vector<char> &data);
 } // namespace OHOS::NativeRdb
 #endif // RDB_HMAC_H

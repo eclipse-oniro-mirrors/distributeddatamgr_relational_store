@@ -193,9 +193,8 @@ bool RdbSecurityManager::SaveSecretKeyToFile(const std::string &keyFile, const s
 std::vector<char> RdbSecurityManager::GenerateHMAC(std::vector<char> &data)
 {
     std::vector<char> result(HMAC_SIZE, 0);
-    HmacSha256Digest digest{};
-    std::string error;
-    if (!GenerateHmacSha256(data, digest, error)) {
+    auto [error, digest] = GenerateHmacSha256(data);
+    if (!error.empty()) {
         LOG_ERROR("GenerateHMAC failed:%{public}s", error.c_str());
         Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_HMAC_FILE, E_DFX_HMAC_KEY_FAIL, GetBundleName(), error));
         return result;

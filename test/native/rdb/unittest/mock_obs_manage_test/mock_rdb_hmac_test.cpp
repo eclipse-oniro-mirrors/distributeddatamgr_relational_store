@@ -46,14 +46,24 @@ HWTEST_F(MockRdbHmacTest, Rdb_Hmac_BackendFailures_001, TestSize.Level3)
         // Arrange: each iteration injects a separate failure into a local manager.
         ::Test::GetHmacState() = {};
         ::Test::GetHmacState().failure = failure;
-        RdbSecurityManager manager;
         std::vector<char> data = { 'a' };
+        const uint32_t allocated = failure == ::Test::HmacFailure::ALLOCATE ? 0U : 1U;
+        // Act and Assert: validate the backend's returned error, digest and context release.
+        const auto [error, digest] = GenerateHmacSha256(data);
+        EXPECT_FALSE(error.empty()) << "stage=" << static_cast<int>(failure);
+        EXPECT_EQ(digest, HmacSha256Digest{}) << "stage=" << static_cast<int>(failure);
+        EXPECT_EQ(::Test::GetHmacState().created, allocated)
+            << "backend allocation stage=" << static_cast<int>(failure);
+        EXPECT_EQ(::Test::GetHmacState().freed, allocated) << "backend release stage=" << static_cast<int>(failure);
+        // Arrange: inject the same failure through the manager to validate its file-checksum fallback.
+        ::Test::GetHmacState() = {};
+        ::Test::GetHmacState().failure = failure;
+        RdbSecurityManager manager;
         // Act.
         const auto result = manager.GenerateHMAC(data);
         // Assert: the mock writes nonzero output, which must never escape on failure.
         EXPECT_EQ(result, std::vector<char>(manager.HMAC_SIZE, 0)) << "stage=" << static_cast<int>(failure);
         const auto &state = ::Test::GetHmacState();
-        const uint32_t allocated = failure == ::Test::HmacFailure::ALLOCATE ? 0U : 1U;
         const uint32_t updated = allocated != 0 && failure != ::Test::HmacFailure::INIT ? 1U : 0U;
         const uint32_t finalized = updated != 0 && failure != ::Test::HmacFailure::UPDATE ? 1U : 0U;
         EXPECT_EQ(state.created, allocated) << "allocation stage=" << static_cast<int>(failure);
@@ -74,14 +84,12 @@ HWTEST_F(MockRdbHmacTest, Rdb_Hmac_InvalidLengthDetails_001, TestSize.Level3)
     // Arrange.
     ::Test::GetHmacState().failure = ::Test::HmacFailure::LENGTH;
     const std::vector<char> data = { 'a' };
-    HmacSha256Digest digest{};
-    std::string error;
     // Act.
-    const bool success = GenerateHmacSha256(data, digest, error);
+    const auto [error, digest] = GenerateHmacSha256(data);
     // Assert.
-    EXPECT_FALSE(success) << "successful status alone cannot validate a digest";
     EXPECT_NE(error.find("ret=0"), std::string::npos) << error;
     EXPECT_NE(error.find("len=0"), std::string::npos) << error;
+    EXPECT_EQ(digest, HmacSha256Digest{}) << "partial output must not escape on failure";
 }
 
 /**

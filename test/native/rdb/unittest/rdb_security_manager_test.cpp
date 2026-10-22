@@ -229,7 +229,7 @@ HWTEST_F(RdbSecurityManagerTest, KeyFilesLockTest001, TestSize.Level1)
 }
 
 /**
- * @brief Return the complete empty-key HMAC-SHA256 and clear stale error information.
+ * @brief Return an empty error and the complete empty-key HMAC-SHA256.
  * @tc.name: Rdb_Hmac_FullDigest_001
  * @tc.type: FUNC
  */
@@ -240,14 +240,11 @@ HWTEST_F(RdbSecurityManagerTest, Rdb_Hmac_FullDigest_001, TestSize.Level1)
     const HmacSha256Digest expected = { 0xfd, 0x7a, 0xdb, 0x15, 0x2c, 0x05, 0xef, 0x80, 0xdc, 0xcf, 0x50, 0xa1, 0xfa,
         0x4c, 0x05, 0xd5, 0xa3, 0xec, 0x6d, 0xa9, 0x55, 0x75, 0xfc, 0x31, 0x2a, 0xe7, 0xc5, 0xd0, 0x91, 0x83, 0x63,
         0x51 };
-    HmacSha256Digest digest{};
-    std::string error = "previous error";
     // Act.
-    const bool success = GenerateHmacSha256(data, digest, error);
+    const auto [error, digest] = GenerateHmacSha256(data);
     // Assert.
-    ASSERT_TRUE(success) << error;
+    ASSERT_TRUE(error.empty()) << error;
     EXPECT_EQ(digest, expected) << "all 32 bytes must match the baseline";
-    EXPECT_TRUE(error.empty()) << "successful calls must clear previous errors";
 }
 
 /**
