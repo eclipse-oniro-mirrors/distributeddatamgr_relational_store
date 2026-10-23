@@ -29,17 +29,16 @@
 using namespace testing::ext;
 using namespace OHOS::NativeRdb;
 
-namespace {
-const std::string TEST_DIR = RDB_TEST_PATH + "dump_stack_delete_test/";
-
+namespace RdbTest {
 class DumpStackDeleteTest : public testing::Test {
 public:
+    static constexpr const char *TEST_DIR = RDB_TEST_PATH "dump_stack_delete_test/";
     static void SetUpTestCase(void){};
     static void TearDownTestCase(void){};
     void SetUp(void)
     {
-        mkdir(TEST_DIR.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
-    };
+        mkdir(TEST_DIR, S_IRWXU | S_IRWXG | S_IRWXO);
+    }
     void TearDown(void) { RdbHelper::ClearCache(); }
 };
 
@@ -58,7 +57,7 @@ int DumpStackDeleteCallback::OnUpgrade(RdbStore &store, int oldVersion, int newV
 {
     return E_OK;
 }
-} // namespace
+} // namespace RdbTest
 
 /**
  * @tc.name: DumpStackDelete_ClearTagsBeforeDelete_001
@@ -67,7 +66,7 @@ int DumpStackDeleteCallback::OnUpgrade(RdbStore &store, int oldVersion, int newV
  */
 HWTEST_F(DumpStackDeleteTest, DumpStackDelete_ClearTagsBeforeDelete_001, TestSize.Level1)
 {
-    const std::string dbPath = TEST_DIR + "delete_on.db";
+    const std::string dbPath = std::string(TEST_DIR) + "delete_on.db";
     RdbStoreConfig config(dbPath);
     config.EnableDumpStackOnFileDel(true);
     DumpStackDeleteCallback helper;
@@ -94,7 +93,7 @@ HWTEST_F(DumpStackDeleteTest, DumpStackDelete_ClearTagsBeforeDelete_001, TestSiz
  */
 HWTEST_F(DumpStackDeleteTest, DumpStackDelete_UntaggedStore_002, TestSize.Level1)
 {
-    const std::string dbPath = TEST_DIR + "delete_off.db";
+    const std::string dbPath = std::string(TEST_DIR) + "delete_off.db";
     RdbStoreConfig config(dbPath);
     DumpStackDeleteCallback helper;
     int errCode = E_ERROR;

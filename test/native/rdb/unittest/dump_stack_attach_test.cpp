@@ -29,41 +29,38 @@
 using namespace testing::ext;
 using namespace OHOS::NativeRdb;
 
-namespace {
-const std::string TEST_DIR = RDB_TEST_PATH + "dump_stack_attach_test/";
-const std::string ATTACH_NAME = "attached_db";
-
+namespace RdbTest {
 class DumpStackAttachTest : public testing::Test {
 public:
+    static constexpr const char *TEST_DIR = RDB_TEST_PATH "dump_stack_attach_test/";
+    static constexpr const char *ATTACH_NAME = "attached_db";
     static void SetUpTestCase(void){};
     static void TearDownTestCase(void){};
     void SetUp(void)
     {
-        mkdir(TEST_DIR.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
-    };
+        mkdir(TEST_DIR, S_IRWXU | S_IRWXG | S_IRWXO);
+    }
     void TearDown(void) { RdbHelper::ClearCache(); }
 };
 
 class DumpStackAttachCallback : public RdbOpenCallback {
 public:
+    static constexpr const char *CREATE_TABLE_TEST =
+        "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)";
     int OnCreate(RdbStore &store) override;
     int OnUpgrade(RdbStore &store, int oldVersion, int newVersion) override;
-    static const std::string createTableTest;
 };
-
-const std::string DumpStackAttachCallback::createTableTest =
-    "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)";
 
 int DumpStackAttachCallback::OnCreate(RdbStore &store)
 {
-    return store.ExecuteSql(createTableTest);
+    return store.ExecuteSql(DumpStackAttachCallback::CREATE_TABLE_TEST);
 }
 
 int DumpStackAttachCallback::OnUpgrade(RdbStore &store, int oldVersion, int newVersion)
 {
     return E_OK;
 }
-} // namespace
+} // namespace RdbTest
 
 /**
  * @tc.name: DumpStackAttach_ModeSwitchWithFlag_001
@@ -72,8 +69,8 @@ int DumpStackAttachCallback::OnUpgrade(RdbStore &store, int oldVersion, int newV
  */
 HWTEST_F(DumpStackAttachTest, DumpStackAttach_ModeSwitchWithFlag_001, TestSize.Level1)
 {
-    const std::string mainPath = TEST_DIR + "attach_main.db";
-    const std::string attachedPath = TEST_DIR + "attach_target.db";
+    const std::string mainPath = std::string(TEST_DIR) + "attach_main.db";
+    const std::string attachedPath = std::string(TEST_DIR) + "attach_target.db";
     RdbStoreConfig mainConfig(mainPath);
     mainConfig.EnableDumpStackOnFileDel(true);
     DumpStackAttachCallback helper;

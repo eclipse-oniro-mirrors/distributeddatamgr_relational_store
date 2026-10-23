@@ -29,41 +29,38 @@
 using namespace testing::ext;
 using namespace OHOS::NativeRdb;
 
-namespace {
-const std::string TEST_DIR = RDB_TEST_PATH + "dump_stack_restore_test/";
-const std::string BACKUP_NAME = "dump_stack_backup.db";
-
+namespace RdbTest {
 class DumpStackRestoreTest : public testing::Test {
 public:
+    static constexpr const char *TEST_DIR = RDB_TEST_PATH "dump_stack_restore_test/";
+    static constexpr const char *BACKUP_NAME = "dump_stack_backup.db";
     static void SetUpTestCase(void){};
     static void TearDownTestCase(void){};
     void SetUp(void)
     {
-        mkdir(TEST_DIR.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
-    };
+        mkdir(TEST_DIR, S_IRWXU | S_IRWXG | S_IRWXO);
+    }
     void TearDown(void) { RdbHelper::ClearCache(); }
 };
 
 class DumpStackRestoreCallback : public RdbOpenCallback {
 public:
+    static constexpr const char *CREATE_TABLE_TEST =
+        "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)";
     int OnCreate(RdbStore &store) override;
     int OnUpgrade(RdbStore &store, int oldVersion, int newVersion) override;
-    static const std::string createTableTest;
 };
-
-const std::string DumpStackRestoreCallback::createTableTest =
-    "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)";
 
 int DumpStackRestoreCallback::OnCreate(RdbStore &store)
 {
-    return store.ExecuteSql(createTableTest);
+    return store.ExecuteSql(DumpStackRestoreCallback::CREATE_TABLE_TEST);
 }
 
 int DumpStackRestoreCallback::OnUpgrade(RdbStore &store, int oldVersion, int newVersion)
 {
     return E_OK;
 }
-} // namespace
+} // namespace RdbTest
 
 /**
  * @tc.name: DumpStackRestore_BackupRestoreWithFlag_001
@@ -72,7 +69,7 @@ int DumpStackRestoreCallback::OnUpgrade(RdbStore &store, int oldVersion, int new
  */
 HWTEST_F(DumpStackRestoreTest, DumpStackRestore_BackupRestoreWithFlag_001, TestSize.Level1)
 {
-    const std::string dbPath = TEST_DIR + "restore_on.db";
+    const std::string dbPath = std::string(TEST_DIR) + "restore_on.db";
     RdbStoreConfig config(dbPath);
     config.EnableDumpStackOnFileDel(true);
     DumpStackRestoreCallback helper;
@@ -85,9 +82,9 @@ HWTEST_F(DumpStackRestoreTest, DumpStackRestore_BackupRestoreWithFlag_001, TestS
     // tag-clear ioctl degrades silently (BR-5) and the flow must still succeed. Tag
     // lifecycle (cleared before delete, re-tagged via the Enable notification after
     // restore) is validated on HMFS devices (device integration).
-    int ret = store->Backup(BACKUP_NAME);
+    int ret = store->Backup(DumpStackRestoreTest::BACKUP_NAME);
     EXPECT_EQ(ret, E_OK);
-    ret = store->Restore(BACKUP_NAME);
+    ret = store->Restore(DumpStackRestoreTest::BACKUP_NAME);
     EXPECT_EQ(ret, E_OK);
 
     // The restored store must remain usable.
@@ -108,7 +105,7 @@ HWTEST_F(DumpStackRestoreTest, DumpStackRestore_BackupRestoreWithFlag_001, TestS
  */
 HWTEST_F(DumpStackRestoreTest, DumpStackRestore_RestoreWithoutFlag_002, TestSize.Level1)
 {
-    const std::string dbPath = TEST_DIR + "restore_off.db";
+    const std::string dbPath = std::string(TEST_DIR) + "restore_off.db";
     RdbStoreConfig config(dbPath);
     DumpStackRestoreCallback helper;
     int errCode = E_ERROR;
@@ -116,9 +113,9 @@ HWTEST_F(DumpStackRestoreTest, DumpStackRestore_RestoreWithoutFlag_002, TestSize
     ASSERT_NE(store, nullptr);
     EXPECT_EQ(errCode, E_OK);
 
-    int ret = store->Backup(BACKUP_NAME);
+    int ret = store->Backup(DumpStackRestoreTest::BACKUP_NAME);
     EXPECT_EQ(ret, E_OK);
-    ret = store->Restore(BACKUP_NAME);
+    ret = store->Restore(DumpStackRestoreTest::BACKUP_NAME);
     EXPECT_EQ(ret, E_OK);
 
     store = nullptr;

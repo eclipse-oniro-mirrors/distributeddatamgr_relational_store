@@ -29,18 +29,17 @@
 using namespace testing::ext;
 using namespace OHOS::NativeRdb;
 
-namespace {
-constexpr int32_t SERVICE_GID = 3012;
-const std::string TEST_DIR = RDB_TEST_PATH + "dump_stack_acl_test/";
-
+namespace RdbTest {
 class DumpStackAclTest : public testing::Test {
 public:
+    static constexpr int32_t SERVICE_GID = 3012;
+    static constexpr const char *TEST_DIR = RDB_TEST_PATH "dump_stack_acl_test/";
     static void SetUpTestCase(void){};
     static void TearDownTestCase(void){};
     void SetUp(void)
     {
-        mkdir(TEST_DIR.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
-    };
+        mkdir(TEST_DIR, S_IRWXU | S_IRWXG | S_IRWXO);
+    }
     void TearDown(void) { RdbHelper::ClearCache(); }
 };
 
@@ -59,7 +58,7 @@ int DumpStackAclCallback::OnUpgrade(RdbStore &store, int oldVersion, int newVers
 {
     return E_OK;
 }
-} // namespace
+} // namespace RdbTest
 
 /**
  * @tc.name: DumpStackAcl_GrantedWhenEnabled_001
@@ -68,7 +67,7 @@ int DumpStackAclCallback::OnUpgrade(RdbStore &store, int oldVersion, int newVers
  */
 HWTEST_F(DumpStackAclTest, DumpStackAcl_GrantedWhenEnabled_001, TestSize.Level1)
 {
-    const std::string dbPath = TEST_DIR + "acl_on.db";
+    const std::string dbPath = std::string(TEST_DIR) + "acl_on.db";
     RdbStoreConfig config(dbPath);
     config.EnableDumpStackOnFileDel(true);
     DumpStackAclCallback helper;
@@ -79,14 +78,14 @@ HWTEST_F(DumpStackAclTest, DumpStackAcl_GrantedWhenEnabled_001, TestSize.Level1)
 
     // BR-8: the flag reuses the existing isNeedSetAcl/SetFileGid path, so the db file
     // must be authorized for the service group (same surface as distributed sync).
-    EXPECT_TRUE(SqliteUtils::HasAccessAcl(dbPath, SERVICE_GID));
+    EXPECT_TRUE(SqliteUtils::HasAccessAcl(dbPath, DumpStackAclTest::SERVICE_GID));
     // wal/shm are lazily created; assert them only when they exist.
     struct stat fileStat;
     if (stat((dbPath + "-wal").c_str(), &fileStat) == 0) {
-        EXPECT_TRUE(SqliteUtils::HasAccessAcl(dbPath + "-wal", SERVICE_GID));
+        EXPECT_TRUE(SqliteUtils::HasAccessAcl(dbPath + "-wal", DumpStackAclTest::SERVICE_GID));
     }
     if (stat((dbPath + "-shm").c_str(), &fileStat) == 0) {
-        EXPECT_TRUE(SqliteUtils::HasAccessAcl(dbPath + "-shm", SERVICE_GID));
+        EXPECT_TRUE(SqliteUtils::HasAccessAcl(dbPath + "-shm", DumpStackAclTest::SERVICE_GID));
     }
 
     store = nullptr;
@@ -100,14 +99,14 @@ HWTEST_F(DumpStackAclTest, DumpStackAcl_GrantedWhenEnabled_001, TestSize.Level1)
  */
 HWTEST_F(DumpStackAclTest, DumpStackAcl_NotGrantedByDefault_002, TestSize.Level1)
 {
-    const std::string dbPath = TEST_DIR + "acl_off.db";
+    const std::string dbPath = std::string(TEST_DIR) + "acl_off.db";
     RdbStoreConfig config(dbPath);
     DumpStackAclCallback helper;
     int errCode = E_ERROR;
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
     ASSERT_NE(store, nullptr);
     EXPECT_EQ(errCode, E_OK);
-    EXPECT_FALSE(SqliteUtils::HasAccessAcl(dbPath, SERVICE_GID));
+    EXPECT_FALSE(SqliteUtils::HasAccessAcl(dbPath, DumpStackAclTest::SERVICE_GID));
 
     store = nullptr;
     RdbHelper::DeleteRdbStore(dbPath);
