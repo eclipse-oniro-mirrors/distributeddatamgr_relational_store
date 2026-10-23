@@ -40,9 +40,6 @@
 
 namespace OHOS {
 namespace NativeRdb {
-namespace {
-constexpr uint8_t HMAC_SIZE = 8;
-}
 using namespace OHOS::Rdb;
 using Reportor = RdbFaultHiViewReporter;
 using Creator = std::shared_ptr<OHOS::NativeRdb::RDBCrypto> (*)(const std::vector<uint8_t> &rootKeyAlias);
