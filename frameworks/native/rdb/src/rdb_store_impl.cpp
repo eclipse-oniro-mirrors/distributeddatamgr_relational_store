@@ -98,7 +98,6 @@ static constexpr const char *COMMIT_TRANSACTION_SQL = "commit;";
 static constexpr const char *ROLLBACK_TRANSACTION_SQL = "rollback;";
 static constexpr const char *BACKUP_RESTORE = "backup.restore";
 static constexpr const char *ASYNC_RESTORE = "-async.restore";
-constexpr char const *INVALID_PATH_PART = "..";
 constexpr int32_t SERVICE_GID = 3012;
 constexpr int64_t TIME_OUT = 1500;
 
@@ -164,7 +163,7 @@ void RdbStoreImpl::InitSyncerParam(const RdbStoreConfig &config, bool created)
     syncerParam_.dfxInfo_.lastOpenTime_ = RdbTimeUtils::GetCurSysTimeWithMs();
     std::string serverPath = config.GetServerPath();
     if (!serverPath.empty() && (serverPath.find(syncerParam_.bundleName_) != std::string::npos) &&
-        (serverPath.find(INVALID_PATH_PART) == std::string::npos)) {
+        (serverPath.find(SqliteUtils::INVALID_PATH_PART) == std::string::npos)) {
         syncerParam_.dbPath_ = serverPath;
     }
     if (created) {

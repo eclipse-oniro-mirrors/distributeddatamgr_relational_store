@@ -63,6 +63,7 @@ public:
     static constexpr const char *DB_SUFFIX = ".db";
     static constexpr const char *SLAVE_SUFFIX = "_slave.db";
     static constexpr const char *BINLOG_FOLDER_SUFFIX = "_binlog";
+    static constexpr const char *INVALID_PATH_PART = "..";
     static constexpr const char *BINLOG_LOCK_FILE_SUFFIX = "/binlog_default.readIndex";
     static constexpr ssize_t SLAVE_ASYNC_REPAIR_CHECK_LIMIT = 367001600; // 367001600 = 350 * 1024 * 1024
 

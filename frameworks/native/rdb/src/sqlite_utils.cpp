@@ -745,6 +745,10 @@ bool SqliteUtils::IsValidReplicaPath(const std::string &replicaPath)
         LOG_WARN("replicaPath is not absolute:%{public}s", Anonymous(replicaPath).c_str());
         return false;
     }
+    if (replicaPath.find(INVALID_PATH_PART) != std::string::npos) {
+        LOG_WARN("replicaPath contains path traversal part:%{public}s", Anonymous(replicaPath).c_str());
+        return false;
+    }
     struct stat dirStat;
     if (stat(replicaPath.c_str(), &dirStat) != 0) {
         LOG_WARN("replicaPath dir not exist:%{public}s, errno:%{public}d", Anonymous(replicaPath).c_str(), errno);

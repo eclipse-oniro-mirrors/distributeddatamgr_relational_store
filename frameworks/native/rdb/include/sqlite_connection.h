@@ -92,8 +92,6 @@ public:
     void ReplayBinlog(const RdbStoreConfig &config, bool chkBinlogCount = false) override;
     int SetMatrixFileInfo(const DistributedRdb::MatrixFileInfo &fileInfo) override;
     int UpdateTrackerMatrix(const DistributedRdb::RdbChangedData &rdbChangedData, bool isFull) override;
-    static int32_t CreateSlaveSymLink(
-        const std::string &dbPath, const std::string &masterDbPath, const std::string &suffix);
     std::pair<int, PrimaryAndReplicaInfo> GetPrimaryAndReplicaInfo(
         const std::vector<std::string> &tableNames) override;
 
