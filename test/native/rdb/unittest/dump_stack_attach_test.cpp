@@ -32,7 +32,7 @@ using namespace OHOS::NativeRdb;
 namespace RdbTest {
 class DumpStackAttachTest : public testing::Test {
 public:
-    static constexpr const char *TEST_DIR = RDB_TEST_PATH "dump_stack_attach_test/";
+    static constexpr const char *TEST_DIR = "/data/test/dump_stack_attach_test/";
     static constexpr const char *ATTACH_NAME = "attached_db";
     static void SetUpTestCase(void){};
     static void TearDownTestCase(void){};
@@ -61,6 +61,7 @@ int DumpStackAttachCallback::OnUpgrade(RdbStore &store, int oldVersion, int newV
     return E_OK;
 }
 } // namespace RdbTest
+using namespace RdbTest;
 
 /**
  * @tc.name: DumpStackAttach_ModeSwitchWithFlag_001

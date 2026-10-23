@@ -32,7 +32,7 @@ using namespace OHOS::NativeRdb;
 namespace RdbTest {
 class DumpStackDeleteTest : public testing::Test {
 public:
-    static constexpr const char *TEST_DIR = RDB_TEST_PATH "dump_stack_delete_test/";
+    static constexpr const char *TEST_DIR = "/data/test/dump_stack_delete_test/";
     static void SetUpTestCase(void){};
     static void TearDownTestCase(void){};
     void SetUp(void)
@@ -58,6 +58,7 @@ int DumpStackDeleteCallback::OnUpgrade(RdbStore &store, int oldVersion, int newV
     return E_OK;
 }
 } // namespace RdbTest
+using namespace RdbTest;
 
 /**
  * @tc.name: DumpStackDelete_ClearTagsBeforeDelete_001

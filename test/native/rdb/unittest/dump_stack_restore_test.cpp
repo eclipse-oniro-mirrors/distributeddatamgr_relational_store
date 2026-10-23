@@ -32,7 +32,7 @@ using namespace OHOS::NativeRdb;
 namespace RdbTest {
 class DumpStackRestoreTest : public testing::Test {
 public:
-    static constexpr const char *TEST_DIR = RDB_TEST_PATH "dump_stack_restore_test/";
+    static constexpr const char *TEST_DIR = "/data/test/dump_stack_restore_test/";
     static constexpr const char *BACKUP_NAME = "dump_stack_backup.db";
     static void SetUpTestCase(void){};
     static void TearDownTestCase(void){};
@@ -61,6 +61,7 @@ int DumpStackRestoreCallback::OnUpgrade(RdbStore &store, int oldVersion, int new
     return E_OK;
 }
 } // namespace RdbTest
+using namespace RdbTest;
 
 /**
  * @tc.name: DumpStackRestore_BackupRestoreWithFlag_001

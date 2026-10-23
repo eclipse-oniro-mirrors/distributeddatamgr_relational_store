@@ -33,7 +33,7 @@ namespace RdbTest {
 class DumpStackAclTest : public testing::Test {
 public:
     static constexpr int32_t SERVICE_GID = 3012;
-    static constexpr const char *TEST_DIR = RDB_TEST_PATH "dump_stack_acl_test/";
+    static constexpr const char *TEST_DIR = "/data/test/dump_stack_acl_test/";
     static void SetUpTestCase(void){};
     static void TearDownTestCase(void){};
     void SetUp(void)
@@ -59,6 +59,7 @@ int DumpStackAclCallback::OnUpgrade(RdbStore &store, int oldVersion, int newVers
     return E_OK;
 }
 } // namespace RdbTest
+using namespace RdbTest;
 
 /**
  * @tc.name: DumpStackAcl_GrantedWhenEnabled_001
