@@ -50,4 +50,72 @@ class Rule9DatabaseErrorHandlingInspectionTest : LightPlatformCodeInsightFixture
         Rule9DatabaseErrorHandlingInspection().buildVisitor(holder, false).visitFile(file)
         assertTrue(holder.results.isEmpty())
     }
+
+    fun testBusyLoggingIsReportedForAllSupportedExtensions() {
+        // Arrange: include an ArkTS-style class and typed method in every supported file type.
+        val source = """
+            class StoreAccess {
+                async write(): Promise<void> {
+                    try { await store.insert('t', values); } catch (error) {
+                        if (error.code === 14800024) { console.error(error); }
+                    }
+                }
+            }
+        """.trimIndent()
+        for (extension in listOf("js", "ts", "jsx", "tsx", "ets", "ETS")) {
+            val file = myFixture.configureByText("sample.$extension", source)
+            val holder = ProblemsHolder(InspectionManager.getInstance(project), file, false)
+
+            // Act: enter through the shared file guard rather than calling the analyzer directly.
+            Rule9DatabaseErrorHandlingInspection().buildVisitor(holder, false).visitFile(file)
+
+            // Assert: each file reaches Rule9 and reports the missing busy handling.
+            assertEquals("Missing warning for .$extension", 1, holder.results.size)
+            assertTrue(holder.results.single().descriptionTemplate.contains("14800024"))
+        }
+    }
+
+    fun testEtsCorruptionRecoveryDoesNotProduceProblem() {
+        // Arrange: valid recovery must also be accepted after enabling ETS inspection.
+        val file = myFixture.configureByText("recovery.ets", """
+            try { store.querySql('SELECT 1'); } catch (error) {
+                if (error.code === 14800011) { await store.restore('backup.db'); }
+            }
+        """.trimIndent())
+        val holder = ProblemsHolder(InspectionManager.getInstance(project), file, false)
+
+        // Act.
+        Rule9DatabaseErrorHandlingInspection().buildVisitor(holder, false).visitFile(file)
+
+        // Assert.
+        assertTrue("Recovery in .ets must not warn", holder.results.isEmpty())
+    }
+
+    fun testEtsTextFileIsNotInspected() {
+        // Arrange: an ETS name embedded in an unsupported extension must stay excluded.
+        val file = myFixture.configureByText("sample.ets.txt",
+            "try { store.insert('t', values); } catch (error) { console.error(error); }")
+        val holder = ProblemsHolder(InspectionManager.getInstance(project), file, false)
+
+        // Act.
+        Rule9DatabaseErrorHandlingInspection().buildVisitor(holder, false).visitFile(file)
+
+        // Assert.
+        assertTrue("A .txt file must not receive database warnings", holder.results.isEmpty())
+    }
+
+    fun testEtsWarningAppearsThroughInspectionHighlighting() {
+        // Arrange: exercise IDE inspection scheduling as well as the file visitor.
+        myFixture.enableInspections(Rule9DatabaseErrorHandlingInspection())
+        myFixture.configureByText("highlight.ets",
+            "try { store.insert('t', values); } catch (error) { console.error(error); }")
+
+        // Act.
+        val warnings = myFixture.doHighlighting().filter {
+            it.description?.contains("Database Rule 9") == true
+        }
+
+        // Assert.
+        assertEquals("The IDE must display the ETS diagnostic", 1, warnings.size)
+    }
 }

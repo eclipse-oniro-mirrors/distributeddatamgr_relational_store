@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-本项目是为 **DevEco Studio** 开发的代码扫描插件，用于检测应用程序中的数据库使用规范问题。插件基于《数据库健壮性规范 Checklist 1.0》标准，通过静态代码分析技术自动检测JavaScript代码中违反数据库使用推荐规范的情况。
+本项目是为 **DevEco Studio** 开发的代码扫描插件，用于检测应用程序中的数据库使用规范问题。插件基于《数据库健壮性规范 Checklist 1.0》标准，通过静态代码分析技术检测 JavaScript、TypeScript 和 ArkTS（`.ets`）文件中违反数据库使用推荐规范的情况。
 
 ### 主要特性
 
@@ -323,7 +323,7 @@ A: 目前支持 `.js`、`.ts`、`.ets` 等 JavaScript/TypeScript 相关文件。
 
 ### v1.0.0 (当前版本)
 - ✅ 实现全部 10 条数据库健壮性规则
-- ✅ 支持 JavaScript/TypeScript 代码分析（.js, .ts, .jsx, .tsx）
+- ✅ 支持 JavaScript/TypeScript/ArkTS 文本规则检查（.js, .ts, .jsx, .tsx, .ets），不提供完整的 ArkTS 语义分析
 - ✅ 提供精确的问题定位（使用 TextRange 技术）
 - ✅ 智能过滤注释中的代码
 - ✅ 支持跨文件配置一致性检查（Rule 14）

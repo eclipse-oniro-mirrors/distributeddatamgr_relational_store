@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Device Co., Ltd.
+ * Copyright (c) 2024-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -26,7 +26,7 @@ import com.intellij.psi.PsiFile
  * Base class for all database robustness rule inspections
  * 
  * This class provides common functionality for database rule inspections including:
- * - JavaScript/TypeScript file detection
+ * - JavaScript/TypeScript/ArkTS file detection
  * - Comment removal utilities
  * - Common data structures for prohibited operations
  * - Unified problem reporting mechanisms
@@ -81,14 +81,15 @@ abstract class BaseDatabaseInspection : LocalInspectionTool() {
     abstract fun visitJavaScriptFile(file: PsiFile, holder: ProblemsHolder)
     
     /**
-     * Checks if the file is a JavaScript or TypeScript file
+     * Checks if the file is a JavaScript, TypeScript or ArkTS file
      */
     protected fun isJavaScriptFile(file: PsiFile): Boolean {
         val fileName = file.name.lowercase()
         return fileName.endsWith(".js") || 
                fileName.endsWith(".ts") || 
                fileName.endsWith(".jsx") || 
-               fileName.endsWith(".tsx")
+               fileName.endsWith(".tsx") ||
+               fileName.endsWith(".ets")
     }
     
 
