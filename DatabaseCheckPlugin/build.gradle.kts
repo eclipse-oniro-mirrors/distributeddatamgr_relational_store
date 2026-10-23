@@ -46,7 +46,8 @@ tasks {
     
     patchPluginXml {
         sinceBuild.set("233")
-        untilBuild.set("243.*")
+        // Keep the minimum platform build without generating an upper bound.
+        untilBuild.set(provider { null })
     }
     
     test {

@@ -19,7 +19,7 @@
 - **编程语言**：使用 1.9.25 版本的编程语言
 - **构建工具**：Gradle 8.x (使用KotlinDSL)
 - **Java 版本**：JDK 17
-- **目标平台**：IntelliJ Platform 2023.3.6+
+- **编译平台**：IntelliJ Platform 2023.3.6；安装要求平台构建号 233 及以上，不设版本上限
 - **插件框架**：IntelliJ Platform Plugin SDK 1.17.3
 - **插件类型**：LocalInspection（本地代码检查）
 
@@ -280,7 +280,7 @@ src/test/com/example/databasecheck/testdata/
 
 ### Q: 插件安装后没有生效？
 A: 请确保：
-1. IDE 版本符合要求（IDEA 2023.3+， DevEco-Studio 5.0+）
+1. IDE 的 IntelliJ 平台构建号为 233 及以上（IDEA 2023.3+；DevEco Studio 请查看 About 中的平台构建号）
 2. 已重启 IDE
 3. 在 Settings → Editor → Inspections 中启用了 "Database Robustness Rules" 分组
 
@@ -315,7 +315,9 @@ A: 目前支持 `.js`、`.ts`、`.ets` 等 JavaScript/TypeScript 相关文件。
 - **Plugin Name**：DatabaseCheck
 - **Version**：1.0.0
 - **Vendor**：YourCompany
-- **Compatibility**：IntelliJ Build 233 ~ 242.*
+- **Compatibility**：IntelliJ Build 233 及以上，不设安装版本上限
+
+编译和自动化测试使用 IntelliJ IDEA Community 2023.3.6。取消版本上限可避免新版 IDE 仅因构建号较新而拒绝安装；新版 IDE 的运行兼容性仍需在对应版本验证。
 
 ## 版本历史
 
