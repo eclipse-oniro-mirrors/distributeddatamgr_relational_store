@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Device Co., Ltd.
+ * Copyright (c) 2024-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -17,6 +17,7 @@ package com.example.databasecheck.inspections
 
 import com.example.databasecheck.utils.DatabaseConstants
 import com.example.databasecheck.utils.JavaScriptAnalyzer
+import com.example.databasecheck.utils.JavaScriptCode
 import com.intellij.codeInspection.*
 import com.intellij.psi.PsiFile
 
@@ -134,7 +135,8 @@ class Rule4TransactionCommitInspection : BaseDatabaseInspection() {
         
         if (transactionVariable != null) {
             // Step 2: Find all operations on this transaction variable
-            val transactionOperations = findTransactionOperations(transactionVariable, scopeCalls)
+            val transactionOperations = JavaScriptAnalyzer.transactionOperations(
+                transactionCall, transactionVariable, scopeCalls, scopeAssignments)
             
             // Step 3: Check for missing commit
             val hasCommit = transactionOperations.any { op ->
@@ -154,7 +156,7 @@ class Rule4TransactionCommitInspection : BaseDatabaseInspection() {
             
             // Step 4: Check for missing rollback in exception handling
             val missingRollbackViolations = checkMissingRollback(
-                transactionCall, transactionVariable, scopeCalls, codeText
+                transactionCall, transactionVariable, codeText
             )
             violations.addAll(missingRollbackViolations)
         }
@@ -169,7 +171,6 @@ class Rule4TransactionCommitInspection : BaseDatabaseInspection() {
     private fun checkMissingRollback(
         transactionCall: JavaScriptAnalyzer.FunctionCall,
         transactionVariable: String,
-        scopeCalls: List<JavaScriptAnalyzer.FunctionCall>,
         codeText: String
     ): List<TransactionViolation> {
         val violations = mutableListOf<TransactionViolation>()
@@ -200,12 +201,10 @@ class Rule4TransactionCommitInspection : BaseDatabaseInspection() {
             ?: return false
         
         // Check if the catch block contains rollback for this transaction variable
-        val hasDirectRollback = tryCatchBlock.catchBlock.contains("$transactionVariable.rollback")
-        val hasConditionalRollback = Regex("""if\s*\(\s*$transactionVariable\s*\)[\s\S]*?$transactionVariable\.rollback""")
-            .containsMatchIn(tryCatchBlock.catchBlock)
-        
-        // Missing rollback if neither direct nor conditional rollback is found
-        return !hasDirectRollback && !hasConditionalRollback
+        val calls = JavaScriptAnalyzer.extractWithFunctionScopes(tryCatchBlock.catchBlock).first
+        return calls.none {
+            it.objectName == transactionVariable && it.functionName.endsWith(".rollback") && it.functionScope == null
+        }
     }
     
     /**
@@ -287,78 +286,8 @@ class Rule4TransactionCommitInspection : BaseDatabaseInspection() {
      * Find the matching closing brace for an opening brace at the given position.
      * Returns the index of the matching closing brace, or -1 if not found.
      */
-    private fun findMatchingBrace(text: String, openBracePos: Int): Int {
-        if (openBracePos >= text.length || text[openBracePos] != '{') return -1
-        
-        var braceCount = 1
-        var i = openBracePos + 1
-        var inString = false
-        var inSingleLineComment = false
-        var inMultiLineComment = false
-        var escapeNext = false
-        
-        while (i < text.length && braceCount > 0) {
-            val char = text[i]
-            
-            // Handle escape sequences
-            if (escapeNext) {
-                escapeNext = false
-                i++
-                continue
-            }
-            
-            // Handle comments and strings to avoid counting braces inside them
-            when {
-                inSingleLineComment -> {
-                    if (char == '\n') {
-                        inSingleLineComment = false
-                    }
-                }
-                inMultiLineComment -> {
-                    if (char == '*' && i + 1 < text.length && text[i + 1] == '/') {
-                        inMultiLineComment = false
-                        i++ // Skip the '/'
-                    }
-                }
-                inString -> {
-                    when (char) {
-                        '\\' -> escapeNext = true
-                        '"', '\'' -> {
-                            // Check if this quote matches the string delimiter
-                            if (i > 0) {
-                                var stringStart = i - 1
-                                while (stringStart >= 0 && text[stringStart] != '"' && text[stringStart] != '\'') {
-                                    stringStart--
-                                }
-                                if (stringStart >= 0 && text[stringStart] == char) {
-                                    inString = false
-                                }
-                            }
-                        }
-                    }
-                }
-                else -> {
-                    when (char) {
-                        '"', '\'' -> inString = true
-                        '/' -> {
-                            if (i + 1 < text.length) {
-                                when (text[i + 1]) {
-                                    '/' -> inSingleLineComment = true
-                                    '*' -> inMultiLineComment = true
-                                }
-                            }
-                        }
-                        '{' -> braceCount++
-                        '}' -> braceCount--
-                    }
-                }
-            }
-            
-            i++
-        }
-        
-        return if (braceCount == 0) i - 1 else -1
-    }
+    private fun findMatchingBrace(text: String, openBracePos: Int): Int =
+        JavaScriptCode(text).closingOffsetAt(openBracePos)
 
     /**
      * Extract try-catch block information from code text.
@@ -398,37 +327,9 @@ class Rule4TransactionCommitInspection : BaseDatabaseInspection() {
     private fun findTransactionVariable(
         transactionCall: JavaScriptAnalyzer.FunctionCall,
         assignments: List<JavaScriptAnalyzer.VariableAssignment>
-    ): String? {
-        // Look for assignments that include this transaction call
-        for (assignment in assignments) {
-            // Check if assignment expression contains the transaction call
-            if (assignment.startOffset <= transactionCall.startOffset && 
-                assignment.endOffset >= transactionCall.endOffset) {
-                return assignment.variableName
-            }
-            
-            // Also check for assignments that happen around the same time
-            val offsetDiff = kotlin.math.abs(assignment.startOffset - transactionCall.startOffset)
-            if (offsetDiff < 100 && assignment.assignmentExpression.contains("createTransaction")) {
-                return assignment.variableName
-            }
-        }
-        
-        return null
-    }
-
-    /**
-     * Find all operations on the transaction variable.
-     */
-    private fun findTransactionOperations(
-        transactionVariable: String,
-        calls: List<JavaScriptAnalyzer.FunctionCall>
-    ): List<JavaScriptAnalyzer.FunctionCall> {
-        return calls.filter { call ->
-            call.objectName == transactionVariable ||
-            call.functionName.startsWith("$transactionVariable.")
-        }
-    }
+    ): String? = assignments.filter {
+        it.startOffset <= transactionCall.startOffset && it.endOffset >= transactionCall.endOffset
+    }.maxByOrNull { it.startOffset }?.variableName
 
     /**
      * Convert JavaScriptAnalyzer.FunctionCall to ProhibitedOperation.
@@ -464,31 +365,13 @@ class Rule4TransactionCommitInspection : BaseDatabaseInspection() {
      * Fallback analysis for transaction operations if main analysis fails.
      */
     private fun fallbackTransactionAnalysis(file: PsiFile, holder: ProblemsHolder) {
-        val originalText = file.text
-        val codeWithoutComments = removeComments(originalText)
-        
-        // Simple pattern matching for transaction operations
-        val transactionPattern = Regex(
-            """(rdbStore\.createTransaction|rdbStore\.beginTransaction)\s*\([^)]*\)""",
-            RegexOption.MULTILINE
-        )
-        
-        transactionPattern.findAll(codeWithoutComments).forEach { match ->
-            val startPos = match.range.first
-            val endPos = match.range.last + 1
-            
-            val prohibitedOp = ProhibitedOperation(
-                operationName = match.value,
-                startPos = startPos,
-                endPos = endPos,
-                fullMatch = match.value,
-                parameters = ""
-            )
-            
-            val message = "Transaction usage detected (fallback analysis). " +
-                    "Please ensure transactions have proper commit and rollback operations."
-            
-            reportViolation(prohibitedOp, file, holder, message)
+        val code = removeComments(file.text)
+        JavaScriptAnalyzer.extractFunctionCallsFromText(code).filter {
+            it.objectName != null && JavaScriptAnalyzer.isProhibitedOperation(it,
+                DatabaseConstants.TRANSACTION_CREATE_OPERATIONS)
+        }.forEach { call ->
+            reportViolation(createProhibitedOperation(call), file, holder,
+                "Transaction usage detected (fallback analysis). Ensure proper commit and rollback handling.")
         }
     }
 

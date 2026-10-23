@@ -55,9 +55,9 @@ class JavaScriptAnalyzerTest {
         """.trimIndent()
         val (calls, assignments) = JavaScriptAnalyzer.extractWithFunctionScopes(source)
         assertEquals(listOf("first", "second"), JavaScriptAnalyzer.extractFunctionScopes(source).map { it.functionName })
-        assertEquals("first", calls.single { it.functionName == "txn.insert" }.functionScope)
-        assertEquals("second", calls.single { it.functionName == "txn.commit" }.functionScope)
-        assertEquals("first", assignments.single().functionScope)
+        assertEquals("first@0", calls.single { it.functionName == "txn.insert" }.functionScope)
+        assertEquals("second@${source.indexOf("function second")}", calls.single { it.functionName == "txn.commit" }.functionScope)
+        assertEquals("first@0", assignments.single().functionScope)
         assertEquals("txn", assignments.single().variableName)
     }
 
@@ -65,6 +65,6 @@ class JavaScriptAnalyzerTest {
     fun untypedFunctionsContinueToProduceScopes() {
         val source = "function open() { store.querySql('SELECT 1'); }"
         val (calls, _) = JavaScriptAnalyzer.extractWithFunctionScopes(source)
-        assertEquals("open", calls.single { it.functionName == "store.querySql" }.functionScope)
+        assertEquals("open@0", calls.single { it.functionName == "store.querySql" }.functionScope)
     }
 }

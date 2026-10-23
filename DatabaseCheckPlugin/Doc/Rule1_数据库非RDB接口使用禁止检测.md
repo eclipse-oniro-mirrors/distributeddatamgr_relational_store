@@ -36,27 +36,32 @@ Rule1 用于检测基于 OpenHarmony 平台的应用中，禁止使用非 RDB �
 ## 3. 检测方法
 
 ### 3.1 检测架构
-Rule1采用基于AST（抽象语法树）的增强分析方法，主要由以下组件构成：
+Rule1采用词法扫描、括号配对和调用位置上的变量回溯，主要由以下组件构成：
 
 - **主分析引擎**: `analyzeJavaScriptFile()` - 协调整个检测流程
-- **直接违规检测**: `findDirectDatabasePathViolations()` - 检测直接在数据库路径上的禁止操作
-- **数据库变量跟踪**: `trackDatabaseVariables()` - 跟踪从数据库操作分配的变量（支持函数作用域）
-- **间接违规检测**: `findIndirectViolations()` - 检测对跟踪变量的后续操作
-- **回退分析**: `fallbackStringAnalysis()` - 当AST分析失败时的字符串模式匹配
+- **调用提取**: `JavaScriptAnalyzer` - 提取完整调用与顶层参数，跳过字符串和模板中的伪调用
+- **路径与句柄解析**: `DatabasePathMatcher.Resolver` - 回溯调用前可见的路径赋值、别名和文件句柄来源
+- **违规检测**: `findPathViolations()` - 对既有禁止接口检查参数及接收对象
+- **违规报告**: `reportViolations()` - 使用保留的源码偏移定位调用
 
 ### 3.2 检测流程
-1. **预处理**: 移除代码注释，避免解析干扰
-2. **AST解析**: 使用`JavaScriptAnalyzer`提取函数调用和变量赋值，包含函数作用域信息
-3. **直接检测**: 识别直接对数据库路径执行的禁止操作
-4. **变量跟踪**: 标记从数据库文件操作返回的变量，按函数作用域分组
-5. **间接检测**: 检测对标记变量的后续文件操作
+1. **预处理**: 将注释替换为空白，保留字符串、模板、换行和源码位置
+2. **词法解析**: 提取调用及带类型、跨行的变量赋值，按嵌套括号拆分参数
+3. **直接检测**: 识别数据库路径字面量及 `context.databaseDir` 等属性访问
+4. **变量回溯**: 从调用位置向前查找最近可见赋值，递归解析路径别名、拼接及简单模板插值
+5. **句柄回溯**: 解析 `open/openSync/fopen` 返回的文件对象或描述符来源，每个违规调用只报告一次
 6. **违规报告**: 生成详细的违规信息并在IDE中显示
 
 ### 3.3 核心特性
-- **函数作用域感知**: 避免跨函数变量污染，确保检测准确性
-- **精确匹配算法**: 使用`isExactMatchForDatabaseOperation()`确保变量赋值和数据库操作的精确关联
-- **双重检测机制**: 既检测直接违规也检测间接违规（数据流分析）
-- **容错设计**: 提供字符串匹配作为AST分析的回退方案
+- **变量可见性**: 支持可见的外层变量，排除相邻函数、退出代码块的局部变量及被参数遮蔽的同名变量
+- **调用位置约束**: 不借用调用后的赋值；别名按建立时的值回溯，后续重新赋值不改变已建立的别名
+- **直接与间接检测**: 路径字面量、路径变量和文件句柄共用解析逻辑，Rule2/Rule7复用同一解析器
+- **有界解析**: 使用已访问集合并限制回溯为64层，避免循环别名导致无限递归
+
+该实现不是完整的 AST、类型分析或控制流证明。仅在当前文件按源码顺序回溯；
+不跨文件追踪，不推断任意函数返回值、对象字段赋值、解构及条件分支合流，
+不对拆开的路径字面量做完整常量折叠。模板仅回溯简单标识符或属性插值，
+复杂插值、嵌套模板及正则字面量不提供完整语义分析。
 
 ### 3.4 检测范围
 - **禁止操作**: `fileIo.open/close`、`fopen/fclose`、`fcntl/flock`、`open/close`等
@@ -96,6 +101,17 @@ async function badExample3() {
 }
 ```
 
+#### 路径变量与别名
+```javascript
+// ✗ 错误：路径先赋给变量仍属于直接访问数据库文件
+function badPathVariable(context) {
+    const root = context.databaseDir;
+    const dbPath = root + '/user.db';
+    const file = fileIo.openSync(dbPath, fileIo.OpenMode.READ_ONLY);
+    fileIo.closeSync(file.fd);
+}
+```
+
 ### 4.2 正确示例
 
 ```javascript
@@ -121,6 +137,15 @@ async function goodExample2() {
     let configFile = await fileIo.open('/data/storage/el1/config/app.json');
     await fileIo.write(configFile, configData);
     await fileIo.close(configFile);
+}
+```
+
+```javascript
+// ✓ 正确：普通文件路径变量不应触发数据库路径告警
+function goodPathVariable(context) {
+    const path = context.filesDir + '/settings.json';
+    const file = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+    fileIo.closeSync(file.fd);
 }
 ```
 

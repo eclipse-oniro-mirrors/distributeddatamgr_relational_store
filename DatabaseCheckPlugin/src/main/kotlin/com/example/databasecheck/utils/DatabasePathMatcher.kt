@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Device Co., Ltd.
+ * Copyright (c) 2024-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -23,6 +23,81 @@ import com.intellij.psi.util.PsiTreeUtil
  */
 object DatabasePathMatcher {
     
+    /** Resolve local path/descriptor aliases at the position where an operation is executed. */
+    internal class Resolver(source: String) {
+        private val code = JavaScriptCode(source)
+        private val assignments = JavaScriptAnalyzer.extractVariableAssignmentsFromText(source)
+        private val scopes = JavaScriptAnalyzer.extractFunctionScopes(source)
+        private val identifier = Regex("[a-zA-Z_$][a-zA-Z0-9_$]*")
+        private val parameters = scopes.associateWith { parameterNames(it) }
+
+        fun resolves(expression: String, position: Int): Boolean = resolve(expression, position, emptySet())
+
+        private fun resolve(expression: String, position: Int, visited: Set<Int>): Boolean {
+            if (visited.size >= 64) return false
+            val view = JavaScriptCode(expression)
+            if (view.text(0) in setOf("{", "[")) return false
+            val calls = JavaScriptAnalyzer.extractFunctionCallsFromText(expression)
+            if (calls.isNotEmpty() && calls.first().functionName.substringAfterLast('.') !in
+                setOf("open", "openSync", "fopen", "join")) return false
+            if (view.tokens.any { it.isString && DatabaseConstants.DATABASE_PATHS.drop(1)
+                    .any { pattern -> pattern.containsMatchIn(it.text) } }) return true
+            if (view.tokens.indices.any { !view.tokens[it].isString && view.text(it) == "databaseDir" &&
+                    view.text(it - 1) in setOf(".", "?.") }) return true
+            val references = view.tokens.indices.filter {
+                !view.tokens[it].isString && view.text(it).matches(identifier) &&
+                    view.text(it - 1) !in setOf(".", "?.") && view.text(it + 1) != "("
+            }.map { view.text(it) }.toSet()
+            view.tokens.filter { it.text.startsWith('`') }.forEach { token ->
+                Regex("""\$\{\s*([a-zA-Z_$][a-zA-Z0-9_$]*(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*)*)\s*}""")
+                    .findAll(token.text).forEach { match ->
+                        if (resolve(match.groupValues[1], position, visited)) return true
+                    }
+            }
+            return references.any { variable ->
+                val minimum = shadowingOffset(variable, position)
+                val binding = assignments.filter {
+                    it.variableName == variable && it.startOffset < position && it.startOffset >= minimum &&
+                        isVisible(it.startOffset, position)
+                }.maxByOrNull { it.startOffset }
+                binding != null && binding.startOffset !in visited &&
+                    resolve(binding.assignmentExpression, binding.startOffset, visited + binding.startOffset)
+            }
+        }
+
+        private fun isVisible(declaration: Int, position: Int): Boolean {
+            if (code.tokens.none { it.start == declaration && it.text == "var" }) {
+                return code.isVisibleAt(declaration, position)
+            }
+            val owner = scopes.filter { declaration in it.bodyStartOffset until it.endOffset }
+                .minByOrNull { it.endOffset - it.bodyStartOffset }
+            return owner == null || position in owner.bodyStartOffset until owner.endOffset
+        }
+
+        private fun shadowingOffset(name: String, position: Int): Int {
+            val parameter = scopes.filter { position in it.bodyStartOffset until it.endOffset &&
+                name in parameters.getValue(it) }.maxOfOrNull { it.bodyStartOffset } ?: 0
+            return code.tokens.indices.filter {
+                code.text(it) in setOf("const", "let", "var") && code.text(it + 1) == name &&
+                    code.tokens[it].start < position && isVisible(code.tokens[it].start, position)
+            }.maxOfOrNull { code.tokens[it].start }?.coerceAtLeast(parameter) ?: parameter
+        }
+
+        private fun parameterNames(scope: JavaScriptAnalyzer.FunctionScope): Set<String> {
+            val start = code.tokens.indexOfFirst { it.start == scope.startOffset }
+            if (start < 0) return emptySet()
+            val open = if (code.text(start) == "=>") {
+                if (code.text(start - 1) != ")") return setOf(code.text(start - 1))
+                code.tokens.indices.firstOrNull { code.end(it) == start - 1 } ?: return emptySet()
+            } else code.tokens.indices.firstOrNull {
+                it >= start && code.tokens[it].start < scope.bodyStartOffset && code.text(it) == "("
+            } ?: return emptySet()
+            return code.arguments(open).mapNotNull {
+                Regex("""^\s*(?:\.\.\.)?([a-zA-Z_$][a-zA-Z0-9_$]*)""").find(it)?.groupValues?.get(1)
+            }.toSet()
+        }
+    }
+
     /**
      * Checks if a string literal represents a database path
      */

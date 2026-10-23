@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Device Co., Ltd.
+ * Copyright (c) 2024-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,6 +16,7 @@
 package com.example.databasecheck.inspections
 
 import com.example.databasecheck.utils.DatabaseConstants
+import com.example.databasecheck.utils.DatabasePathMatcher
 import com.example.databasecheck.utils.JavaScriptAnalyzer
 import com.intellij.codeInspection.*
 import com.intellij.psi.PsiFile
@@ -115,10 +116,10 @@ class Rule2DatabaseCopyInspection : BaseDatabaseInspection() {
             val codeWithoutComments = removeComments(originalText)
             
             // Step 1: Extract function calls and variable assignments with scope awareness
-            val (functionCalls, variableAssignments) = JavaScriptAnalyzer.extractWithFunctionScopes(codeWithoutComments)
+            val (functionCalls, _) = JavaScriptAnalyzer.extractWithFunctionScopes(codeWithoutComments)
             
             // Step 2: Find file copy operations on database paths (with variable resolution)
-            val fileCopyViolations = findFileCopyViolations(functionCalls, variableAssignments)
+            val fileCopyViolations = findFileCopyViolations(functionCalls, codeWithoutComments)
             
             // Step 3: Report JavaScript code violations only
             reportViolations(fileCopyViolations, file, holder)
@@ -135,22 +136,15 @@ class Rule2DatabaseCopyInspection : BaseDatabaseInspection() {
      */
     private fun findFileCopyViolations(
         calls: List<JavaScriptAnalyzer.FunctionCall>,
-        variableAssignments: List<JavaScriptAnalyzer.VariableAssignment>
+        codeText: String
     ): List<DatabaseViolation> {
         val violations = mutableListOf<DatabaseViolation>()
+        val resolver = DatabasePathMatcher.Resolver(codeText)
         
         for (call in calls) {
             if (isFileCopyOperation(call.functionName)) {
-                // Filter variable assignments to same function scope for accurate resolution
-                val scopeAssignments = variableAssignments.filter { 
-                    it.functionScope == call.functionScope 
-                }
-                
-                // Check if any argument contains database paths (with variable resolution)
-                val targetsDatabasePath = call.arguments.any { arg ->
-                    JavaScriptAnalyzer.containsDatabasePath(arg, DatabaseConstants.DATABASE_PATHS, scopeAssignments)
-                }
-                
+                val targetsDatabasePath = call.arguments.any { resolver.resolves(it, call.startOffset) }
+
                 if (targetsDatabasePath) {
                     violations.add(DatabaseViolation(
                         operation = createProhibitedOperation(call),
@@ -272,38 +266,8 @@ class Rule2DatabaseCopyInspection : BaseDatabaseInspection() {
      * Fallback analysis for file copy operations if main analysis fails.
      */
     private fun fallbackFileCopyAnalysis(file: PsiFile, holder: ProblemsHolder) {
-        val originalText = file.text
-        val codeWithoutComments = removeComments(originalText)
-        
-        // Simple pattern matching for file copy operations
-        for (operation in DatabaseConstants.FILE_COPY_OPERATIONS) {
-            val pattern = if (operation.contains(".")) {
-                Regex("""($operation)\s*\(([^)]*)\)""", RegexOption.MULTILINE)
-            } else {
-                Regex("""\b($operation)\s*\(([^)]*)\)""", RegexOption.MULTILINE)
-            }
-            
-            pattern.findAll(codeWithoutComments).forEach { match ->
-                val parameters = match.groupValues[2]
-                if (DatabaseConstants.DATABASE_PATHS.any { it.containsMatchIn(parameters) }) {
-                    val startPos = match.range.first
-                    val endPos = startPos + match.groupValues[1].length
-                    
-                    val prohibitedOp = ProhibitedOperation(
-                        operationName = match.groupValues[1],
-                        startPos = startPos,
-                        endPos = endPos,
-                        fullMatch = match.value,
-                        parameters = parameters
-                    )
-                    
-                    val message = "Unsafe database file copy operation '${prohibitedOp.operationName}' (fallback detection). " +
-                            "Consider using RDB interfaces instead."
-                    
-                    reportViolation(prohibitedOp, file, holder, message)
-                }
-            }
-        }
+        val code = removeComments(file.text)
+        reportViolations(findFileCopyViolations(JavaScriptAnalyzer.extractFunctionCallsFromText(code), code), file, holder)
     }
 
     /**

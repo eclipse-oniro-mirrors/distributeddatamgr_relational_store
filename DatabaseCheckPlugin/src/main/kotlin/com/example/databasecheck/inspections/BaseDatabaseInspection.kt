@@ -15,6 +15,7 @@
  
 package com.example.databasecheck.inspections
 
+import com.example.databasecheck.utils.JavaScriptCode
 import com.intellij.codeInspection.*
 import com.intellij.codeHighlighting.HighlightDisplayLevel
 import com.intellij.openapi.util.TextRange
@@ -157,84 +158,12 @@ abstract class BaseDatabaseInspection : LocalInspectionTool() {
     )
     
     /**
-     * Removes both single-line (//) and multi-line (/* */) comments from JavaScript code.
-     * 
-     * This method handles:
-     * - Single-line comments: // comment
-     * - Multi-line comments: /* comment */
-     * - Nested comments and edge cases
-     * - Preserves string literals and regex patterns
-     * - Maintains original character positions for accurate error reporting
-     * 
-     * @param code The original JavaScript/TypeScript code
-     * @return Code with comments removed, preserving original character positions
+     * Mask line/block comments while retaining offsets and line breaks for IDE reporting.
+     * Quoted strings and backtick templates are opaque tokens; interpolation and regex literals
+     * are not parsed as JavaScript expressions.
      */
-    protected fun removeComments(code: String): String {
-        val result = StringBuilder()
-        var i = 0
-        var inString = false
-        var stringChar = ' '
-        
-        while (i < code.length) {
-            val char = code[i]
-            
-            when {
-                // Handle string literals - don't remove "comments" inside strings
-                !inString && (char == '"' || char == '\'') -> {
-                    inString = true
-                    stringChar = char
-                    result.append(char)
-                }
-                inString && char == stringChar && (i == 0 || code[i-1] != '\\') -> {
-                    inString = false
-                    result.append(char)
-                }
-                inString -> {
-                    result.append(char)
-                }
-                // Handle single-line comments
-                !inString && i < code.length - 1 && char == '/' && code[i + 1] == '/' -> {
-                    // Skip to end of line, but preserve newline for position tracking
-                    while (i < code.length && code[i] != '\n') {
-                        result.append(' ') // Replace with spaces to maintain positions
-                        i++
-                    }
-                    if (i < code.length) {
-                        result.append(code[i]) // Preserve newline
-                    }
-                }
-                // Handle multi-line comments
-                !inString && i < code.length - 1 && char == '/' && code[i + 1] == '*' -> {
-                    // Skip to */ but preserve structure for position tracking
-                    result.append(' ') // Replace / with space
-                    i++
-                    result.append(' ') // Replace * with space
-                    i++
-                    
-                    while (i < code.length - 1) {
-                        if (code[i] == '*' && code[i + 1] == '/') {
-                            result.append(' ') // Replace * with space
-                            i++
-                            result.append(' ') // Replace / with space
-                            break
-                        } else if (code[i] == '\n') {
-                            result.append('\n') // Preserve newlines
-                        } else {
-                            result.append(' ') // Replace comment content with spaces
-                        }
-                        i++
-                    }
-                }
-                else -> {
-                    result.append(char)
-                }
-            }
-            i++
-        }
-        
-        return result.toString()
-    }
-    
+    protected fun removeComments(code: String): String = JavaScriptCode(code).withoutComments()
+
     /**
      * Enhanced problem descriptor creation with TextRange support for precise highlighting.
      * 

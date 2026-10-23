@@ -43,6 +43,62 @@ internal class JavaScriptCode(val source: String) {
     fun end(index: Int): Int = pairs[index] ?: -1
     fun joined(range: IntRange): String = range.joinToString("") { text(it) }
 
+    fun withoutComments(): String {
+        val result = source.toCharArray()
+        TOKEN_PATTERN.findAll(source).filter {
+            it.value.startsWith("//") || it.value.startsWith("/*")
+        }.forEach { comment ->
+            for (index in comment.range) if (result[index] !in "\r\n") result[index] = ' '
+        }
+        return String(result)
+    }
+
+    fun withoutStrings(): String {
+        val result = source.toCharArray()
+        tokens.filter { it.isString }.forEach { token ->
+            for (index in token.start until token.end) if (result[index] !in "\r\n") result[index] = ' '
+        }
+        return String(result)
+    }
+
+    fun closingOffsetAt(offset: Int): Int {
+        val start = tokens.indexOfFirst { it.start == offset }
+        return tokens.getOrNull(end(start))?.start ?: -1
+    }
+
+    /** Split only at commas outside nested delimiters and string/template tokens. */
+    fun arguments(open: Int): List<String> {
+        val close = end(open)
+        if (close <= open + 1) return emptyList()
+        val result = mutableListOf<String>()
+        var first = open + 1
+        var cursor = first
+        while (cursor < close) {
+            if (text(cursor) == ",") {
+                result.add(source.substring(tokens[first].start, tokens[cursor].start).trim())
+                first = cursor + 1
+            }
+            val nestedEnd = end(cursor)
+            cursor = if (nestedEnd >= cursor) nestedEnd + 1 else cursor + 1
+        }
+        if (first < close) result.add(source.substring(tokens[first].start, tokens[close].start).trim())
+        return result
+    }
+
+    /** End of an initializer, including multiline calls/objects and basic semicolon insertion. */
+    fun expressionEnd(start: Int): Int {
+        var cursor = start
+        var last = start - 1
+        while (cursor < tokens.size && text(cursor) !in setOf(";", "}", ")", "]", ",")) {
+            if (last >= start && source.substring(tokens[last].end, tokens[cursor].start).contains('\n') &&
+                text(last) !in CONTINUATIONS && text(cursor) !in CONTINUATIONS) break
+            val close = end(cursor)
+            last = if (close >= cursor) close else cursor
+            cursor = last + 1
+        }
+        return last
+    }
+
     /** A declaration cannot escape its containing braces into a sibling function or block. */
     fun isVisibleAt(declarationOffset: Int, referenceOffset: Int): Boolean = pairs.all { (open, close) ->
         text(open) != "{" || declarationOffset !in tokens[open].end until tokens[close].start ||
@@ -62,6 +118,7 @@ internal class JavaScriptCode(val source: String) {
     companion object {
         private val OPEN = listOf("(", "[", "{")
         private val CLOSE = listOf(")", "]", "}")
+        private val CONTINUATIONS = setOf("await", "=", ".", "?.", ",", "+", "-", "*", "/", "&&", "||", "?", ":", "=>")
         private val TOKEN_PATTERN = Regex(
             """//[^\r\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|[a-zA-Z_$][a-zA-Z0-9_$]*|[0-9]+|===|!==|==|!=|\?\.|&&|\|\||=>|[^\s]"""
         )

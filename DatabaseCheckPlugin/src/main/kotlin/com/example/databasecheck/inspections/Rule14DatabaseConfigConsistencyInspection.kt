@@ -130,81 +130,17 @@ class Rule14DatabaseConfigConsistencyInspection : BaseDatabaseInspection() {
      * Find all getRdbStore calls and extract their configurations
      */
     private fun findGetRdbStoreCalls(codeText: String): List<RdbStoreCall> {
-        val calls = mutableListOf<RdbStoreCall>()
-        
-        // Find getRdbStore calls with proper multi-line support
-        val getRdbStorePattern = Regex("""getRdbStore\s*\(""", RegexOption.MULTILINE)
-        val matches = getRdbStorePattern.findAll(codeText).toList()
-        
-        matches.forEach { match ->
-            val startPos = match.range.first
-            
-            // Find the complete call by parsing from the match position
-            val callInfo = extractCompleteCall(codeText, startPos)
-            
-            if (callInfo != null) {
-                val config = extractConfiguration(callInfo.configParam, codeText, callInfo.startOffset)
-                
-                if (config != null) {
-                    calls.add(
-                        RdbStoreCall(
-                            configParameter = callInfo.configParam,
-                            configuration = config,
-                            startOffset = callInfo.startOffset,
-                            endOffset = callInfo.endOffset,
-                            fullMatch = callInfo.fullMatch
-                        )
-                    )
-                }
-            }
+        return JavaScriptAnalyzer.extractFunctionCallsFromText(codeText).filter {
+            it.functionName.substringAfterLast('.') == "getRdbStore" && it.arguments.size >= 2
+        }.mapNotNull { call ->
+            val method = Regex("""\bgetRdbStore\s*\(""").find(codeText, call.startOffset)
+                ?: return@mapNotNull null
+            val config = extractConfiguration(call.arguments[1], codeText, method.range.first)
+                ?: return@mapNotNull null
+            RdbStoreCall(call.arguments[1], config, method.range.first, call.endOffset,
+                codeText.substring(method.range.first, call.endOffset))
         }
-        
-        return calls
     }
-    
-    /**
-     * Extract complete getRdbStore call from starting position
-     */
-    private fun extractCompleteCall(codeText: String, startPos: Int): CallInfo? {
-        var pos = startPos
-        
-        // Skip "getRdbStore" and whitespace
-        while (pos < codeText.length && codeText[pos] != '(') pos++
-        if (pos >= codeText.length) return null
-        
-        pos++ // Skip '('
-        var parenCount = 1
-        var commaPos = -1
-        val callStart = startPos
-        
-        // Find the comma separating context and config parameters
-        var tempPos = pos
-        while (tempPos < codeText.length && parenCount > 0) {
-            when (codeText[tempPos]) {
-                '(' -> parenCount++
-                ')' -> parenCount--
-                ',' -> if (parenCount == 1 && commaPos == -1) commaPos = tempPos
-            }
-            tempPos++
-        }
-        
-        if (commaPos == -1 || parenCount != 0) return null
-        
-        val configStart = commaPos + 1
-        val callEnd = tempPos - 1
-        
-        val configParam = codeText.substring(configStart, callEnd).trim()
-        val fullMatch = codeText.substring(callStart, tempPos)
-        
-        return CallInfo(configParam, callStart, tempPos, fullMatch)
-    }
-    
-    private data class CallInfo(
-        val configParam: String,
-        val startOffset: Int,
-        val endOffset: Int,
-        val fullMatch: String
-    )
 
     /**
      * Extract configuration details from the parameter
@@ -232,9 +168,10 @@ class Rule14DatabaseConfigConsistencyInspection : BaseDatabaseInspection() {
         val config = DatabaseConfiguration()
         
         // Parse all key-value pairs in the object literal
-        val parameterPattern = Regex("""(?:^|,)\s*(?:"([^"]+)"|'([^']+)'|([a-zA-Z_$][a-zA-Z0-9_$]*?))\s*:\s*([^,}]+)""", RegexOption.MULTILINE)
+        val parameterPattern = Regex("""\s*(?:"([^"]+)"|'([^']+)'|([a-zA-Z_$][a-zA-Z0-9_$]*))\s*:\s*([\s\S]+)""")
         
-        parameterPattern.findAll(objectLiteral.trim().removeSurrounding("{", "}")).forEach { match ->
+        JavaScriptCode(objectLiteral.trim()).arguments(0).forEach { field ->
+            val match = parameterPattern.matchEntire(field) ?: return@forEach
             // Get the key name (could be in group 1, 2, or 3 depending on quote type)
             val key = when {
                 match.groupValues[1].isNotEmpty() -> match.groupValues[1] // "key"

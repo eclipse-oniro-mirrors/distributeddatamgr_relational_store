@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Device Co., Ltd.
+ * Copyright (c) 2024-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,6 +16,8 @@
 package com.example.databasecheck.inspections
 
 import com.example.databasecheck.utils.DatabaseConstants
+import com.example.databasecheck.utils.DatabasePathMatcher
+import com.example.databasecheck.utils.JavaScriptAnalyzer
 import com.intellij.codeInspection.*
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiFile
@@ -112,30 +114,9 @@ class Rule7DatabasePermissionInspection : BaseDatabaseInspection() {
      * Find all permission change operations in the code
      */
     private fun findPermissionOperations(codeText: String): List<PermissionOperation> {
-        val operations = mutableListOf<PermissionOperation>()
-        
-        for (operation in DatabaseConstants.PERMISSION_OPERATIONS) {
-            val pattern = when (operation) {
-                "fileIo.chmod" -> Regex("""fileIo\.chmod\s*\(\s*([^,)]+)""")
-                "fileIo.chmodSync" -> Regex("""fileIo\.chmodSync\s*\(\s*([^,)]+)""")
-                "chmod" -> Regex("""(?<!fileIo\.)chmod\s*\(\s*([^,)]+)""")
-                else -> continue
-            }
-            
-            pattern.findAll(codeText).forEach { matchResult ->
-                val pathArgument = matchResult.groupValues[1].trim()
-                operations.add(
-                    PermissionOperation(
-                        operation = operation,
-                        pathArgument = pathArgument,
-                        startOffset = matchResult.range.first,
-                        endOffset = matchResult.range.last + 1
-                    )
-                )
-            }
-        }
-        
-        return operations.sortedBy { it.startOffset }
+        return JavaScriptAnalyzer.extractFunctionCallsFromText(codeText).filter {
+            it.functionName in DatabaseConstants.PERMISSION_OPERATIONS && it.arguments.isNotEmpty()
+        }.map { PermissionOperation(it.functionName, it.arguments.first(), it.startOffset, it.endOffset) }
     }
 
     /**
@@ -146,9 +127,10 @@ class Rule7DatabasePermissionInspection : BaseDatabaseInspection() {
         codeText: String
     ): List<PermissionViolation> {
         val violations = mutableListOf<PermissionViolation>()
-        
+        val resolver = DatabasePathMatcher.Resolver(codeText)
+
         for (operation in operations) {
-            val isDatabasePath = checkIfDatabasePath(operation.pathArgument, codeText)
+            val isDatabasePath = resolver.resolves(operation.pathArgument, operation.startOffset)
             
             if (isDatabasePath) {
                 violations.add(
@@ -164,87 +146,6 @@ class Rule7DatabasePermissionInspection : BaseDatabaseInspection() {
         }
         
         return violations
-    }
-
-    /**
-     * Check if a path argument references a database path
-     * Uses the same logic as Rule1 to ensure consistency
-     */
-    private fun checkIfDatabasePath(pathArgument: String, codeText: String): Boolean {
-        // Primary check: Test against actual database path regex patterns from DatabaseConstants
-        for (pathPattern in DatabaseConstants.DATABASE_PATHS) {
-            if (pathPattern.containsMatchIn(pathArgument)) {
-                return true
-            }
-        }
-        
-        // Secondary check: String concatenation expressions
-        if (pathArgument.contains("+") || pathArgument.contains("`")) {
-            return containsDatabasePathPattern(pathArgument)
-        }
-        
-        // Tertiary check: Variable references - check if they might be database paths
-        return couldBeDatabasePathVariable(pathArgument, codeText)
-    }
-
-    /**
-     * Check if a string literal is a database path
-     */
-    private fun isDatabasePathString(path: String): Boolean {
-        return DatabaseConstants.DATABASE_PATHS.any { regex ->
-            regex.containsMatchIn(path)
-        }
-    }
-
-    /**
-     * Check if an expression contains database path patterns
-     * Uses DatabaseConstants.DATABASE_PATHS for consistency with other rules
-     */
-    private fun containsDatabasePathPattern(expression: String): Boolean {
-        // Test against database path regex patterns from DatabaseConstants
-        for (pathPattern in DatabaseConstants.DATABASE_PATHS) {
-            if (pathPattern.containsMatchIn(expression)) {
-                return true
-            }
-        }
-        
-        // Also check for common database path components that might be in concatenation
-        val databaseIndicators = listOf(
-            "context.databaseDir", "databaseDir",
-            "/data/storage/el1/database", "/data/storage/el2/database",
-            "/data/storage/el3/database", "/data/storage/el4/database", "/data/storage/el5/database"
-        )
-        
-        return databaseIndicators.any { indicator ->
-            expression.contains(indicator)
-        }
-    }
-
-    /**
-     * Check if a variable might reference a database path
-     * Uses DatabaseConstants.DATABASE_PATHS for consistent detection
-     */
-    private fun couldBeDatabasePathVariable(variable: String, codeText: String): Boolean {
-        // Look for variable assignments that might indicate database paths
-        val variablePattern = Regex("""(let|var|const)\s+${Regex.escape(variable)}\s*=\s*([^;\n]+)""")
-        
-        variablePattern.findAll(codeText).forEach { match ->
-            val assignment = match.groupValues[2].trim()
-            
-            // Check assignment against database path patterns
-            for (pathPattern in DatabaseConstants.DATABASE_PATHS) {
-                if (pathPattern.containsMatchIn(assignment)) {
-                    return true
-                }
-            }
-            
-            // Also check using the string-based method for backward compatibility
-            if (containsDatabasePathPattern(assignment) || isDatabasePathString(assignment)) {
-                return true
-            }
-        }
-        
-        return false
     }
 
     /**
@@ -271,32 +172,8 @@ class Rule7DatabasePermissionInspection : BaseDatabaseInspection() {
      * Fallback analysis using simpler pattern matching
      */
     private fun fallbackPermissionAnalysis(file: PsiFile, holder: ProblemsHolder) {
-        val codeText = file.text
-        
-        // Simple pattern to catch obvious violations
-        val patterns = listOf(
-            Regex("""(fileIo\.chmod|fileIo\.chmodSync|chmod)\s*\([^)]*context\.databaseDir[^)]*\)"""),
-            Regex("""(fileIo\.chmod|fileIo\.chmodSync|chmod)\s*\([^)]*/data/storage/el[1-5]/database[^)]*\)"""),
-            Regex("""(fileIo\.chmod|fileIo\.chmodSync|chmod)\s*\([^)]*/data/app/el[1-5]/[^/]+/database[^)]*\)"""),
-            Regex("""(fileIo\.chmod|fileIo\.chmodSync|chmod)\s*\([^)]*/data/service/el[1-4]/[^/]+/database[^)]*\)""")
-        )
-        
-        patterns.forEach { pattern ->
-            pattern.findAll(codeText).forEach { match ->
-                val textRange = TextRange(match.range.first, match.range.last + 1)
-                if (textRange.startOffset >= 0 && textRange.endOffset <= file.textLength && 
-                    textRange.startOffset < textRange.endOffset) {
-                    
-                    createProblemDescriptor(
-                        file,
-                        "Database permission modification detected. " +
-                        "Avoid chmod operations on database paths to maintain proper DAC/ACL permissions.",
-                        holder,
-                        textRange
-                    )
-                }
-            }
-        }
+        val code = removeComments(file.text)
+        detectPermissionViolations(findPermissionOperations(code), code).forEach { reportViolation(it, file, holder) }
     }
 
     /**

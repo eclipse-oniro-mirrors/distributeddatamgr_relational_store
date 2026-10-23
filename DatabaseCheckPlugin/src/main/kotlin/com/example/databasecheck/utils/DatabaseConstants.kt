@@ -71,7 +71,7 @@ object DatabaseConstants {
     
     // Rule 3, 4, 5: Transaction operations
     val TRANSACTION_CREATE_OPERATIONS = setOf(
-        "rdbStore.createTransaction", "rdbStore.beginTransaction"
+        "createTransaction", "beginTransaction"
     )
     
     val TRANSACTION_COMMIT_OPERATIONS = setOf(
