@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Device Co., Ltd.
+ * Copyright (c) 2024-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -79,9 +79,9 @@ object JavaScriptAnalyzer {
     fun extractVariableAssignmentsFromText(code: String): List<VariableAssignment> {
         val assignments = mutableListOf<VariableAssignment>()
         
-        // Pattern for variable declarations: const/let/var variableName = expression
+        // Preserve the variable name when JS/TS/ArkTS declarations include a type annotation.
         val declarationPattern = Regex(
-            """(const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*([^;\n]+)""",
+            """(const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\s*:\s*[^=;\n]+)?\s*=\s*([^;\n]+)""",
             RegexOption.MULTILINE
         )
         
@@ -102,13 +102,7 @@ object JavaScriptAnalyzer {
         
         assignmentPattern.findAll(code).forEach { match ->
             // Skip if this is already captured as a declaration
-            val precedingText = if (match.range.first > 10) {
-                code.substring(match.range.first - 10, match.range.first)
-            } else {
-                code.substring(0, match.range.first)
-            }
-            
-            if (!precedingText.contains(Regex("""(const|let|var)\s*$"""))) {
+            if (assignments.none { match.range.first in it.startOffset until it.endOffset }) {
                 assignments.add(VariableAssignment(
                     variableName = match.groupValues[1],
                     assignmentExpression = match.groupValues[2].trim(),
@@ -259,9 +253,9 @@ object JavaScriptAnalyzer {
     fun extractFunctionScopes(code: String): List<FunctionScope> {
         val scopes = mutableListOf<FunctionScope>()
         
-        // Pattern for function declarations: function name(...) { ... }
+        // Function declarations can include a TS/ArkTS return type before the body.
         val functionPattern = Regex(
-            """(async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\([^)]*\)\s*\{""",
+            """(async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\([^)]*\)(?:\s*:\s*[^{};=]+)?\s*\{""",
             RegexOption.MULTILINE
         )
         

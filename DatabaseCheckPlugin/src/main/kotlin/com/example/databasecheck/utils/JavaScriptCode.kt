@@ -15,7 +15,7 @@
 
 package com.example.databasecheck.utils
 
-/** A small lexical view used by Rule9; offsets always refer to the original source. */
+/** A lexical view shared by database rules; offsets always refer to the original source. */
 internal class JavaScriptCode(val source: String) {
     data class Token(val text: String, val start: Int, val end: Int) {
         val isString: Boolean get() = text.firstOrNull() in listOf('\'', '"', '`')
@@ -42,6 +42,12 @@ internal class JavaScriptCode(val source: String) {
     fun text(index: Int): String = tokens.getOrNull(index)?.text.orEmpty()
     fun end(index: Int): Int = pairs[index] ?: -1
     fun joined(range: IntRange): String = range.joinToString("") { text(it) }
+
+    /** A declaration cannot escape its containing braces into a sibling function or block. */
+    fun isVisibleAt(declarationOffset: Int, referenceOffset: Int): Boolean = pairs.all { (open, close) ->
+        text(open) != "{" || declarationOffset !in tokens[open].end until tokens[close].start ||
+            referenceOffset in tokens[open].end until tokens[close].start
+    }
 
     fun statementEnd(start: Int): Int {
         if (text(start) == "{") return end(start)
