@@ -24,6 +24,7 @@ extern "C" {
 #define _IOC_WRITE 1U
 #define _IOR(a, b, c) _IOC(_IOC_READ, (a), (b), sizeof(c))
 #define _IOW(a, b, c) _IOC(_IOC_WRITE, (a), (b), sizeof(c))
+#define _IOWR(a, b, c) _IOC(_IOC_READ | _IOC_WRITE, (a), (b), sizeof(c))
 
 // Open flags not defined by the Windows headers; the values are irrelevant
 // because every ioctl call on the Windows host is a no-op.
