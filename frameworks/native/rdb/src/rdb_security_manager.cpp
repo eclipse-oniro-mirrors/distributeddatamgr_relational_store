@@ -16,26 +16,23 @@
 #include "rdb_security_manager.h"
 
 #include <algorithm>
-#include <dirent.h>
+#include <cerrno>
+#include <cstring>
 #include <dlfcn.h>
 #include <fcntl.h>
-#include <fstream>
-#include <securec.h>
-#include <sstream>
-#include <iomanip>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <string>
+#include <tuple>
+#include <utility>
 
-#include "directory_ex.h"
 #include "file_ex.h"
 #include "hmac/rdb_hmac.h"
 #include "logger.h"
 #include "rdb_errno.h"
 #include "rdb_platform.h"
-#include "rdb_sql_utils.h"
 #include "sqlite_utils.h"
 #include "string_utils.h"
 #include "rdb_fault_hiview_reporter.h"
@@ -43,6 +40,9 @@
 
 namespace OHOS {
 namespace NativeRdb {
+namespace {
+constexpr uint8_t HMAC_SIZE = 8;
+}
 using namespace OHOS::Rdb;
 using Reportor = RdbFaultHiViewReporter;
 using Creator = std::shared_ptr<OHOS::NativeRdb::RDBCrypto> (*)(const std::vector<uint8_t> &rootKeyAlias);
@@ -192,7 +192,7 @@ bool RdbSecurityManager::SaveSecretKeyToFile(const std::string &keyFile, const s
 
 std::vector<char> RdbSecurityManager::GenerateHMAC(std::vector<char> &data)
 {
-    auto result = GenerateHmacSha256(data);
+    auto result = GenerateHmacSha256(data, HMAC_SIZE);
     const auto &error = result.first;
     if (!error.empty()) {
         LOG_ERROR("GenerateHMAC failed:%{public}s", error.c_str());

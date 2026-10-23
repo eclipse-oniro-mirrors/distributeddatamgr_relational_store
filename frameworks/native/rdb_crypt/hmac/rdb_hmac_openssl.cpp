@@ -18,8 +18,11 @@
 #include <openssl/hmac.h>
 
 namespace OHOS::NativeRdb {
-std::pair<std::string, std::vector<char>> GenerateHmacSha256(const std::vector<char> &data)
+std::pair<std::string, std::vector<char>> GenerateHmacSha256(const std::vector<char> &data, uint32_t outputSize)
 {
+    if (outputSize == 0 || outputSize > HMAC_SHA256_SIZE) {
+        return { "invalid hmac size=" + std::to_string(outputSize), {} };
+    }
     std::vector<char> result(HMAC_SHA256_SIZE, 0);
     unsigned int hmacLen = 0;
     std::string key = "";
@@ -27,10 +30,10 @@ std::pair<std::string, std::vector<char>> GenerateHmacSha256(const std::vector<c
         reinterpret_cast<const unsigned char *>(data.data()), static_cast<int>(data.size()),
         reinterpret_cast<uint8_t *>(result.data()), &hmacLen);
     if (hmacLen == 0) {
-        result.assign(RDB_HMAC_SIZE, 0);
+        result.assign(outputSize, 0);
         return { "hmac generate failed" + std::to_string(hmacLen), std::move(result) };
     }
-    result.resize(RDB_HMAC_SIZE);
+    result.resize(outputSize);
     return { "", std::move(result) };
 }
 } // namespace OHOS::NativeRdb

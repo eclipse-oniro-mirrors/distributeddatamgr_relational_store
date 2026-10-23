@@ -14,12 +14,18 @@
  */
 #include <gtest/gtest.h>
 
+#include <limits>
+
 #include "hmac/rdb_hmac.h"
 #include "mock_hmac.h"
 #include "rdb_security_manager.h"
 
 using namespace testing::ext;
 using namespace OHOS::NativeRdb;
+
+namespace {
+constexpr uint32_t HMAC_SIZE = 8;
+}
 
 class MockRdbHmacTest : public testing::Test {
 public:
@@ -49,9 +55,9 @@ HWTEST_F(MockRdbHmacTest, Rdb_Hmac_BackendFailures_001, TestSize.Level3)
         std::vector<char> data = { 'a' };
         const uint32_t allocated = failure == ::Test::HmacFailure::ALLOCATE ? 0U : 1U;
         // Act and Assert: validate the backend's returned error, digest and context release.
-        const auto [error, digest] = GenerateHmacSha256(data);
+        const auto [error, digest] = GenerateHmacSha256(data, HMAC_SIZE);
         EXPECT_FALSE(error.empty()) << "stage=" << static_cast<int>(failure);
-        EXPECT_EQ(digest, std::vector<char>(RDB_HMAC_SIZE, 0)) << "stage=" << static_cast<int>(failure);
+        EXPECT_EQ(digest, std::vector<char>(HMAC_SIZE, 0)) << "stage=" << static_cast<int>(failure);
         EXPECT_EQ(::Test::GetHmacState().created, allocated)
             << "backend allocation stage=" << static_cast<int>(failure);
         EXPECT_EQ(::Test::GetHmacState().freed, allocated) << "backend release stage=" << static_cast<int>(failure);
@@ -62,7 +68,7 @@ HWTEST_F(MockRdbHmacTest, Rdb_Hmac_BackendFailures_001, TestSize.Level3)
         // Act.
         const auto result = manager.GenerateHMAC(data);
         // Assert: the mock writes nonzero output, which must never escape on failure.
-        EXPECT_EQ(result, std::vector<char>(manager.HMAC_SIZE, 0)) << "stage=" << static_cast<int>(failure);
+        EXPECT_EQ(result, std::vector<char>(HMAC_SIZE, 0)) << "stage=" << static_cast<int>(failure);
         const auto &state = ::Test::GetHmacState();
         const uint32_t updated = allocated != 0 && failure != ::Test::HmacFailure::INIT ? 1U : 0U;
         const uint32_t finalized = updated != 0 && failure != ::Test::HmacFailure::UPDATE ? 1U : 0U;
@@ -85,11 +91,11 @@ HWTEST_F(MockRdbHmacTest, Rdb_Hmac_InvalidLengthDetails_001, TestSize.Level3)
     ::Test::GetHmacState().failure = ::Test::HmacFailure::LENGTH;
     const std::vector<char> data = { 'a' };
     // Act.
-    const auto [error, digest] = GenerateHmacSha256(data);
+    const auto [error, digest] = GenerateHmacSha256(data, HMAC_SIZE);
     // Assert.
     EXPECT_NE(error.find("ret=0"), std::string::npos) << error;
     EXPECT_NE(error.find("len=0"), std::string::npos) << error;
-    EXPECT_EQ(digest, std::vector<char>(RDB_HMAC_SIZE, 0)) << "partial output must not escape on failure";
+    EXPECT_EQ(digest, std::vector<char>(HMAC_SIZE, 0)) << "partial output must not escape on failure";
 }
 
 /**
@@ -112,4 +118,28 @@ HWTEST_F(MockRdbHmacTest, Rdb_Hmac_EmptyKeyLifecycle_001, TestSize.Level1)
     EXPECT_EQ(::Test::GetHmacState().keyLength, 0U) << "placeholder byte is not part of the key";
     EXPECT_EQ(::Test::GetHmacState().created, 1U) << "one context per call";
     EXPECT_EQ(::Test::GetHmacState().freed, 1U) << "context released before return";
+}
+
+/**
+ * @brief Reject invalid requested output sizes before invoking the MAC backend.
+ * @tc.name: Rdb_Hmac_InvalidOutputSize_001
+ * @tc.type: RELI
+ */
+HWTEST_F(MockRdbHmacTest, Rdb_Hmac_InvalidOutputSize_001, TestSize.Level3)
+{
+    const std::vector<char> data = { 'a' };
+    for (const uint32_t outputSize : { 0U, HMAC_SHA256_SIZE + 1, std::numeric_limits<uint32_t>::max() }) {
+        // Arrange: start with a working backend to detect any unexpected crypto call.
+        ::Test::GetHmacState() = {};
+        // Act.
+        const auto [error, digest] = GenerateHmacSha256(data, outputSize);
+        // Assert.
+        EXPECT_EQ(error, "invalid hmac size=" + std::to_string(outputSize));
+        EXPECT_TRUE(digest.empty()) << "output bytes=" << outputSize;
+        const auto &state = ::Test::GetHmacState();
+        EXPECT_EQ(state.created, 0U) << "output bytes=" << outputSize;
+        EXPECT_EQ(state.initCalls, 0U) << "output bytes=" << outputSize;
+        EXPECT_EQ(state.updateCalls, 0U) << "output bytes=" << outputSize;
+        EXPECT_EQ(state.finalCalls, 0U) << "output bytes=" << outputSize;
+    }
 }

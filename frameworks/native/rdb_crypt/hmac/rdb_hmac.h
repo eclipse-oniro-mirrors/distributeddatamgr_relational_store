@@ -22,10 +22,10 @@
 
 namespace OHOS::NativeRdb {
 constexpr uint32_t HMAC_SHA256_SIZE = 32;
-constexpr uint32_t RDB_HMAC_SIZE = 8;
 
-// Return the first RDB_HMAC_SIZE bytes of an empty-key HMAC-SHA256 with an empty error on success,
-// or an error and RDB_HMAC_SIZE zero bytes on failure.
-std::pair<std::string, std::vector<char>> GenerateHmacSha256(const std::vector<char> &data);
+// Return outputSize bytes of an empty-key HMAC-SHA256 with an empty error on success,
+// or an error and outputSize zero bytes on calculation failure.
+// outputSize must be in [1, HMAC_SHA256_SIZE]; otherwise return an error and an empty vector.
+std::pair<std::string, std::vector<char>> GenerateHmacSha256(const std::vector<char> &data, uint32_t outputSize);
 } // namespace OHOS::NativeRdb
 #endif // RDB_HMAC_H

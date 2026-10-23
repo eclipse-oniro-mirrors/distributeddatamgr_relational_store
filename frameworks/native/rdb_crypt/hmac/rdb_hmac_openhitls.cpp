@@ -21,8 +21,11 @@
 #include "crypt_errno.h"
 
 namespace OHOS::NativeRdb {
-std::pair<std::string, std::vector<char>> GenerateHmacSha256(const std::vector<char> &data)
+std::pair<std::string, std::vector<char>> GenerateHmacSha256(const std::vector<char> &data, uint32_t outputSize)
 {
+    if (outputSize == 0 || outputSize > HMAC_SHA256_SIZE) {
+        return { "invalid hmac size=" + std::to_string(outputSize), {} };
+    }
     std::vector<char> result(HMAC_SHA256_SIZE, 0);
     uint32_t length = result.size();
     std::unique_ptr<CRYPT_EAL_MacCtx, decltype(&CRYPT_EAL_MacFreeCtx)> ctx(
@@ -39,11 +42,11 @@ std::pair<std::string, std::vector<char>> GenerateHmacSha256(const std::vector<c
         ret = CRYPT_EAL_MacFinal(ctx.get(), reinterpret_cast<uint8_t *>(result.data()), &length);
     }
     if (ret != CRYPT_SUCCESS || length != HMAC_SHA256_SIZE) {
-        result.assign(RDB_HMAC_SIZE, 0);
+        result.assign(outputSize, 0);
         return { "hmac generate failed, ret=" + std::to_string(ret) + ", len=" + std::to_string(length),
             std::move(result) };
     }
-    result.resize(RDB_HMAC_SIZE);
+    result.resize(outputSize);
     return { "", std::move(result) };
 }
 } // namespace OHOS::NativeRdb

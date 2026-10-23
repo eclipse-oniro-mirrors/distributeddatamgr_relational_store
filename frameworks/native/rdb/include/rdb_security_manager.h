@@ -1,5 +1,5 @@
-/*
- * Copyright (c) 2022 Huawei Device Co., Ltd.
+/**
+ * Copyright (c) 2022-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -178,7 +178,6 @@ private:
     static constexpr uint32_t HEX_FIELD_WIDTH = 2;
     static constexpr uint8_t VERSION_V0 = 1;
     static constexpr uint8_t VERSION_V1 = 2;
-    static constexpr uint8_t HMAC_SIZE = 8;
 
     const std::vector<uint8_t> rootAlias_;
     std::mutex mutex_;
