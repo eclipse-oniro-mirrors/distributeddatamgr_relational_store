@@ -14,23 +14,23 @@
  */
 #include "rdb_hmac.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <openssl/hmac.h>
 
 namespace OHOS::NativeRdb {
-std::pair<std::string, HmacSha256Digest> GenerateHmacSha256(const std::vector<char> &data)
+std::pair<std::string, std::vector<char>> GenerateHmacSha256(const std::vector<char> &data)
 {
-    HmacSha256Digest digest{};
-    unsigned char hmacResult[EVP_MAX_MD_SIZE] = { 0 };
+    std::vector<char> result(HMAC_SHA256_SIZE, 0);
     unsigned int hmacLen = 0;
     std::string key = "";
     HMAC(EVP_sha256(), key.c_str(), static_cast<int>(key.length()),
-        reinterpret_cast<const unsigned char *>(data.data()), static_cast<int>(data.size()), hmacResult, &hmacLen);
+        reinterpret_cast<const unsigned char *>(data.data()), static_cast<int>(data.size()),
+        reinterpret_cast<uint8_t *>(result.data()), &hmacLen);
     if (hmacLen == 0) {
-        return { "hmac generate failed" + std::to_string(hmacLen), {} };
+        result.assign(RDB_HMAC_SIZE, 0);
+        return { "hmac generate failed" + std::to_string(hmacLen), std::move(result) };
     }
-    std::copy_n(hmacResult, std::min(digest.size(), static_cast<size_t>(hmacLen)), digest.begin());
-    return { "", digest };
+    result.resize(RDB_HMAC_SIZE);
+    return { "", std::move(result) };
 }
 } // namespace OHOS::NativeRdb

@@ -51,7 +51,7 @@ HWTEST_F(MockRdbHmacTest, Rdb_Hmac_BackendFailures_001, TestSize.Level3)
         // Act and Assert: validate the backend's returned error, digest and context release.
         const auto [error, digest] = GenerateHmacSha256(data);
         EXPECT_FALSE(error.empty()) << "stage=" << static_cast<int>(failure);
-        EXPECT_EQ(digest, HmacSha256Digest{}) << "stage=" << static_cast<int>(failure);
+        EXPECT_EQ(digest, std::vector<char>(RDB_HMAC_SIZE, 0)) << "stage=" << static_cast<int>(failure);
         EXPECT_EQ(::Test::GetHmacState().created, allocated)
             << "backend allocation stage=" << static_cast<int>(failure);
         EXPECT_EQ(::Test::GetHmacState().freed, allocated) << "backend release stage=" << static_cast<int>(failure);
@@ -89,7 +89,7 @@ HWTEST_F(MockRdbHmacTest, Rdb_Hmac_InvalidLengthDetails_001, TestSize.Level3)
     // Assert.
     EXPECT_NE(error.find("ret=0"), std::string::npos) << error;
     EXPECT_NE(error.find("len=0"), std::string::npos) << error;
-    EXPECT_EQ(digest, HmacSha256Digest{}) << "partial output must not escape on failure";
+    EXPECT_EQ(digest, std::vector<char>(RDB_HMAC_SIZE, 0)) << "partial output must not escape on failure";
 }
 
 /**
@@ -107,6 +107,8 @@ HWTEST_F(MockRdbHmacTest, Rdb_Hmac_EmptyKeyLifecycle_001, TestSize.Level1)
     const auto result = manager.GenerateHMAC(data);
     // Assert.
     EXPECT_EQ(result, std::vector<char>(bytes.begin(), bytes.end())) << "truncate successful digest";
+    EXPECT_EQ(reinterpret_cast<const uint8_t *>(result.data()), ::Test::GetHmacState().output)
+        << "move the backend buffer to the caller without copying";
     EXPECT_EQ(::Test::GetHmacState().keyLength, 0U) << "placeholder byte is not part of the key";
     EXPECT_EQ(::Test::GetHmacState().created, 1U) << "one context per call";
     EXPECT_EQ(::Test::GetHmacState().freed, 1U) << "context released before return";

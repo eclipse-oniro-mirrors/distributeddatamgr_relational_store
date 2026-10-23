@@ -15,7 +15,6 @@
 #ifndef RDB_HMAC_H
 #define RDB_HMAC_H
 
-#include <array>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -23,10 +22,10 @@
 
 namespace OHOS::NativeRdb {
 constexpr uint32_t HMAC_SHA256_SIZE = 32;
-using HmacSha256Digest = std::array<uint8_t, HMAC_SHA256_SIZE>;
+constexpr uint32_t RDB_HMAC_SIZE = 8;
 
-// Compute an empty-key HMAC-SHA256. Return an empty error and the complete digest on success,
-// or an error and a zero digest on failure.
-std::pair<std::string, HmacSha256Digest> GenerateHmacSha256(const std::vector<char> &data);
+// Return the first RDB_HMAC_SIZE bytes of an empty-key HMAC-SHA256 with an empty error on success,
+// or an error and RDB_HMAC_SIZE zero bytes on failure.
+std::pair<std::string, std::vector<char>> GenerateHmacSha256(const std::vector<char> &data);
 } // namespace OHOS::NativeRdb
 #endif // RDB_HMAC_H

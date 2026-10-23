@@ -27,6 +27,7 @@ struct HmacState {
     uint32_t initCalls = 0;
     uint32_t updateCalls = 0;
     uint32_t finalCalls = 0;
+    const uint8_t *output = nullptr;
 };
 HmacState &GetHmacState();
 } // namespace Test

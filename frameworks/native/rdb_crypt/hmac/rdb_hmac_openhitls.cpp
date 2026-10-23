@@ -21,10 +21,10 @@
 #include "crypt_errno.h"
 
 namespace OHOS::NativeRdb {
-std::pair<std::string, HmacSha256Digest> GenerateHmacSha256(const std::vector<char> &data)
+std::pair<std::string, std::vector<char>> GenerateHmacSha256(const std::vector<char> &data)
 {
-    HmacSha256Digest digest{};
-    uint32_t length = digest.size();
+    std::vector<char> result(HMAC_SHA256_SIZE, 0);
+    uint32_t length = result.size();
     std::unique_ptr<CRYPT_EAL_MacCtx, decltype(&CRYPT_EAL_MacFreeCtx)> ctx(
         CRYPT_EAL_MacNewCtx(CRYPT_MAC_HMAC_SHA256), CRYPT_EAL_MacFreeCtx);
     const uint8_t emptyKey = 0;
@@ -36,11 +36,14 @@ std::pair<std::string, HmacSha256Digest> GenerateHmacSha256(const std::vector<ch
                       ctx.get(), reinterpret_cast<const uint8_t *>(data.data()), static_cast<uint32_t>(data.size()));
     }
     if (ret == CRYPT_SUCCESS) {
-        ret = CRYPT_EAL_MacFinal(ctx.get(), digest.data(), &length);
+        ret = CRYPT_EAL_MacFinal(ctx.get(), reinterpret_cast<uint8_t *>(result.data()), &length);
     }
-    if (ret != CRYPT_SUCCESS || length != digest.size()) {
-        return { "hmac generate failed, ret=" + std::to_string(ret) + ", len=" + std::to_string(length), {} };
+    if (ret != CRYPT_SUCCESS || length != HMAC_SHA256_SIZE) {
+        result.assign(RDB_HMAC_SIZE, 0);
+        return { "hmac generate failed, ret=" + std::to_string(ret) + ", len=" + std::to_string(length),
+            std::move(result) };
     }
-    return { "", digest };
+    result.resize(RDB_HMAC_SIZE);
+    return { "", std::move(result) };
 }
 } // namespace OHOS::NativeRdb

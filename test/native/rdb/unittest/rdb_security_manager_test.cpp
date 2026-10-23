@@ -229,22 +229,21 @@ HWTEST_F(RdbSecurityManagerTest, KeyFilesLockTest001, TestSize.Level1)
 }
 
 /**
- * @brief Return an empty error and the complete empty-key HMAC-SHA256.
- * @tc.name: Rdb_Hmac_FullDigest_001
+ * @brief Return the eight-byte file checksum directly with an empty error.
+ * @tc.name: Rdb_Hmac_Result_001
  * @tc.type: FUNC
  */
-HWTEST_F(RdbSecurityManagerTest, Rdb_Hmac_FullDigest_001, TestSize.Level1)
+HWTEST_F(RdbSecurityManagerTest, Rdb_Hmac_Result_001, TestSize.Level1)
 {
-    // Arrange: independently generated full digest for the empty key and "abc".
+    // Arrange: independently generated checksum for the empty key and "abc".
     const std::vector<char> data = { 'a', 'b', 'c' };
-    const HmacSha256Digest expected = { 0xfd, 0x7a, 0xdb, 0x15, 0x2c, 0x05, 0xef, 0x80, 0xdc, 0xcf, 0x50, 0xa1, 0xfa,
-        0x4c, 0x05, 0xd5, 0xa3, 0xec, 0x6d, 0xa9, 0x55, 0x75, 0xfc, 0x31, 0x2a, 0xe7, 0xc5, 0xd0, 0x91, 0x83, 0x63,
-        0x51 };
+    const std::vector<uint8_t> bytes = { 0xfd, 0x7a, 0xdb, 0x15, 0x2c, 0x05, 0xef, 0x80 };
+    const std::vector<char> expected(bytes.begin(), bytes.end());
     // Act.
     const auto [error, digest] = GenerateHmacSha256(data);
     // Assert.
     ASSERT_TRUE(error.empty()) << error;
-    EXPECT_EQ(digest, expected) << "all 32 bytes must match the baseline";
+    EXPECT_EQ(digest, expected) << "return exactly the eight-byte file checksum";
 }
 
 /**

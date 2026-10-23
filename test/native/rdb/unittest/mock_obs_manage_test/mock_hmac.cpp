@@ -75,6 +75,7 @@ int32_t CRYPT_EAL_MacFinal(CRYPT_EAL_MacCtx *ctx, uint8_t *output, uint32_t *len
     if (ctx == nullptr || output == nullptr || len == nullptr || *len < SHA256_SIZE) {
         return CRYPT_NULL_INPUT;
     }
+    state.output = output;
     std::iota(output, output + SHA256_SIZE, uint8_t{ 0xa5 });
     if (state.failure == HmacFailure::FINAL) {
         return CRYPT_NULL_INPUT;
