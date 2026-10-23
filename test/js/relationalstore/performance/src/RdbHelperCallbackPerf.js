@@ -30,6 +30,7 @@ const BASE_COUNT = 2000; // loop times
 const BASE_LINE_TABLE = 2500; // callback tablet base line
 const BASE_LINE_PHONE = 3000; // callback phone base line
 const BASE_LINE = (deviceInfo.deviceType == "tablet") ? BASE_LINE_TABLE : BASE_LINE_PHONE;
+const DELETE_BASE_LINE = BASE_LINE * 2; // deleteRdbStore probes HMFS ioctl per file
 
 describe('rdbHelperCallbackPerf', function () {
   beforeAll(async function () {
@@ -81,7 +82,7 @@ describe('rdbHelperCallbackPerf', function () {
           let endTime = new Date().getTime();
           averageTime = ((endTime - startTime) * 1000) / BASE_COUNT;
           console.info(TAG + " the deleteRdbStore_Callback average time is: " + averageTime + " μs");
-          expect(averageTime < BASE_LINE).assertTrue();
+          expect(averageTime < DELETE_BASE_LINE).assertTrue();
           done();
         }
       })
