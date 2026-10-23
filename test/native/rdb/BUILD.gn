@@ -1,4 +1,4 @@
-# Copyright (c) 2021 Huawei Device Co., Ltd.
+# Copyright (c) 2021-2026 Huawei Device Co., Ltd.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -81,6 +81,7 @@ ohos_unittest("NativeRdbMultiProcessTest") {
     "unittest/common.cpp",
     "unittest/multiProcess/rdb_store_multiprocess_createDB_test.cpp",
     "${relational_store_native_path}/rdb/src/rdb_security_manager.cpp",
+    relational_store_hmac_source,
     "${relational_store_native_path}/rdb/src/sqlite_utils.cpp",
     "${relational_store_native_path}/rdb/src/string_utils.cpp",
     "${relational_store_native_path}/rdb/src/rdb_file_system.cpp",
@@ -103,12 +104,12 @@ ohos_unittest("NativeRdbMultiProcessTest") {
   defines = [ "RELATIONAL_STORE" ]
 
   external_deps = [
-    "openssl:libcrypto_shared",
     "c_utils:utils",
     "googletest:gtest_main",
     "json:nlohmann_json_static",
     "sqlite:sqlite",
   ]
+  external_deps += external_deps_rdb_hmac
   external_deps += external_deps_hilog
   external_deps += external_deps_ability_base_zuri
   external_deps += external_deps_ability_runtime_dataobs_manager
@@ -232,6 +233,7 @@ ohos_unittest("SilentProxyTest") {
     "${relational_store_native_path}/rdb/src/rdb_perfStat.cpp",
     "${relational_store_native_path}/rdb/src/rdb_predicates.cpp",
     "${relational_store_native_path}/rdb/src/rdb_security_manager.cpp",
+    relational_store_hmac_source,
     "${relational_store_native_path}/rdb/src/rdb_sql_log.cpp",
     "${relational_store_native_path}/rdb/src/rdb_sql_statistic.cpp",
     "${relational_store_native_path}/rdb/src/rdb_sql_utils.cpp",
@@ -295,10 +297,10 @@ ohos_unittest("SilentProxyTest") {
     "googletest:gtest",
     "googletest:gtest_main",
     "json:nlohmann_json_static",
-    "openssl:libcrypto_shared",
     "sqlite:sqlite",
     "sqlite:sqliteicu",
   ]
+  external_deps += external_deps_rdb_hmac
   external_deps += external_deps_file_api
   external_deps += external_deps_hilog
   external_deps += external_deps_ability_base_zuri
@@ -425,6 +427,7 @@ ohos_unittest("NativeRdbTest") {
     "${relational_store_native_path}/rdb/src/rdb_obs_manager.cpp",
     "${relational_store_native_path}/rdb/src/rdb_perfStat.cpp",
     "${relational_store_native_path}/rdb/src/rdb_security_manager.cpp",
+    relational_store_hmac_source,
     "${relational_store_native_path}/rdb/src/rdb_sql_log.cpp",
     "${relational_store_native_path}/rdb/src/rdb_sql_statistic.cpp",
     "${relational_store_native_path}/rdb/src/rdb_store_impl.cpp",
@@ -472,9 +475,9 @@ ohos_unittest("NativeRdbTest") {
     "c_utils:utils",
     "googletest:gtest_main",
     "json:nlohmann_json_static",
-    "openssl:libcrypto_shared",
     "sqlite:sqlite",
   ]
+  external_deps += external_deps_rdb_hmac
   external_deps += external_deps_file_api
   external_deps += external_deps_hilog
   external_deps += external_deps_ability_base_zuri
@@ -543,6 +546,7 @@ ohos_unittest("RdbAuditTest") {
     "${relational_store_native_path}/rdb/src/rdb_perfStat.cpp",
     "${relational_store_native_path}/rdb/src/rdb_predicates.cpp",
     "${relational_store_native_path}/rdb/src/rdb_security_manager.cpp",
+    relational_store_hmac_source,
     "${relational_store_native_path}/rdb/src/rdb_sql_log.cpp",
     "${relational_store_native_path}/rdb/src/rdb_sql_statistic.cpp",
     "${relational_store_native_path}/rdb/src/rdb_sql_utils.cpp",
@@ -601,10 +605,10 @@ ohos_unittest("RdbAuditTest") {
     "c_utils:utils",
     "googletest:gtest_main",
     "json:nlohmann_json_static",
-    "openssl:libcrypto_shared",
     "sqlite:sqlite",
     "sqlite:sqliteicu",
   ]
+  external_deps += external_deps_rdb_hmac
   external_deps += external_deps_file_api
   external_deps += external_deps_hilog
   external_deps += external_deps_ability_base_zuri
@@ -685,6 +689,7 @@ ohos_unittest("RdbAuditTxnTest") {
     "${relational_store_native_path}/rdb/src/rdb_perfStat.cpp",
     "${relational_store_native_path}/rdb/src/rdb_predicates.cpp",
     "${relational_store_native_path}/rdb/src/rdb_security_manager.cpp",
+    relational_store_hmac_source,
     "${relational_store_native_path}/rdb/src/rdb_sql_log.cpp",
     "${relational_store_native_path}/rdb/src/rdb_sql_statistic.cpp",
     "${relational_store_native_path}/rdb/src/rdb_sql_utils.cpp",
@@ -743,10 +748,10 @@ ohos_unittest("RdbAuditTxnTest") {
     "c_utils:utils",
     "googletest:gtest_main",
     "json:nlohmann_json_static",
-    "openssl:libcrypto_shared",
     "sqlite:sqlite",
     "sqlite:sqliteicu",
   ]
+  external_deps += external_deps_rdb_hmac
   external_deps += external_deps_file_api
   external_deps += external_deps_hilog
   external_deps += external_deps_ability_base_zuri

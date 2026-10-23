@@ -83,9 +83,9 @@ ohos_unittest("MockNativeRdbTest") {
     "c_utils:utils",
     "googletest:gtest_main",
     "json:nlohmann_json_static",
-    "openssl:libcrypto_shared",
     "sqlite:sqlite",
   ]
+  external_deps += external_deps_rdb_hmac
   external_deps += external_deps_file_api
   external_deps += external_deps_hilog
   external_deps += external_deps_ability_base_zuri

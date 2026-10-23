@@ -1,5 +1,5 @@
-/*
- * Copyright (c) 2022 Huawei Device Co., Ltd.
+/**
+ * Copyright (c) 2022-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,26 +15,24 @@
 #define LOG_TAG "RdbSecurityManager"
 #include "rdb_security_manager.h"
 
-#include <dirent.h>
+#include <algorithm>
+#include <cerrno>
+#include <cstring>
 #include <dlfcn.h>
 #include <fcntl.h>
-#include <fstream>
-#include <securec.h>
-#include <sstream>
-#include <iomanip>
-#include <openssl/hmac.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <string>
+#include <tuple>
+#include <utility>
 
-#include "directory_ex.h"
 #include "file_ex.h"
+#include "hmac/rdb_hmac.h"
 #include "logger.h"
 #include "rdb_errno.h"
 #include "rdb_platform.h"
-#include "rdb_sql_utils.h"
 #include "sqlite_utils.h"
 #include "string_utils.h"
 #include "rdb_fault_hiview_reporter.h"
@@ -191,26 +189,12 @@ bool RdbSecurityManager::SaveSecretKeyToFile(const std::string &keyFile, const s
 
 std::vector<char> RdbSecurityManager::GenerateHMAC(std::vector<char> &data)
 {
-    unsigned char hmacResult[EVP_MAX_MD_SIZE] = {0};
-    unsigned int hmacLen = 0;
-    std::string key = "";
-    std::vector<char> result;
-    result.resize(HMAC_SIZE, 0);
-
-    HMAC(EVP_sha256(),
-         key.c_str(), static_cast<int>(key.length()),
-         reinterpret_cast<const unsigned char*>(data.data()), static_cast<int>(data.size()),
-         hmacResult, &hmacLen);
-    if (hmacLen == 0) {
-        LOG_ERROR("hmac generate failed");
-        Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_HMAC_FILE, E_DFX_HMAC_KEY_FAIL,
-            GetBundleName(), "hmac generate failed" + std::to_string(hmacLen)));
-        return result;
+    auto [error, result] = GenerateHmacSha256(data, HMAC_SIZE);
+    if (!error.empty()) {
+        LOG_ERROR("GenerateHMAC failed:%{public}s", error.c_str());
+        Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_HMAC_FILE, E_DFX_HMAC_KEY_FAIL, GetBundleName(), error));
     }
-    for (unsigned int i = 0; i < HMAC_SIZE && i < hmacLen; ++i) {
-        result[i] = static_cast<char>(hmacResult[i]);
-    }
-    return result;
+    return std::move(result);
 }
 
 bool RdbSecurityManager::SaveSecretKeyToDisk(const std::string &keyPath, const RdbSecretContent &secretContent)

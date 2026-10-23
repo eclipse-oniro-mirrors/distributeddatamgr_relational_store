@@ -1,4 +1,4 @@
-# Copyright (c) 2022 Huawei Device Co., Ltd.
+# Copyright (c) 2022-2026 Huawei Device Co., Ltd.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -97,6 +97,18 @@ datashare_common_native_path = "${datashare_base_path}/frameworks/native/common"
 
 datashare_innerapi_path = "${datashare_base_path}/interfaces/inner_api"
 
+# Keep OpenSSL for minimal OHOS products (such as host mini) without OpenHiTLS.
+relational_store_use_openhitls =
+    is_ohos && (!defined(global_parts_info) ||
+                defined(global_parts_info.thirdparty_openhitls))
+if (relational_store_use_openhitls) {
+  relational_store_hmac_source =
+      "${relational_store_native_path}/rdb_crypt/hmac/rdb_hmac_openhitls.cpp"
+} else {
+  relational_store_hmac_source =
+      "${relational_store_native_path}/rdb_crypt/hmac/rdb_hmac_openssl.cpp"
+}
+
 base_sources = [
   "${relational_store_native_path}/dfx/src/rdb_fault_hiview_reporter.cpp",
   "${relational_store_native_path}/dfx/src/rdb_radar_reporter.cpp",
@@ -158,4 +170,5 @@ base_sources = [
   "${relational_store_native_path}/rdb/src/values_bucket.cpp",
   "${relational_store_native_path}/rdb/src/values_buckets.cpp",
   "${relational_store_native_path}/rdb/src/marshal_utils.cpp",
+  relational_store_hmac_source,
 ]

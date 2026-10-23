@@ -100,11 +100,11 @@ native_rdb_platform_external_deps = [
   "kv_store:database_utils",
   "kv_store:datamgr_common",
   "kv_store:distributeddb_client",
-  "openssl:libcrypto_shared",
   "sqlite:sqlite",
   "sqlite:sqliteicu",
 ]
 
+native_rdb_platform_external_deps += external_deps_rdb_hmac
 native_rdb_platform_external_deps += external_deps_hilog
 native_rdb_platform_external_deps += external_deps_hisysevent
 native_rdb_platform_external_deps += external_deps_hitrace

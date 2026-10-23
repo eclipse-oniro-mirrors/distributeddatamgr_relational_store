@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Huawei Device Co., Ltd.
+# Copyright (c) 2025-2026 Huawei Device Co., Ltd.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -64,6 +64,13 @@ ohos_unittest("GlobalResourceTest") {
     "mock_rdb_security_manager_test.cpp",
   ]
 
+  if (relational_store_use_openhitls) {
+    sources += [
+      "mock_hmac.cpp",
+      "mock_rdb_hmac_test.cpp",
+    ]
+  }
+
   configs = [ ":module_private_config" ]
 
   external_deps = [
@@ -71,10 +78,10 @@ ohos_unittest("GlobalResourceTest") {
     "googletest:gmock",
     "googletest:gtest",
     "json:nlohmann_json_static",
-    "openssl:libcrypto_shared",
     "sqlite:sqlite",
     "sqlite:sqliteicu",
   ]
+  external_deps += external_deps_rdb_hmac
   external_deps += external_deps_file_api
   external_deps += external_deps_hilog
   external_deps += external_deps_hisysevent
