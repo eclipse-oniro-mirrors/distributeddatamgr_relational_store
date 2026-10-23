@@ -37,7 +37,10 @@ class DumpStackAclTest : public testing::Test {
 public:
     static void SetUpTestCase(void){};
     static void TearDownTestCase(void){};
-    void SetUp(void){};
+    void SetUp(void)
+    {
+        mkdir(TEST_DIR.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+    };
     void TearDown(void) { RdbHelper::ClearCache(); }
 };
 
