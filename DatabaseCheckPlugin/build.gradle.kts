@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Device Co., Ltd.
+ * Copyright (c) 2024-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -46,12 +46,17 @@ tasks {
     
     patchPluginXml {
         sinceBuild.set("233")
-        untilBuild.set("243.*")
+        // Keep the minimum platform build without generating an upper bound.
+        untilBuild.set(provider { null })
+    }
+
+    buildPlugin {
+        destinationDirectory.set(layout.projectDirectory)
     }
     
-    // Disable problematic test task
     test {
-        enabled = false
+        useJUnit()
+        inputs.dir("EtsAcceptance")
     }
 }
 

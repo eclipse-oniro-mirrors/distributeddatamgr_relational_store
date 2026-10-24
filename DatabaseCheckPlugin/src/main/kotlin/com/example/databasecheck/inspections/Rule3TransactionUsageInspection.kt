@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Device Co., Ltd.
+ * Copyright (c) 2024-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -17,6 +17,7 @@ package com.example.databasecheck.inspections
 
 import com.example.databasecheck.utils.DatabaseConstants
 import com.example.databasecheck.utils.JavaScriptAnalyzer
+import com.example.databasecheck.utils.JavaScriptCode
 import com.intellij.codeInspection.*
 import com.intellij.psi.PsiFile
 
@@ -136,7 +137,8 @@ class Rule3TransactionUsageInspection : BaseDatabaseInspection() {
         
         if (transactionVariable != null) {
             // Step 2: Find all operations on this transaction variable
-            val transactionOperations = findTransactionOperations(transactionVariable, scopeCalls)
+            val transactionOperations = JavaScriptAnalyzer.transactionOperations(
+                transactionCall, transactionVariable, scopeCalls, scopeAssignments)
             
             // Step 3: Check for unnecessary transaction (single operation)
             val crudOperations = transactionOperations.filter { op ->
@@ -187,37 +189,9 @@ class Rule3TransactionUsageInspection : BaseDatabaseInspection() {
     private fun findTransactionVariable(
         transactionCall: JavaScriptAnalyzer.FunctionCall,
         assignments: List<JavaScriptAnalyzer.VariableAssignment>
-    ): String? {
-        // Look for assignments that include this transaction call
-        for (assignment in assignments) {
-            // Check if assignment expression contains the transaction call
-            if (assignment.startOffset <= transactionCall.startOffset && 
-                assignment.endOffset >= transactionCall.endOffset) {
-                return assignment.variableName
-            }
-            
-            // Also check for assignments that happen around the same time
-            val offsetDiff = kotlin.math.abs(assignment.startOffset - transactionCall.startOffset)
-            if (offsetDiff < 100 && assignment.assignmentExpression.contains("createTransaction")) {
-                return assignment.variableName
-            }
-        }
-        
-        return null
-    }
-
-    /**
-     * Find all operations on the transaction variable.
-     */
-    private fun findTransactionOperations(
-        transactionVariable: String,
-        calls: List<JavaScriptAnalyzer.FunctionCall>
-    ): List<JavaScriptAnalyzer.FunctionCall> {
-        return calls.filter { call ->
-            call.objectName == transactionVariable ||
-            call.functionName.startsWith("$transactionVariable.")
-        }
-    }
+    ): String? = assignments.filter {
+        it.startOffset <= transactionCall.startOffset && it.endOffset >= transactionCall.endOffset
+    }.maxByOrNull { it.startOffset }?.variableName
 
     /**
      * Check if there are loops within the transaction scope.
@@ -238,7 +212,7 @@ class Rule3TransactionUsageInspection : BaseDatabaseInspection() {
         val endOffset = transactionEnd?.startOffset ?: Int.MAX_VALUE
         
         // Get the code text within transaction scope to analyze for loops
-        val codeInScope = extractCodeInRange(codeText, transactionStart.endOffset, endOffset)
+        val codeInScope = JavaScriptCode(extractCodeInRange(codeText, transactionStart.endOffset, endOffset)).withoutStrings()
         
         // Check for common loop patterns in JavaScript
         val loopPatterns = listOf(
@@ -260,10 +234,11 @@ class Rule3TransactionUsageInspection : BaseDatabaseInspection() {
      * Extract code text within a specific offset range from the full code text.
      */
     private fun extractCodeInRange(codeText: String, startOffset: Int, endOffset: Int): String {
-        if (startOffset < 0 || endOffset > codeText.length || startOffset >= endOffset) {
+        val boundedEnd = minOf(endOffset, codeText.length)
+        if (startOffset < 0 || startOffset >= boundedEnd) {
             return ""
         }
-        return codeText.substring(startOffset, kotlin.math.min(endOffset, codeText.length))
+        return codeText.substring(startOffset, boundedEnd)
     }
 
     /**
@@ -356,31 +331,13 @@ class Rule3TransactionUsageInspection : BaseDatabaseInspection() {
      * Fallback analysis for transaction operations if main analysis fails.
      */
     private fun fallbackTransactionAnalysis(file: PsiFile, holder: ProblemsHolder) {
-        val originalText = file.text
-        val codeWithoutComments = removeComments(originalText)
-        
-        // Simple pattern matching for transaction operations
-        val transactionPattern = Regex(
-            """(rdbStore\.createTransaction|rdbStore\.beginTransaction)\s*\([^)]*\)""",
-            RegexOption.MULTILINE
-        )
-        
-        transactionPattern.findAll(codeWithoutComments).forEach { match ->
-            val startPos = match.range.first
-            val endPos = match.range.last + 1
-            
-            val prohibitedOp = ProhibitedOperation(
-                operationName = match.value,
-                startPos = startPos,
-                endPos = endPos,
-                fullMatch = match.value,
-                parameters = ""
-            )
-            
-            val message = "Transaction usage detected (fallback analysis). " +
-                    "Please ensure transactions are necessary and contain only atomic CRUD operations."
-            
-            reportViolation(prohibitedOp, file, holder, message)
+        val code = removeComments(file.text)
+        JavaScriptAnalyzer.extractFunctionCallsFromText(code).filter {
+            it.objectName != null && JavaScriptAnalyzer.isProhibitedOperation(it,
+                DatabaseConstants.TRANSACTION_CREATE_OPERATIONS)
+        }.forEach { call ->
+            reportViolation(createProhibitedOperation(call), file, holder,
+                "Transaction usage detected (fallback analysis). Ensure proper commit and rollback handling.")
         }
     }
 

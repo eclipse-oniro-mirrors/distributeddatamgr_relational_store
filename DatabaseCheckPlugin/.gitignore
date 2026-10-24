@@ -1,1 +1,6 @@
 gradle/wrapper/gradle-wrapper.jar
+
+# Locally generated plugin packages and build logs
+/DatabaseCheck-*.zip
+/DatabaseCheckPlugin-ets-acceptance-*.zip
+/build-current-directory.log

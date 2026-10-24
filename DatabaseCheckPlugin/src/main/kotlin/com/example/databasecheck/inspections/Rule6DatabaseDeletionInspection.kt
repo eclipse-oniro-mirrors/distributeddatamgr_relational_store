@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Device Co., Ltd.
+ * Copyright (c) 2024-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,7 +15,6 @@
  
 package com.example.databasecheck.inspections
 
-import com.example.databasecheck.utils.DatabaseConstants
 import com.example.databasecheck.utils.JavaScriptAnalyzer
 import com.intellij.codeInspection.*
 import com.intellij.psi.PsiFile
@@ -59,10 +58,10 @@ class Rule6DatabaseDeletionInspection : BaseDatabaseInspection() {
             val codeWithoutComments = removeComments(originalText)
             
             // Step 1: Extract function calls and variable assignments with scope awareness
-            val (functionCalls, variableAssignments) = JavaScriptAnalyzer.extractWithFunctionScopes(codeWithoutComments)
+            val (functionCalls, _) = JavaScriptAnalyzer.extractWithFunctionScopes(codeWithoutComments)
             
             // Step 2: Find database deletion violations
-            val deletionViolations = findDatabaseDeletionViolations(functionCalls, variableAssignments, codeWithoutComments)
+            val deletionViolations = findDatabaseDeletionViolations(functionCalls)
             
             // Step 3: Report violations
             reportViolations(deletionViolations, file, holder)
@@ -78,21 +77,18 @@ class Rule6DatabaseDeletionInspection : BaseDatabaseInspection() {
      * Simple rule: check if deleteRdbStore is called without rdbStore.close() before it.
      */
     private fun findDatabaseDeletionViolations(
-        calls: List<JavaScriptAnalyzer.FunctionCall>,
-        @Suppress("UNUSED_PARAMETER") variableAssignments: List<JavaScriptAnalyzer.VariableAssignment>,
-        codeText: String
+        calls: List<JavaScriptAnalyzer.FunctionCall>
     ): List<DatabaseDeletionViolation> {
         val violations = mutableListOf<DatabaseDeletionViolation>()
         
         // Find all deleteRdbStore calls
         val deleteRdbStoreCalls = calls.filter { call ->
-            call.functionName.contains("deleteRdbStore") ||
-            call.functionName.endsWith(".deleteRdbStore")
+            call.functionName.substringAfterLast('.') == "deleteRdbStore"
         }
         
         // For each deleteRdbStore call, check if rdbStore.close() is called before it
         for (deleteCall in deleteRdbStoreCalls) {
-            if (!isRdbStoreClosedBeforeDeletion(deleteCall, codeText)) {
+            if (!isRdbStoreClosedBeforeDeletion(deleteCall, calls)) {
                 violations.add(DatabaseDeletionViolation(
                     operation = createProhibitedOperation(deleteCall),
                     violationType = DeletionViolationType.MISSING_RDBSTORE_CLOSE,
@@ -112,19 +108,10 @@ class Rule6DatabaseDeletionInspection : BaseDatabaseInspection() {
      */
     private fun isRdbStoreClosedBeforeDeletion(
         deleteCall: JavaScriptAnalyzer.FunctionCall,
-        codeText: String
-    ): Boolean {
-        val beforeDeletion = codeText.substring(0, deleteCall.startOffset)
-        
-        // Look for any rdbStore close patterns before the deletion
-        val closePatterns = listOf(
-            Regex("""rdbStore\s*\??\.\s*close\s*\(\s*\)"""),
-            Regex("""\w+\s*\??\.\s*close\s*\(\s*\)""")
-        )
-        
-        return closePatterns.any { pattern ->
-            pattern.containsMatchIn(beforeDeletion)
-        }
+        calls: List<JavaScriptAnalyzer.FunctionCall>
+    ): Boolean = calls.any {
+        it.objectName != null && it.functionName.substringAfterLast('.') == "close" && it.arguments.isEmpty() &&
+            it.endOffset <= deleteCall.startOffset && it.functionScope == deleteCall.functionScope
     }
 
     /**
@@ -163,39 +150,9 @@ class Rule6DatabaseDeletionInspection : BaseDatabaseInspection() {
      * Fallback analysis for database deletion if main analysis fails.
      */
     private fun fallbackDeletionAnalysis(file: PsiFile, holder: ProblemsHolder) {
-        val originalText = file.text
-        val codeWithoutComments = removeComments(originalText)
-        
-        // Simple pattern matching for deleteRdbStore without rdbStore.close()
-        val deleteRdbStorePattern = Regex(
-            """deleteRdbStore\s*\([^)]*\)""",
-            RegexOption.MULTILINE
-        )
-        
-        deleteRdbStorePattern.findAll(codeWithoutComments).forEach { match ->
-            val startPos = match.range.first
-            val endPos = match.range.last + 1
-            
-            // Check if there's rdbStore.close() in the surrounding context
-            val contextBefore = codeWithoutComments.substring(0, startPos)
-            val hasRdbStoreClose = contextBefore.contains("rdbStore.close()") ||
-                                  contextBefore.contains("rdbStore?.close()")
-            
-            if (!hasRdbStoreClose) {
-                val prohibitedOp = ProhibitedOperation(
-                    operationName = match.value,
-                    startPos = startPos,
-                    endPos = endPos,
-                    fullMatch = match.value,
-                    parameters = ""
-                )
-                
-                val message = "Database deletion without proper handle closure (fallback analysis). " +
-                        "Ensure rdbStore.close() is called before deleteRdbStore()."
-                
-                reportViolation(prohibitedOp, file, holder, message)
-            }
-        }
+        val code = removeComments(file.text)
+        val (calls, _) = JavaScriptAnalyzer.extractWithFunctionScopes(code)
+        reportViolations(findDatabaseDeletionViolations(calls), file, holder)
     }
 
     /**

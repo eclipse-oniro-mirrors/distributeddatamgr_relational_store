@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-本项目是为 **DevEco Studio** 开发的代码扫描插件，用于检测应用程序中的数据库使用规范问题。插件基于《数据库健壮性规范 Checklist 1.0》标准，通过静态代码分析技术自动检测JavaScript代码中违反数据库使用推荐规范的情况。
+本项目是为 **DevEco Studio** 开发的代码扫描插件，用于检测应用程序中的数据库使用规范问题。插件基于《数据库健壮性规范 Checklist 1.0》标准，通过静态代码分析技术检测 JavaScript、TypeScript 和 ArkTS（`.ets`）文件中违反数据库使用推荐规范的情况。
 
 ### 主要特性
 
@@ -17,9 +17,9 @@
 ### 开发环境
 
 - **编程语言**：使用 1.9.25 版本的编程语言
-- **构建工具**：Gradle 8.x (使用KotlinDSL)
+- **构建工具**：Gradle 8.12.1 (使用DSL配置)
 - **Java 版本**：JDK 17
-- **目标平台**：IntelliJ Platform 2023.3.6+
+- **编译平台**：IntelliJ Platform 2023.3.6；安装要求平台构建号 233 及以上，不设版本上限
 - **插件框架**：IntelliJ Platform Plugin SDK 1.17.3
 - **插件类型**：LocalInspection（本地代码检查）
 
@@ -46,18 +46,8 @@ DatabaseCheck_Release/
 │       └── JavaScriptAnalyzer.kt   # JavaScript代码分析工具
 ├── src/main/resources/META-INF/
 │   └── plugin.xml             # 插件配置文件
-├── src/test/com/example/databasecheck/
-│   └── testdata/              # 测试数据（正例和反例）
-│       ├── Rule1/             # 规则1 测试文件
-│       ├── Rule2/             # 规则2 测试文件
-│       ├── Rule3/             # 规则3 测试文件
-│       ├── Rule4/             # 规则4 测试文件
-│       ├── Rule5/             # 规则5 测试文件
-│       ├── Rule6/             # 规则6 测试文件
-│       ├── Rule7/             # 规则7 测试文件
-│       ├── Rule9/             # 规则9 测试文件
-│       ├── Rule12/            # 规则12 测试文件
-│       └── Rule14/            # 规则14 测试文件
+├── src/test/                  # 自动化测试和既有样例，按包路径组织
+├── EtsAcceptance/             # 根目录ETS验收输入，按Rule*分组
 ├── Doc/                       # 规则文档与参考文档
 ├── build.gradle.kts           # Gradle 构建配置
 └── README.md                  # 本文件
@@ -76,7 +66,7 @@ DatabaseCheck_Release/
 | **Rule 5** | 事务嵌套和线程安全 | 防止事务嵌套，确保事务的线程安全性 | WARNING |
 | **Rule 6** | 数据库删除句柄关闭 | 在删除数据库前确保所有数据库句柄已关闭 | WARNING |
 | **Rule 7** | 数据库权限验证 | 确保数据库目录和文件具有正确的权限设置（DAC/ACL） | WARNING |
-| **Rule 9** | 错误码处理和重试 | 检测特定数据库错误码（14800047、14800024等）的正确处理和重试逻辑 | WARNING |
+| **Rule 9** | 错误码处理和重试 | 检查 busy/locked 重试、corrupt 恢复、磁盘满清理及 WAL 超限处理（详见 Rule9 文档） | WARNING |
 | **Rule 12** | SQLite Pragma限制 | 禁止修改 SQLite 的 `synchronous` 等敏感 pragma 设置 | WARNING |
 | **Rule 14** | 配置一致性检查 | 确保同一 HAP 包内相同数据库名称的配置参数保持一致 | WARNING |
 
@@ -87,63 +77,104 @@ DatabaseCheck_Release/
 1. **文本模式匹配**：使用正则表达式识别数据库代码 API 调用模式
 2. **上下文分析**：分析代码上下文，理解数据库操作的意图
 3. **路径识别**：识别特定的数据库路径模式（如 `/data/storage/el[1-5]/database/`）
-4. **配置追踪**：跨文件追踪数据库配置参数，确保一致性
+4. **配置追踪**：比较当前文件内可见的同名数据库配置，不进行跨文件符号解析
 
 ## 快速开始
 
 ### 环境要求
 
 - **JDK**：17 或更高版本
-- **Gradle**：8.x（项目自带 Gradle Wrapper）
+- **Gradle**：8.12.1（当前仓库缺少 Wrapper JAR，请使用已安装的 Gradle）
 - **IDE**：IntelliJ IDEA 2023.3+ 或 DevEco Studio
 
-### 构建插件
+### 编译插件与执行全量用例
+
+所有命令均在当前仓库的 `DatabaseCheckPlugin` 目录执行。推荐使用 JDK 21、Gradle 8.12.1，
+插件输出 JVM 17 字节码；依赖未缓存时，构建需要下载 Maven 依赖和 IntelliJ IDEA Community 2023.3.6 SDK。
+当前仓库没有 `gradle-wrapper.jar`，请使用已安装的 `gradle`：
 
 ```bash
-# 编译插件
-./gradlew build
+cd foundation/distributeddatamgr/relational_store/DatabaseCheckPlugin
+export JAVA_HOME=/path/to/jdk-21
+export PATH="$JAVA_HOME/bin:/path/to/gradle-8.12.1/bin:$PATH"
+java -version
+gradle --version
 
-# 构建插件发布包（推荐）
-./gradlew buildPlugin
+# 全量重跑所有自动化用例，并生成可安装插件 ZIP；推荐提交前执行
+# cleanTest 清除旧测试结果，test 未指定过滤器，会执行全部测试类
+gradle cleanTest test buildPlugin --no-daemon --console=plain
 ```
 
-构建完成后，插件安装包位于：
-```
-build/distributions/DatabaseCheck-1.0.0.zip
+预期：`BUILD SUCCESSFUL`，全量 **137 个 JUnit 测试方法**通过，0失败、0错误、0跳过。
+其中 `EtsAcceptanceInspectionTest` 的10个方法分别执行10组规则输入，合计验证根目录
+`EtsAcceptance/` 下的 **75 个 ETS 场景**（42个告警反例、33个不误报正例）。这些是静态检查输入，
+不会实际执行数据库、文件或网络操作。其余127个方法覆盖分析器、规则入口及此前回归场景。
+
+```text
+DatabaseCheck-1.0.0.zip                 当前插件目录根层的可安装插件包
+build/reports/tests/test/index.html    全量测试 HTML 报告
+build/test-results/test/TEST-*.xml      JUnit XML，包含逐 ETS 文件的 PASS 记录
 ```
 
-**注意**：该 `.zip` 文件即为可直接安装的插件包，可以通过 IDE 的 "Install Plugin from Disk" 功能进行安装。
+可将 `DatabaseCheck-1.0.0.zip` 直接交给 IDE 的 `Install Plugin from Disk` 安装。
+只执行 `buildPlugin` 不代表已运行全量测试；请检查上述 `test` 的结果。
+`test` 已将根目录 `EtsAcceptance/` 声明为输入，修改 ETS 文件后会触发重新验证。
+如果构建停留在 `initializeIntelliJPlugin` 在线版本查询，可将以下配置保存为插件目录外的
+`local.init.gradle`，仅关闭该查询，不跳过编译或测试：
 
-### 本地测试
+```groovy
+allprojects {
+    tasks.matching { it.name == 'initializeIntelliJPlugin' }.configureEach {
+        selfUpdateCheck.set(false)
+    }
+}
+```
+
+再执行 `gradle -I /path/to/local.init.gradle cleanTest test buildPlugin --no-daemon --console=plain`。
+
+### 单项验证与调试
+
+以下过滤命令只用于定位问题，不能替代前面的全量验证命令：
 
 ```bash
-# 源码编译
-./gradlew compileKotlin
+# 只编译插件源码
+gradle compileKotlin --no-daemon --console=plain
 
-# 在沙箱环境中运行 IDE 测试插件
-./gradlew runIde
+# 只执行75个ETS输入的自动验收
+gradle cleanTest test --tests '*EtsAcceptanceInspectionTest' --no-daemon --console=plain
+
+# 只执行Rule1的ETS输入
+gradle cleanTest test --tests '*EtsAcceptanceInspectionTest.testRule1EtsCases' --no-daemon --console=plain
+
+# 启动安装了插件的IntelliJ IDEA沙箱
+gradle runIde --no-daemon --console=plain
 ```
 
-执行 `runIde` 后会启动一个带有插件的 IntelliJ IDEA 实例，可以在其中测试插件功能。
+每个 ETS 文件的头部注释包含目标规则预期 `Expected`，以及全部10条规则启用时的
+`ExpectedAll` 告警分布。自动验证同时核对两种结果，不把目标规则条数当作全部告警总数。
+例如 `R04_MissingRollback_Warn`：只开Rule4时1条；开启Rule4和Rule9时2条；
+全部规则启用时还有Rule3的单操作事务告警，合计3条。
+`_Pass` 仅表示目标规则的正例，不承诺其余规则均无告警。
+ETS 文件用于静态检查，不运行应用；DevEco手工安装和Hvigor应用编译需要在目标环境单独验收。
 
 ### 安装插件
 
 #### 方法一：从磁盘安装（推荐用于开发测试）
 
-1. 构建插件：`./gradlew buildPlugin`
+1. 构建插件：`gradle buildPlugin`
 2. 在 DevEco Studio 中打开：`File` → `Settings` → `Plugins`
 3. 点击齿轮图标 → `Install Plugin from Disk...`
-4. 选择 `build/distributions/DatabaseCheck-1.0.0.zip`
+4. 选择 `DatabaseCheck-1.0.0.zip`
 5. 重启 IDE
 
 #### 方法二：发布到 JetBrains Marketplace（生产环境）
 
 ```bash
 # 验证插件兼容性
-./gradlew verifyPlugin
+gradle verifyPlugin
 
 # 发布插件（需要配置 token）
-./gradlew publishPlugin
+gradle publishPlugin
 ```
 
 **关于验证警告**：执行 `verifyPlugin` 可能会出现以下警告，这些**不影响插件功能**：
@@ -207,7 +238,7 @@ class RuleXXXInspection : BaseDatabaseInspection() {
 
 ### 测试文件说明
 
-项目包含完整的测试用例，位于 `src/test/com/example/databasecheck/testdata/` 目录：
+项目包含完整的测试用例，位于 `src/test/` 源码树中的 `testdata` 子目录 目录：
 
 **测试文件结构**：
 - 每个规则都有独立的测试目录（Rule1/ ~ Rule14/）
@@ -217,7 +248,7 @@ class RuleXXXInspection : BaseDatabaseInspection() {
 
 **示例**：
 ```
-src/test/com/example/databasecheck/testdata/
+testdata/（位于 src/test/ 源码树）
 ├── Rule1/
 │   ├── test-rule1-violations.js    # 反例：使用非RDB接口
 │   └── test-rule1-correct.js       # 正例：使用RDB接口
@@ -244,8 +275,8 @@ src/test/com/example/databasecheck/testdata/
 
 ### 调试方法
 
-1. 使用 `./gradlew runIde` 启动调试实例
-2. 在调试实例中打开 `src/test/com/example/databasecheck/testdata/` 目录下的测试文件
+1. 使用 `gradle runIde` 启动调试实例
+2. 在调试实例中打开 `src/test/` 源码树中的 `testdata` 子目录 目录下的测试文件
 3. 观察 IDE 中是否正确显示警告标记（黄色波浪线）
 4. 使用 IDE 的 `Analyze` → `Inspect Code` 功能查看完整检查结果
 5. 对比正例和反例文件，验证检测的准确性
@@ -280,7 +311,7 @@ src/test/com/example/databasecheck/testdata/
 
 ### Q: 插件安装后没有生效？
 A: 请确保：
-1. IDE 版本符合要求（IDEA 2023.3+， DevEco-Studio 5.0+）
+1. IDE 的 IntelliJ 平台构建号为 233 及以上（IDEA 2023.3+；DevEco Studio 请查看 About 中的平台构建号）
 2. 已重启 IDE
 3. 在 Settings → Editor → Inspections 中启用了 "Database Robustness Rules" 分组
 
@@ -315,14 +346,16 @@ A: 目前支持 `.js`、`.ts`、`.ets` 等 JavaScript/TypeScript 相关文件。
 - **Plugin Name**：DatabaseCheck
 - **Version**：1.0.0
 - **Vendor**：YourCompany
-- **Compatibility**：IntelliJ Build 233 ~ 242.*
+- **Compatibility**：IntelliJ Build 233 及以上，不设安装版本上限
+
+编译和自动化测试使用 IntelliJ IDEA Community 2023.3.6。取消版本上限可避免新版 IDE 仅因构建号较新而拒绝安装；新版 IDE 的运行兼容性仍需在对应版本验证。
 
 ## 版本历史
 
 ### v1.0.0 (当前版本)
 - ✅ 实现全部 10 条数据库健壮性规则
-- ✅ 支持 JavaScript/TypeScript 代码分析（.js, .ts, .jsx, .tsx）
+- ✅ 支持 JavaScript/TypeScript/ArkTS 文本规则检查（.js, .ts, .jsx, .tsx, .ets），不提供完整的 ArkTS 语义分析
 - ✅ 提供精确的问题定位（使用 TextRange 技术）
 - ✅ 智能过滤注释中的代码
-- ✅ 支持跨文件配置一致性检查（Rule 14）
+- ✅ 支持当前文件内的数据库配置一致性检查（Rule 14）
 - ✅ 兼容 DevEco Studio 和 IntelliJ IDEA

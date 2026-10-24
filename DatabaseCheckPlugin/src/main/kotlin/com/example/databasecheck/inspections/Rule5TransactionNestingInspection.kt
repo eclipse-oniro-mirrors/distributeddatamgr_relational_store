@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Device Co., Ltd.
+ * Copyright (c) 2024-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,8 +15,8 @@
  
 package com.example.databasecheck.inspections
 
-import com.example.databasecheck.utils.DatabaseConstants
 import com.example.databasecheck.utils.JavaScriptAnalyzer
+import com.example.databasecheck.utils.JavaScriptCode
 import com.intellij.codeInspection.*
 import com.intellij.psi.PsiFile
 
@@ -80,41 +80,51 @@ class Rule5TransactionNestingInspection : BaseDatabaseInspection() {
      * Find deprecated transaction API violations.
      */
     private fun findDeprecatedTransactionAPIs(codeText: String): List<DeprecatedApiViolation> {
-        val violations = mutableListOf<DeprecatedApiViolation>()
-        
-        // Define deprecated API patterns
-        val deprecatedApis = mapOf(
-            "beginTransaction" to "rdbStore\\.beginTransaction\\s*\\(\\s*\\)",
-            "commit" to "rdbStore\\.commit\\s*\\(\\s*\\)",
-            "rollback" to "rdbStore\\.rollback\\s*\\(\\s*\\)"
-        )
-        
-        for ((apiName, pattern) in deprecatedApis) {
-            val regex = Regex(pattern)
-            regex.findAll(codeText).forEach { match ->
-                val startPos = match.range.first
-                val endPos = match.range.last + 1
-                
-                violations.add(DeprecatedApiViolation(
-                    operation = ProhibitedOperation(
-                        operationName = match.value.trim(),
-                        startPos = startPos,
-                        endPos = endPos,
-                        fullMatch = match.value,
-                        parameters = ""
-                    ),
-                    apiType = when (apiName) {
-                        "beginTransaction" -> DeprecatedApiType.BEGIN_TRANSACTION
-                        "commit" -> DeprecatedApiType.COMMIT
-                        "rollback" -> DeprecatedApiType.ROLLBACK
-                        else -> DeprecatedApiType.BEGIN_TRANSACTION
-                    },
-                    reason = generateViolationReason(apiName)
-                ))
-            }
+        val (calls, assignments) = JavaScriptAnalyzer.extractWithFunctionScopes(codeText)
+        val code = JavaScriptCode(codeText)
+        return calls.filter { call ->
+            call.objectName != null && call.arguments.isEmpty() &&
+                (call.functionName.substringAfterLast('.') == "beginTransaction" ||
+                    call.functionName.substringAfterLast('.') in setOf("commit", "rollback") &&
+                    isStoreReceiver(call, calls, assignments, code))
+        }.map { call ->
+            val apiName = call.functionName.substringAfterLast('.')
+            DeprecatedApiViolation(ProhibitedOperation(call.functionName, call.startOffset, call.endOffset,
+                codeText.substring(call.startOffset, call.endOffset), ""),
+                when (apiName) {
+                    "commit" -> DeprecatedApiType.COMMIT
+                    "rollback" -> DeprecatedApiType.ROLLBACK
+                    else -> DeprecatedApiType.BEGIN_TRANSACTION
+                }, generateViolationReason(apiName))
         }
-        
-        return violations
+    }
+
+    private fun isStoreReceiver(
+        call: JavaScriptAnalyzer.FunctionCall,
+        calls: List<JavaScriptAnalyzer.FunctionCall>,
+        assignments: List<JavaScriptAnalyzer.VariableAssignment>,
+        code: JavaScriptCode
+    ): Boolean {
+        val binding = assignments.filter {
+            it.variableName == call.objectName && it.startOffset < call.startOffset &&
+                code.isVisibleAt(it.startOffset, call.startOffset)
+        }.maxByOrNull { it.startOffset }
+        if (binding != null) {
+            val origins = JavaScriptAnalyzer.extractFunctionCallsFromText(binding.assignmentExpression)
+                .map { it.functionName.substringAfterLast('.') }
+            if ("createTransaction" in origins) return false
+            if ("getRdbStore" in origins) return true
+        }
+        if (calls.any { it.objectName == call.objectName && it.functionScope == call.functionScope &&
+                it.startOffset < call.startOffset && it.functionName.endsWith(".beginTransaction") }) return true
+        val scope = JavaScriptAnalyzer.extractFunctionScopes(code.source).filter {
+            call.startOffset in it.bodyStartOffset until it.endOffset
+        }.minByOrNull { it.endOffset - it.bodyStartOffset }
+        val header = scope?.let { code.source.substring(it.startOffset, it.bodyStartOffset) }.orEmpty()
+        val typedTransaction = Regex("""\b${Regex.escape(call.objectName.orEmpty())}\s*:\s*(?:[a-zA-Z_$][a-zA-Z0-9_$]*\.)?Transaction\b""")
+        if (typedTransaction.containsMatchIn(header)) return false
+        val typedStore = Regex("""\b${Regex.escape(call.objectName.orEmpty())}\s*:\s*(?:[a-zA-Z_$][a-zA-Z0-9_$]*\.)?RdbStore\b""")
+        return typedStore.containsMatchIn(header) || binding == null && call.objectName == "rdbStore"
     }
 
     /**
@@ -158,33 +168,7 @@ class Rule5TransactionNestingInspection : BaseDatabaseInspection() {
      * Fallback analysis for deprecated transaction APIs if main analysis fails.
      */
     private fun fallbackDeprecatedApiAnalysis(file: PsiFile, holder: ProblemsHolder) {
-        val originalText = file.text
-        val codeWithoutComments = removeComments(originalText)
-        
-        // Simple pattern matching for deprecated APIs
-        val deprecatedApiPattern = Regex(
-            """rdbStore\.(beginTransaction|commit|rollback)\s*\(\s*\)""",
-            RegexOption.MULTILINE
-        )
-        
-        deprecatedApiPattern.findAll(codeWithoutComments).forEach { match ->
-            val startPos = match.range.first
-            val endPos = match.range.last + 1
-            val apiName = match.groupValues[1]
-            
-            val prohibitedOp = ProhibitedOperation(
-                operationName = match.value,
-                startPos = startPos,
-                endPos = endPos,
-                fullMatch = match.value,
-                parameters = ""
-            )
-            
-            val message = "Deprecated transaction API detected: ${match.value}. " +
-                    "Use createTransaction() with transaction objects to prevent thread safety issues."
-            
-            reportViolation(prohibitedOp, file, holder, message)
-        }
+        reportViolations(findDeprecatedTransactionAPIs(removeComments(file.text)), file, holder)
     }
 
     /**

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Huawei Device Co., Ltd.
+ * Copyright (c) 2024-2026 Huawei Device Co., Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,6 +16,8 @@
 package com.example.databasecheck.inspections
 
 import com.example.databasecheck.utils.DatabaseConstants
+import com.example.databasecheck.utils.JavaScriptAnalyzer
+import com.example.databasecheck.utils.JavaScriptCode
 import com.intellij.codeInspection.*
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiFile
@@ -115,7 +117,7 @@ class Rule14DatabaseConfigConsistencyInspection : BaseDatabaseInspection() {
             
             // Report all violations
             violations.forEach { violation ->
-                reportViolation(violation, file, holder, originalText)
+                reportViolation(violation, file, holder)
             }
             
         } catch (e: Exception) {
@@ -128,81 +130,17 @@ class Rule14DatabaseConfigConsistencyInspection : BaseDatabaseInspection() {
      * Find all getRdbStore calls and extract their configurations
      */
     private fun findGetRdbStoreCalls(codeText: String): List<RdbStoreCall> {
-        val calls = mutableListOf<RdbStoreCall>()
-        
-        // Find getRdbStore calls with proper multi-line support
-        val getRdbStorePattern = Regex("""getRdbStore\s*\(""", RegexOption.MULTILINE)
-        val matches = getRdbStorePattern.findAll(codeText).toList()
-        
-        matches.forEach { match ->
-            val startPos = match.range.first
-            
-            // Find the complete call by parsing from the match position
-            val callInfo = extractCompleteCall(codeText, startPos)
-            
-            if (callInfo != null) {
-                val config = extractConfiguration(callInfo.configParam, codeText, callInfo.startOffset)
-                
-                if (config != null) {
-                    calls.add(
-                        RdbStoreCall(
-                            configParameter = callInfo.configParam,
-                            configuration = config,
-                            startOffset = callInfo.startOffset,
-                            endOffset = callInfo.endOffset,
-                            fullMatch = callInfo.fullMatch
-                        )
-                    )
-                }
-            }
+        return JavaScriptAnalyzer.extractFunctionCallsFromText(codeText).filter {
+            it.functionName.substringAfterLast('.') == "getRdbStore" && it.arguments.size >= 2
+        }.mapNotNull { call ->
+            val method = Regex("""\bgetRdbStore\s*\(""").find(codeText, call.startOffset)
+                ?: return@mapNotNull null
+            val config = extractConfiguration(call.arguments[1], codeText, method.range.first)
+                ?: return@mapNotNull null
+            RdbStoreCall(call.arguments[1], config, method.range.first, call.endOffset,
+                codeText.substring(method.range.first, call.endOffset))
         }
-        
-        return calls
     }
-    
-    /**
-     * Extract complete getRdbStore call from starting position
-     */
-    private fun extractCompleteCall(codeText: String, startPos: Int): CallInfo? {
-        var pos = startPos
-        
-        // Skip "getRdbStore" and whitespace
-        while (pos < codeText.length && codeText[pos] != '(') pos++
-        if (pos >= codeText.length) return null
-        
-        pos++ // Skip '('
-        var parenCount = 1
-        var commaPos = -1
-        val callStart = startPos
-        
-        // Find the comma separating context and config parameters
-        var tempPos = pos
-        while (tempPos < codeText.length && parenCount > 0) {
-            when (codeText[tempPos]) {
-                '(' -> parenCount++
-                ')' -> parenCount--
-                ',' -> if (parenCount == 1 && commaPos == -1) commaPos = tempPos
-            }
-            tempPos++
-        }
-        
-        if (commaPos == -1 || parenCount != 0) return null
-        
-        val configStart = commaPos + 1
-        val callEnd = tempPos - 1
-        
-        val configParam = codeText.substring(configStart, callEnd).trim()
-        val fullMatch = codeText.substring(callStart, tempPos)
-        
-        return CallInfo(configParam, callStart, tempPos, fullMatch)
-    }
-    
-    private data class CallInfo(
-        val configParam: String,
-        val startOffset: Int,
-        val endOffset: Int,
-        val fullMatch: String
-    )
 
     /**
      * Extract configuration details from the parameter
@@ -230,9 +168,10 @@ class Rule14DatabaseConfigConsistencyInspection : BaseDatabaseInspection() {
         val config = DatabaseConfiguration()
         
         // Parse all key-value pairs in the object literal
-        val parameterPattern = Regex("""(?:^|,)\s*(?:"([^"]+)"|'([^']+)'|([a-zA-Z_$][a-zA-Z0-9_$]*?))\s*:\s*([^,}]+)""", RegexOption.MULTILINE)
+        val parameterPattern = Regex("""\s*(?:"([^"]+)"|'([^']+)'|([a-zA-Z_$][a-zA-Z0-9_$]*))\s*:\s*([\s\S]+)""")
         
-        parameterPattern.findAll(objectLiteral).forEach { match ->
+        JavaScriptCode(objectLiteral.trim()).arguments(0).forEach { field ->
+            val match = parameterPattern.matchEntire(field) ?: return@forEach
             // Get the key name (could be in group 1, 2, or 3 depending on quote type)
             val key = when {
                 match.groupValues[1].isNotEmpty() -> match.groupValues[1] // "key"
@@ -250,7 +189,7 @@ class Rule14DatabaseConfigConsistencyInspection : BaseDatabaseInspection() {
             when (key) {
                 "name" -> {
                     config.name = if (value.startsWith("\"") || value.startsWith("'")) {
-                        value.removeSurrounding("\"", "'")
+                        unquote(value)
                     } else {
                         value // Keep variable names as-is (e.g., STORE_NAME)
                     }
@@ -258,7 +197,7 @@ class Rule14DatabaseConfigConsistencyInspection : BaseDatabaseInspection() {
                 "securityLevel" -> config.securityLevel = value
                 "encrypt" -> config.encrypt = value
                 "isReadOnly" -> config.isReadOnly = value
-                "customDir" -> config.customDir = value.removeSurrounding("\"", "'")
+                "customDir" -> config.customDir = unquote(value)
             }
         }
         
@@ -269,32 +208,32 @@ class Rule14DatabaseConfigConsistencyInspection : BaseDatabaseInspection() {
      * Find configuration from variable assignment - improved scope-aware search
      */
     private fun findVariableConfiguration(variableName: String, codeText: String, callPosition: Int): DatabaseConfiguration? {
-        // Find all variable assignments for this name
-        val pattern = Regex("""(?:const|let|var)\s+${Regex.escape(variableName)}\s*=\s*(\{[\s\S]*?})""", RegexOption.MULTILINE)
-        val matches = pattern.findAll(codeText).toList()
-        
-        // Find the closest assignment before the call position
-        var bestMatch: MatchResult? = null
-        var bestDistance = Int.MAX_VALUE
-        
-        for (match in matches) {
-            val assignmentPos = match.range.first
-            
-            if (assignmentPos < callPosition) {
-                val distance = callPosition - assignmentPos
-                if (distance < bestDistance) {
-                    bestDistance = distance
-                    bestMatch = match
-                }
-            }
-        }
-        
-        if (bestMatch != null) {
-            val objectLiteral = bestMatch.groupValues[1]
-            return parseObjectLiteral(objectLiteral)
-        }
-        
-        return null
+        val code = JavaScriptCode(codeText)
+        val pattern = Regex("""\b(const|let|var)\s+${Regex.escape(variableName)}(?:\s*:\s*[^=;\n]+)?\s*=\s*""")
+        val declaration = pattern.findAll(codeText).filter {
+            it.range.first < callPosition && declarationIsVisible(it, code, callPosition) &&
+                code.tokens.any { token -> token.start == it.range.first && token.text in setOf("const", "let", "var") }
+        }.maxByOrNull { it.range.first } ?: return null
+        val start = code.tokens.indexOfFirst { it.start > declaration.range.last }
+        if (code.text(start) != "{") return null
+        val end = code.end(start)
+        if (end < start) return null
+        return parseObjectLiteral(codeText.substring(code.tokens[start].start, code.tokens[end].end))
+    }
+
+    private fun declarationIsVisible(declaration: MatchResult, code: JavaScriptCode, callPosition: Int): Boolean {
+        if (declaration.groupValues[1] != "var") return code.isVisibleAt(declaration.range.first, callPosition)
+        // Unlike const/let, var declarations remain visible outside an inner block.
+        val owner = JavaScriptAnalyzer.extractFunctionScopes(code.source)
+            .filter { declaration.range.first in it.bodyStartOffset until it.endOffset }
+            .minByOrNull { it.endOffset - it.bodyStartOffset }
+        return owner == null || callPosition in owner.bodyStartOffset until owner.endOffset
+    }
+
+    private fun unquote(value: String): String = when {
+        value.startsWith("\"") && value.endsWith("\"") -> value.removeSurrounding("\"")
+        value.startsWith("'") && value.endsWith("'") -> value.removeSurrounding("'")
+        else -> value
     }
 
     /**
@@ -423,68 +362,11 @@ class Rule14DatabaseConfigConsistencyInspection : BaseDatabaseInspection() {
     /**
      * Report a configuration violation
      */
-    private fun reportViolation(violation: ConfigurationViolation, file: PsiFile, holder: ProblemsHolder, originalText: String) {
+    private fun reportViolation(violation: ConfigurationViolation, file: PsiFile, holder: ProblemsHolder) {
         val call = violation.inconsistentCall
-        
-        // Map the position from filtered code back to original code
-        val mappedPosition = mapPositionToOriginal(call.startOffset, originalText)
-        
-        if (mappedPosition != -1) {
-            // Find the getRdbStore call around the mapped position in original text
-            val getRdbStorePattern = Regex("""getRdbStore\s*\(""", RegexOption.MULTILINE)
-            val matches = getRdbStorePattern.findAll(originalText).toList()
-            
-            // Find the closest match to our mapped position
-            val closestMatch = matches.minByOrNull { match -> 
-                kotlin.math.abs(match.range.first - mappedPosition)
-            }
-            
-            if (closestMatch != null) {
-                val textRange = TextRange(closestMatch.range.first, closestMatch.range.last + 1)
-                
-                if (textRange.startOffset >= 0 && textRange.endOffset <= file.textLength && 
-                    textRange.startOffset < textRange.endOffset) {
-                    
-                    createProblemDescriptor(
-                        file, 
-                        violation.reason,
-                        holder,
-                        textRange
-                    )
-                }
-            }
-        }
-    }
-    
-    /**
-     * Map position from comment-filtered code back to original code
-     */
-    private fun mapPositionToOriginal(filteredPosition: Int, originalText: String): Int {
-        // Simple approximation: find the nth occurrence of "getRdbStore" 
-        // This is not perfect but should work for most cases
-        val getRdbStorePattern = Regex("""getRdbStore""", RegexOption.MULTILINE)
-        val matches = getRdbStorePattern.findAll(originalText).toList()
-        
-        // For now, we'll use a simple heuristic: 
-        // count how many getRdbStore occurrences come before filteredPosition in filtered text
-        val filteredText = removeComments(originalText)
-        val filteredMatches = getRdbStorePattern.findAll(filteredText).toList()
-        
-        // Find which getRdbStore call this position corresponds to
-        var callIndex = 0
-        for ((index, match) in filteredMatches.withIndex()) {
-            if (match.range.first <= filteredPosition) {
-                callIndex = index
-            } else {
-                break
-            }
-        }
-        
-        // Return the position of the corresponding call in original text
-        return if (callIndex < matches.size) {
-            matches[callIndex].range.first
-        } else {
-            -1
+        // Comment removal preserves offsets, so no approximate occurrence mapping is needed.
+        if (call.startOffset >= 0 && call.endOffset <= file.textLength && call.startOffset < call.endOffset) {
+            createProblemDescriptor(file, violation.reason, holder, TextRange(call.startOffset, call.endOffset))
         }
     }
 
