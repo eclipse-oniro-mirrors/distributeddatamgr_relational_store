@@ -15,24 +15,38 @@
 
 import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from '@ohos/hypium';
 import relationalStore from '@ohos.data.relationalStore';
+import AbilityDelegatorRegistry from '@ohos.app.ability.abilityDelegatorRegistry';
+
+const TAG = "[RDB_DUMP_STACK_CONFIG_TEST]";
+const delegator = AbilityDelegatorRegistry.getAbilityDelegator();
+const context = delegator.getAppContext().getApplicationContext();
+const STORE_CONFIG: relationalStore.StoreConfig = {
+  name: "dump_stack_config.db",
+  securityLevel: relationalStore.SecurityLevel.S1,
+  dumpStackOnFileDel: true
+};
+const STORE_CONFIG_DEFAULT: relationalStore.StoreConfig = {
+  name: "dump_stack_config.db",
+  securityLevel: relationalStore.SecurityLevel.S1
+};
 
 export default function dumpStackConfigTest() {
   describe('rdbDumpStackConfigTest', function () {
     beforeAll(async function () {
-      console.info('[RDB_DUMP_STACK_CONFIG_TEST] beforeAll');
+      console.info(TAG + 'beforeAll');
     })
 
     beforeEach(function () {
-      console.info('[RDB_DUMP_STACK_CONFIG_TEST] beforeEach');
+      console.info(TAG + 'beforeEach');
     })
 
     afterEach(async function () {
-      console.info('[RDB_DUMP_STACK_CONFIG_TEST] afterEach');
-      await relationalStore.deleteRdbStore("dump_stack_config.db");
+      console.info(TAG + 'afterEach');
+      await relationalStore.deleteRdbStore(context, "dump_stack_config.db");
     })
 
     afterAll(function () {
-      console.info('[RDB_DUMP_STACK_CONFIG_TEST] afterAll');
+      console.info(TAG + 'afterAll');
     })
 
     /**
@@ -41,20 +55,15 @@ export default function dumpStackConfigTest() {
      * @tc.desc open rdb store with dumpStackOnFileDel set to true succeeds
      */
     it('testDumpStackConfig0001', 0, async function () {
-      console.info("[RDB_DUMP_STACK_CONFIG_TEST]************* testDumpStackConfig0001 start *************");
+      console.info(TAG + "************* testDumpStackConfig0001 start *************");
       try {
-        let storeConfig: Record<string, Object> = {
-          name: "dump_stack_config.db",
-          securityLevel: relationalStore.SecurityLevel.S1,
-          dumpStackOnFileDel: true
-        }
-        let store = await relationalStore.getRdbStore(storeConfig, 1);
+        let store = await relationalStore.getRdbStore(context, STORE_CONFIG);
         expect(store !== null && store !== undefined).assertTrue();
       } catch (err) {
-        console.log("[RDB_DUMP_STACK_CONFIG_TEST]failed, errcode:" + JSON.stringify(err) + ".");
+        console.log(TAG + `failed, errcode:${JSON.stringify(err)}.`);
         expect().assertFail()
       }
-      console.info("[RDB_DUMP_STACK_CONFIG_TEST]************* testDumpStackConfig0001 end   *************");
+      console.info(TAG + "************* testDumpStackConfig0001 end   *************");
     })
 
     /**
@@ -63,19 +72,15 @@ export default function dumpStackConfigTest() {
      * @tc.desc open rdb store without dumpStackOnFileDel uses default false
      */
     it('testDumpStackConfig0002', 0, async function () {
-      console.info("[RDB_DUMP_STACK_CONFIG_TEST]************* testDumpStackConfig0002 start *************");
+      console.info(TAG + "************* testDumpStackConfig0002 start *************");
       try {
-        let storeConfig: relationalStore.StoreConfig = {
-          name: "dump_stack_config.db",
-          securityLevel: relationalStore.SecurityLevel.S1
-        }
-        let store = await relationalStore.getRdbStore(storeConfig, 1);
+        let store = await relationalStore.getRdbStore(context, STORE_CONFIG_DEFAULT);
         expect(store !== null && store !== undefined).assertTrue();
       } catch (err) {
-        console.log("[RDB_DUMP_STACK_CONFIG_TEST]failed, errcode:" + JSON.stringify(err) + ".");
+        console.log(TAG + `failed, errcode:${JSON.stringify(err)}.`);
         expect().assertFail()
       }
-      console.info("[RDB_DUMP_STACK_CONFIG_TEST]************* testDumpStackConfig0002 end   *************");
+      console.info(TAG + "************* testDumpStackConfig0002 end   *************");
     })
 
     /**
@@ -84,20 +89,20 @@ export default function dumpStackConfigTest() {
      * @tc.desc invalid dumpStackOnFileDel type falls back to default without crash
      */
     it('testDumpStackConfig0003', 0, async function () {
-      console.info("[RDB_DUMP_STACK_TEST]************* testDumpStackConfig0003 start *************");
+      console.info(TAG + "************* testDumpStackConfig0003 start *************");
       try {
-        let storeConfig: Record<string, Object> = {
+        let storeConfig: relationalStore.StoreConfig = {
           name: "dump_stack_config.db",
           securityLevel: relationalStore.SecurityLevel.S1,
-          dumpStackOnFileDel: "notBoolean"
+          dumpStackOnFileDel: "notBoolean" as unknown as boolean
         }
-        let store = await relationalStore.getRdbStore(storeConfig, 1);
+        let store = await relationalStore.getRdbStore(context, storeConfig);
         expect(store !== null && store !== undefined).assertTrue();
       } catch (err) {
-        console.log("[RDB_DUMP_STACK_CONFIG_TEST]failed, errcode:" + JSON.stringify(err) + ".");
+        console.log(TAG + `failed, errcode:${JSON.stringify(err)}.`);
         expect().assertFail()
       }
-      console.info("[RDB_DUMP_STACK_CONFIG_TEST]************* testDumpStackConfig0003 end   *************");
+      console.info(TAG + "************* testDumpStackConfig0003 end   *************");
     })
   })
 }
