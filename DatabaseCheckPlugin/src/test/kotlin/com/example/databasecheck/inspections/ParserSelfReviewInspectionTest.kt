@@ -238,6 +238,32 @@ class ParserSelfReviewInspectionTest : LightPlatformCodeInsightFixtureTestCase()
         assertEquals("Template text is not an actual loop", 1, inspect(Rule3TransactionUsageInspection(), fake).size)
     }
 
+    fun testCopyFallbackMatchesMainForPathAliasAndOrdinaryPath() {
+        val rule = Rule2DatabaseCopyInspection()
+        for ((path, expected) in listOf("context.databaseDir + '/test.db'" to 1, "'/tmp/plain.txt'" to 0)) {
+            // Arrange: the same source drives normal and exception-fallback entry points.
+            val source = "const path = $path; fileIo.copyFile(path, '/tmp/backup.txt');"
+            // Act / Assert: require the actual warning, then compare the fallback diagnostic.
+            val main = inspect(rule, source)
+            val fallback = inspect(rule, source, "fallbackFileCopyAnalysis")
+            assertEquals(expected, main.size)
+            assertEquals(main.map { it.descriptionTemplate }, fallback.map { it.descriptionTemplate })
+        }
+    }
+
+    fun testPermissionFallbackMatchesMainForPathAliasAndOrdinaryPath() {
+        val rule = Rule7DatabasePermissionInspection()
+        for ((path, expected) in listOf("context.databaseDir + '/test.db'" to 1, "'/tmp/plain.txt'" to 0)) {
+            // Arrange / Act: use the existing legacy chmod API; no file operation is executed.
+            val source = "const path = $path; chmod(path, 0o600);"
+            val main = inspect(rule, source)
+            val fallback = inspect(rule, source, "fallbackPermissionAnalysis")
+            // Assert: positive and negative paths agree with both the contract and normal dispatch.
+            assertEquals(expected, main.size)
+            assertEquals(main.map { it.descriptionTemplate }, fallback.map { it.descriptionTemplate })
+        }
+    }
+
     private fun inspect(
         rule: BaseDatabaseInspection,
         source: String,

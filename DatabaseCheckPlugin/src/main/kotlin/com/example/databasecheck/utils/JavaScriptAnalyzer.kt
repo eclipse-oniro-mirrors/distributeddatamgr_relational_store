@@ -271,6 +271,20 @@ object JavaScriptAnalyzer {
             code.tokens[end].end, code.source.substring(bodyStart, bodyEnd))
     }
 
+    internal fun parameterNames(code: JavaScriptCode, scope: FunctionScope): List<String> {
+        val start = code.tokens.indexOfFirst { it.start == scope.startOffset }
+        if (start < 0) return emptyList()
+        val open = if (code.text(start) == "=>") {
+            if (code.text(start - 1) != ")") return listOf(code.text(start - 1))
+            code.tokens.indices.firstOrNull { code.end(it) == start - 1 } ?: return emptyList()
+        } else code.tokens.indices.firstOrNull {
+            it >= start && code.tokens[it].start < scope.bodyStartOffset && code.text(it) == "("
+        } ?: return emptyList()
+        return code.arguments(open).mapNotNull {
+            Regex("""^\s*(?:\.\.\.)?([a-zA-Z_$][a-zA-Z0-9_$]*)""").find(it)?.groupValues?.get(1)
+        }
+    }
+
     /**
      * Extract function calls and assignments with function scope information.
      * 

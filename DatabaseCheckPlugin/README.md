@@ -105,10 +105,10 @@ gradle --version
 gradle cleanTest test buildPlugin --no-daemon --console=plain
 ```
 
-预期：`BUILD SUCCESSFUL`，全量 **111 个 JUnit 测试方法**通过，0失败、0错误、0跳过。
+预期：`BUILD SUCCESSFUL`，全量 **137 个 JUnit 测试方法**通过，0失败、0错误、0跳过。
 其中 `EtsAcceptanceInspectionTest` 的10个方法分别执行10组规则输入，合计验证根目录
-`EtsAcceptance/` 下的 **67 个 ETS 场景**（38个告警反例、29个不误报正例）。这些是静态检查输入，
-不会实际执行数据库、文件或网络操作。其余101个方法覆盖分析器、规则入口及此前回归场景。
+`EtsAcceptance/` 下的 **75 个 ETS 场景**（42个告警反例、33个不误报正例）。这些是静态检查输入，
+不会实际执行数据库、文件或网络操作。其余127个方法覆盖分析器、规则入口及此前回归场景。
 
 ```text
 DatabaseCheck-1.0.0.zip                 当前插件目录根层的可安装插件包
@@ -140,7 +140,7 @@ allprojects {
 # 只编译插件源码
 gradle compileKotlin --no-daemon --console=plain
 
-# 只执行67个ETS输入的自动验收
+# 只执行75个ETS输入的自动验收
 gradle cleanTest test --tests '*EtsAcceptanceInspectionTest' --no-daemon --console=plain
 
 # 只执行Rule1的ETS输入

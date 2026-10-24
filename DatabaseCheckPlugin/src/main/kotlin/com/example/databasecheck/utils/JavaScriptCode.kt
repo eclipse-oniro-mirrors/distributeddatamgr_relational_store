@@ -17,13 +17,13 @@ package com.example.databasecheck.utils
 
 /** A lexical view shared by database rules; offsets always refer to the original source. */
 internal class JavaScriptCode(val source: String) {
-    data class Token(val text: String, val start: Int, val end: Int) {
+    data class Token(val text: String, val start: Int, val end: Int, val isRegex: Boolean = false) {
         val isString: Boolean get() = text.firstOrNull() in listOf('\'', '"', '`')
+        val isLiteral: Boolean get() = isString || isRegex
     }
 
-    val tokens: List<Token> = TOKEN_PATTERN.findAll(source)
-        .filterNot { it.value.startsWith("//") || it.value.startsWith("/*") }
-        .map { Token(it.value, it.range.first, it.range.last + 1) }.toList()
+    private val lexicalTokens = tokenize(source)
+    val tokens: List<Token> = lexicalTokens.filterNot { isComment(it.text) }
     private val pairs = mutableMapOf<Int, Int>()
 
     init {
@@ -45,17 +45,15 @@ internal class JavaScriptCode(val source: String) {
 
     fun withoutComments(): String {
         val result = source.toCharArray()
-        TOKEN_PATTERN.findAll(source).filter {
-            it.value.startsWith("//") || it.value.startsWith("/*")
-        }.forEach { comment ->
-            for (index in comment.range) if (result[index] !in "\r\n") result[index] = ' '
+        lexicalTokens.filter { isComment(it.text) }.forEach { comment ->
+            for (index in comment.start until comment.end) if (result[index] !in "\r\n") result[index] = ' '
         }
         return String(result)
     }
 
     fun withoutStrings(): String {
         val result = source.toCharArray()
-        tokens.filter { it.isString }.forEach { token ->
+        tokens.filter { it.isLiteral }.forEach { token ->
             for (index in token.start until token.end) if (result[index] !in "\r\n") result[index] = ' '
         }
         return String(result)
@@ -108,14 +106,60 @@ internal class JavaScriptCode(val source: String) {
     fun statementEnd(start: Int): Int {
         if (text(start) == "{") return end(start)
         var index = start
-        while (index < tokens.size && text(index) !in setOf(";", "}")) {
+        while (index < tokens.size && text(index) !in setOf(";", "}", "else")) {
+            if (index > start && source.substring(tokens[index - 1].end, tokens[index].start).contains('\n') &&
+                text(index - 1) !in CONTINUATIONS && text(index) !in CONTINUATIONS) break
             val end = end(index)
             index = if (end >= index) end + 1 else index + 1
         }
-        return index.coerceAtMost(tokens.lastIndex)
+        return if (text(index) == ";") index else index - 1
     }
 
     companion object {
+        private fun isComment(text: String): Boolean = text.startsWith("//") || text.startsWith("/*")
+
+        private fun tokenize(source: String): List<Token> {
+            val result = mutableListOf<Token>()
+            var position = 0
+            var previous = ""
+            while (position < source.length) {
+                val match = TOKEN_PATTERN.find(source, position) ?: break
+                val regexEnd = if (match.value == "/" && previous in REGEX_PREFIXES)
+                    regularExpressionEnd(source, match.range.first) else -1
+                val end = if (regexEnd >= 0) regexEnd else match.range.last + 1
+                val text = source.substring(match.range.first, end)
+                result.add(Token(text, match.range.first, end, regexEnd >= 0))
+                if (!isComment(text)) previous = text
+                position = end
+            }
+            return result
+        }
+
+        /** Only recognize a regex where an expression may begin; leave division tokens untouched. */
+        private fun regularExpressionEnd(source: String, start: Int): Int {
+            var cursor = start + 1
+            var characterClass = false
+            while (cursor < source.length && source[cursor] !in "\r\n") {
+                when (source[cursor]) {
+                    '\\' -> {
+                        if (cursor + 1 >= source.length || source[cursor + 1] in "\r\n") return -1
+                        cursor++
+                    }
+                    '[' -> characterClass = true
+                    ']' -> characterClass = false
+                    '/' -> if (!characterClass) {
+                        cursor++
+                        while (cursor < source.length && source[cursor].isLetter()) cursor++
+                        return cursor
+                    }
+                }
+                cursor++
+            }
+            return -1
+        }
+
+        private val REGEX_PREFIXES = setOf("", "=", "(", "[", "{", ",", ":", ";", "return", "throw",
+            "case", "=>", "!", "~", "?", "&&", "||", "??", "void", "typeof", "yield", "await")
         private val OPEN = listOf("(", "[", "{")
         private val CLOSE = listOf(")", "]", "}")
         private val CONTINUATIONS = setOf("await", "=", ".", "?.", ",", "+", "-", "*", "/", "&&", "||", "?", ":", "=>")

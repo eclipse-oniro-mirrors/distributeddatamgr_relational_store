@@ -20,6 +20,7 @@ internal class DatabaseErrorHandlingAnalyzer(source: String) {
     data class Violation(val start: Int, val end: Int, val reason: String)
     private data class Handler(val start: Int, val body: IntRange, val error: String, val operations: Set<String>)
     private data class Branch(val codes: Set<Int>, val body: IntRange, val start: Int)
+    private data class ActionContext(val error: Int, val bindings: DatabaseErrorBindings)
     private val code = JavaScriptCode(source)
     private val scopes = JavaScriptAnalyzer.extractFunctionScopes(source)
 
@@ -46,7 +47,8 @@ internal class DatabaseErrorHandlingAnalyzer(source: String) {
     }
 
     private fun checkHandler(handler: Handler): List<Violation> {
-        val branches = branches(handler)
+        val bindings = DatabaseErrorBindings(code, scopes, handler.error, code.tokens[handler.body.first - 1].end)
+        val branches = branches(handler.body, bindings).filter { it.codes.isNotEmpty() }
         if (branches.isEmpty()) {
             return listOf(violation(handler, "No verifiable database error-code handling. " +
                 "Handle busy/locked (14800024/14800025) with retry and delay, " +
@@ -54,7 +56,7 @@ internal class DatabaseErrorHandlingAnalyzer(source: String) {
         }
         return branches.flatMap { branch ->
             branch.codes.mapNotNull { error ->
-                val actions = calls(branch.body, branches.filter { error !in it.codes }, handler.operations)
+                val actions = calls(branch.body, roots = handler.operations, context = ActionContext(error, bindings))
                 val missing = missingActions(error, actions, handler.operations)
                 if (missing.isEmpty()) null else violation(handler,
                     "Database error $error: missing verifiable ${missing.joinToString(" and ")}. " +
@@ -69,37 +71,40 @@ internal class DatabaseErrorHandlingAnalyzer(source: String) {
         reason
     )
 
-    private fun branches(handler: Handler): List<Branch> {
-        if (handler.error.isEmpty()) return emptyList()
+    private fun branches(range: IntRange, bindings: DatabaseErrorBindings): List<Branch> {
         val result = mutableListOf<Branch>()
-        var index = handler.body.first
-        while (index <= handler.body.last) {
+        var index = range.first
+        while (index <= range.last) {
             if (code.text(index) in setOf("function", "=>")) {
-                index = skipFunction(index, handler.body.last)
+                index = skipFunction(index, range.last)
                 continue
             }
-            if (code.text(index) == "if") ifBranch(index, handler.error)?.let { result.add(it) }
-            if (code.text(index) == "switch") result.addAll(switchBranches(index, handler.error))
+            if (code.text(index) == "if") ifBranch(index, bindings)?.let { result.add(it) }
+            if (code.text(index) == "switch") result.addAll(switchBranches(index, bindings))
             index++
         }
-        return result.filter { it.body.last <= handler.body.last }
+        return result.filter { it.body.last <= range.last }
     }
 
-    private fun ifBranch(index: Int, error: String): Branch? {
+    private fun ifBranch(index: Int, bindings: DatabaseErrorBindings): Branch? {
         if (code.text(index + 1) != "(") return null
         val end = code.end(index + 1)
         if (end < 0) return null
         val condition = ((index + 2) until end).joinToString("") {
-            if (code.tokens[it].isString) "<literal>" else code.text(it)
+            if (code.tokens[it].isLiteral) "<literal>" else code.text(it)
         }
         // Negative guards do not establish a positive error-code path.
         if (condition.contains("!(") || condition.contains("=>")) return null
-        val property = "(?<![a-zA-Z0-9_$])${Regex.escape(error)}(?:\\?\\.|\\.)code"
+        val property = "(?<![a-zA-Z0-9_$])([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\\?\\.|\\.)code"
         val equality = Regex("(?:$property==(?:=)?([0-9]+)|([0-9]+)==(?:=)?$property)(?![0-9])")
-        val codes = equality.findAll(condition).mapNotNull {
-            (it.groupValues[1].ifEmpty { it.groupValues[2] }).toIntOrNull()
-        }.filter { it in DatabaseConstants.DATABASE_ERROR_CODES }.toSet()
-        if (codes.isEmpty()) return null
+        val matches = equality.findAll(condition).mapNotNull {
+            val name = it.groupValues[1].ifEmpty { it.groupValues[4] }
+            val number = it.groupValues[2].ifEmpty { it.groupValues[3] }.toIntOrNull()
+            number?.takeIf { it in DatabaseConstants.DATABASE_ERROR_CODES }?.let { name to it }
+        }.toList()
+        if (matches.isEmpty()) return null
+        val names = bindings.namesAt(code.tokens[index].start)
+        val codes = matches.filter { it.first in names }.map { it.second }.toSet()
         val start = end + 1
         val bodyEnd = code.statementEnd(start)
         if (bodyEnd < start) return null
@@ -107,11 +112,12 @@ internal class DatabaseErrorHandlingAnalyzer(source: String) {
         return Branch(codes, body, index)
     }
 
-    private fun switchBranches(index: Int, error: String): List<Branch> {
+    private fun switchBranches(index: Int, bindings: DatabaseErrorBindings): List<Branch> {
         if (code.text(index + 1) != "(") return emptyList()
         val conditionEnd = code.end(index + 1)
         val property = code.joined((index + 2) until conditionEnd)
-        if (property != "$error.code" && property != "$error?.code") return emptyList()
+        if (!Regex("[a-zA-Z_$][a-zA-Z0-9_$]*(?:\\?\\.|\\.)code").matches(property)) return emptyList()
+        val bound = bindings.namesAt(code.tokens[index].start).any { property == "$it.code" || property == "$it?.code" }
         val body = conditionEnd + 1
         val end = code.end(body)
         if (code.text(body) != "{" || end < 0) return emptyList()
@@ -122,7 +128,11 @@ internal class DatabaseErrorHandlingAnalyzer(source: String) {
             val close = code.end(cursor)
             cursor = if (close >= cursor) close + 1 else cursor + 1
         }
-        return labels.mapIndexedNotNull { position, label -> switchBranch(labels, position, label, end) }
+        return labels.mapIndexedNotNull { position, label ->
+            if (code.text(label) == "default")
+                Branch(emptySet(), (label + 2) until (labels.getOrNull(position + 1) ?: end), label)
+            else switchBranch(labels, position, label, end)?.let { if (bound) it else it.copy(codes = emptySet()) }
+        }
     }
 
     private fun switchBranch(labels: List<Int>, position: Int, label: Int, end: Int): Branch? {
@@ -138,16 +148,17 @@ internal class DatabaseErrorHandlingAnalyzer(source: String) {
 
     private fun calls(
         range: IntRange,
-        excluded: List<Branch> = emptyList(),
         roots: Set<String> = emptySet(),
-        visiting: Set<String> = emptySet()
+        visiting: Set<String> = emptySet(),
+        context: ActionContext? = null
     ): List<String> {
+        val skipped = exclusions(range, context)
         val result = mutableListOf<String>()
         var index = range.first
         var last = range.last
         while (index <= last) {
-            val nested = excluded.firstOrNull {
-                index in it.start..it.body.last && it.start >= range.first && it.body.last < range.last
+            val nested = skipped.firstOrNull {
+                index in it.start..it.body.last && it.start >= range.first && it.body.last <= range.last
             }
             if (nested != null) {
                 index = nested.body.last + 1
@@ -168,12 +179,41 @@ internal class DatabaseErrorHandlingAnalyzer(source: String) {
                 val helper = scopes.firstOrNull { it.functionName == name }
                     ?.takeIf { code.text(index - 1) !in setOf(".", "?.") && name !in roots }
                 if (helper == null) result.add(name)
-                else if (name !in visiting && visiting.size < 16) result.addAll(calls(scopeRange(helper), roots = roots, visiting = visiting + name))
+                else if (name !in visiting && visiting.size < 16) {
+                    val bindings = context?.bindings?.forHelper(helper,
+                        code.arguments(index + 1), code.tokens[index].start)
+                    result.addAll(calls(scopeRange(helper), roots = roots, visiting = visiting + name,
+                        context = if (bindings == null) null else context.copy(bindings = bindings)))
+                }
                 if (name in setOf("execute", "executeSql") && checkpointArgument(index)) result.add("checkpoint")
             }
             index++
         }
         return result
+    }
+
+    private fun exclusions(range: IntRange, context: ActionContext?): List<Branch> {
+        if (context == null) return emptyList()
+        val branches = branches(range, context.bindings)
+        val result = branches.filter { context.error !in it.codes }.toMutableList()
+        for (branch in branches.filter { context.error in it.codes && code.text(it.start) == "if" }) {
+            val thenEnd = code.statementEnd(code.end(branch.start + 1) + 1)
+            val alternative = thenEnd + 1
+            if (code.text(alternative) == "else") {
+                val end = conditionalEnd(alternative + 1)
+                if (end >= alternative) result.add(Branch(emptySet(), alternative..end, alternative))
+            }
+        }
+        return result
+    }
+
+    private fun conditionalEnd(start: Int, depth: Int = 0): Int {
+        if (depth >= 16) return -1
+        if (code.text(start) != "if") return code.statementEnd(start)
+        val condition = code.end(start + 1)
+        if (condition < start) return -1
+        val end = conditionalEnd(condition + 1, depth + 1)
+        return if (end >= 0 && code.text(end + 1) == "else") conditionalEnd(end + 2, depth + 1) else end
     }
 
     private fun scopeRange(scope: JavaScriptAnalyzer.FunctionScope): IntRange {

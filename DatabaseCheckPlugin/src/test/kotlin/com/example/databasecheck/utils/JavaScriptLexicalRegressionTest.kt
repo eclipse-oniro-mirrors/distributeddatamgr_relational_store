@@ -124,4 +124,47 @@ class JavaScriptLexicalRegressionTest {
         assertEquals(listOf("first", "second"), assignments.map { it.variableName })
         assertTrue(assignments.all { it.assignmentExpression == "store.createTransaction()" })
     }
+
+    @Test
+    fun regexLiteralsProtectBracketsAndFakeCalls() {
+        val source = "const re = /[({]/; if (x) { real(); }"
+        val code = JavaScriptCode(source)
+        val open = code.tokens.indexOfFirst { it.text == "{" }
+        assertEquals(source.lastIndexOf('}'), code.tokens[code.end(open)].start)
+        assertEquals(listOf("real"), JavaScriptAnalyzer.extractFunctionCallsFromText(source).map { it.functionName })
+        assertTrue(JavaScriptAnalyzer.extractFunctionCallsFromText("const re = /store.insert('t')/g;").isEmpty())
+    }
+
+    @Test
+    fun regexEscapesClassesAndCommentMarkersRemainOpaque() {
+        val source = "const re = /[\\/({]a\\/b/g; const text = /[/][/]/; /* real */ next();"
+        val cleaned = JavaScriptCode(source).withoutComments()
+        assertEquals(source.length, cleaned.length)
+        assertTrue(cleaned.contains("/[/][/]/"))
+        assertFalse(cleaned.contains("real"))
+        assertEquals(source.indexOf("next"), cleaned.indexOf("next"))
+        assertEquals(listOf("next"), JavaScriptAnalyzer.extractFunctionCallsFromText(cleaned).map { it.functionName })
+    }
+
+    @Test
+    fun divisionDoesNotConsumeFollowingCalls() {
+        val source = "const n = total / count / scale; const m = (n + 1) / factor; next(n, m);"
+        assertEquals(listOf("next"), JavaScriptAnalyzer.extractFunctionCallsFromText(source).map { it.functionName })
+    }
+
+    @Test
+    fun regexAfterReturnAndCommaDoesNotBreakArguments() {
+        val source = "function pattern() { return /[({]/; } use(/[,)]/, value);"
+        val call = JavaScriptAnalyzer.extractFunctionCallsFromText(source).single { it.functionName == "use" }
+        assertEquals(listOf("/[,)]/", "value"), call.arguments)
+    }
+
+    @Test
+    fun incompleteRegexAndDivisionRemainSafe() {
+        for (source in listOf("const re = /[", "const re = /unterminated\nnext();", "const x = n / d;")) {
+            JavaScriptCode(source).withoutComments()
+            assertTrue(JavaScriptAnalyzer.extractFunctionCallsFromText(source)
+                .none { it.functionName == "unterminated" })
+        }
+    }
 }

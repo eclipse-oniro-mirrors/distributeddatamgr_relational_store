@@ -29,7 +29,7 @@ object DatabasePathMatcher {
         private val assignments = JavaScriptAnalyzer.extractVariableAssignmentsFromText(source)
         private val scopes = JavaScriptAnalyzer.extractFunctionScopes(source)
         private val identifier = Regex("[a-zA-Z_$][a-zA-Z0-9_$]*")
-        private val parameters = scopes.associateWith { parameterNames(it) }
+        private val parameters = scopes.associateWith { JavaScriptAnalyzer.parameterNames(code, it).toSet() }
 
         fun resolves(expression: String, position: Int): Boolean = resolve(expression, position, emptySet())
 
@@ -81,20 +81,6 @@ object DatabasePathMatcher {
                 code.text(it) in setOf("const", "let", "var") && code.text(it + 1) == name &&
                     code.tokens[it].start < position && isVisible(code.tokens[it].start, position)
             }.maxOfOrNull { code.tokens[it].start }?.coerceAtLeast(parameter) ?: parameter
-        }
-
-        private fun parameterNames(scope: JavaScriptAnalyzer.FunctionScope): Set<String> {
-            val start = code.tokens.indexOfFirst { it.start == scope.startOffset }
-            if (start < 0) return emptySet()
-            val open = if (code.text(start) == "=>") {
-                if (code.text(start - 1) != ")") return setOf(code.text(start - 1))
-                code.tokens.indices.firstOrNull { code.end(it) == start - 1 } ?: return emptySet()
-            } else code.tokens.indices.firstOrNull {
-                it >= start && code.tokens[it].start < scope.bodyStartOffset && code.text(it) == "("
-            } ?: return emptySet()
-            return code.arguments(open).mapNotNull {
-                Regex("""^\s*(?:\.\.\.)?([a-zA-Z_$][a-zA-Z0-9_$]*)""").find(it)?.groupValues?.get(1)
-            }.toSet()
         }
     }
 

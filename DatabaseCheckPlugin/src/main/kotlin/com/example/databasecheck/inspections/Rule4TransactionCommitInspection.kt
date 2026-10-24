@@ -261,65 +261,11 @@ class Rule4TransactionCommitInspection : BaseDatabaseInspection() {
     }
     
     /**
-     * Find the start of the function containing the given offset.
-     */
-    private fun findFunctionStart(codeText: String, offset: Int): Int {
-        val beforeOffset = codeText.substring(0, offset)
-        val functionPattern = Regex("""(async\s+)?function\s+\w+\s*\([^)]*\)\s*\{""")
-        val matches = functionPattern.findAll(beforeOffset).toList()
-        return matches.lastOrNull()?.range?.first ?: -1
-    }
-    
-    /**
-     * Find the end of the function starting at the given position.
-     */
-    private fun findFunctionEnd(codeText: String, functionStart: Int): Int {
-        if (functionStart == -1) return -1
-        
-        val openBracePos = codeText.indexOf('{', functionStart)
-        if (openBracePos == -1) return -1
-        
-        return findMatchingBrace(codeText, openBracePos) + 1
-    }
-    
-    /**
      * Find the matching closing brace for an opening brace at the given position.
      * Returns the index of the matching closing brace, or -1 if not found.
      */
     private fun findMatchingBrace(text: String, openBracePos: Int): Int =
         JavaScriptCode(text).closingOffsetAt(openBracePos)
-
-    /**
-     * Extract try-catch block information from code text.
-     */
-    private fun extractTryCatchBlocks(codeText: String, transactionOffset: Int): List<TryCatchBlock> {
-        val blocks = mutableListOf<TryCatchBlock>()
-        
-        // Find try-catch patterns that might contain the transaction
-        val tryCatchPattern = Regex(
-            """try\s*\{([^{}]*(?:\{[^{}]*}[^{}]*)*)\}\s*catch\s*\([^)]*\)\s*\{([^{}]*(?:\{[^{}]*}[^{}]*)*)}""",
-            setOf(RegexOption.MULTILINE, RegexOption.DOT_MATCHES_ALL)
-        )
-        
-        tryCatchPattern.findAll(codeText).forEach { match ->
-            val tryStart = match.range.first
-            val tryEnd = match.range.last + 1
-            val tryBlock = match.groupValues[1]
-            val catchBlock = match.groupValues[2]
-            
-            // Check if the transaction falls within this try block
-            if (transactionOffset in tryStart..tryEnd) {
-                blocks.add(TryCatchBlock(
-                    tryStart = tryStart,
-                    tryEnd = tryEnd,
-                    tryBlock = tryBlock,
-                    catchBlock = catchBlock
-                ))
-            }
-        }
-        
-        return blocks
-    }
 
     /**
      * Find the variable that stores the transaction object.
