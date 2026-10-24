@@ -49,9 +49,14 @@ tasks {
         // Keep the minimum platform build without generating an upper bound.
         untilBuild.set(provider { null })
     }
+
+    buildPlugin {
+        destinationDirectory.set(layout.projectDirectory)
+    }
     
     test {
         useJUnit()
+        inputs.dir("EtsAcceptance")
     }
 }
 
