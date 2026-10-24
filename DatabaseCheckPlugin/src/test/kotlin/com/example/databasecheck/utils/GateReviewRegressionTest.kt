@@ -137,14 +137,19 @@ class GateReviewRegressionTest {
 
     @Test
     fun helperParametersRetainErrorIdentity() {
-        val suffix = """
-            function handle(err: BusinessError) {
-                if (err.code === 14800025) { retry(); delay(1); }
-            }
-        """.trimIndent()
-        val busy = "try { store.insert('t', values); } catch (e) { if (e.code === 14800024) { handle(e); } }"
-        assertEquals(1, DatabaseErrorHandlingAnalyzer(busy + suffix).analyze().size)
-        assertTrue(DatabaseErrorHandlingAnalyzer(busy.replace("14800024", "14800025") + suffix).analyze().isEmpty())
+        for (name in listOf("err", "e")) {
+            val suffix = """
+                function handle($name: BusinessError) {
+                    if ($name.code === 14800025) { retry(); delay(1); }
+                }
+            """.trimIndent()
+            val busy = "try { store.insert('t', values); } catch (e) { if (e.code === 14800024) { handle(e); } }"
+            assertEquals(1, DatabaseErrorHandlingAnalyzer(busy + suffix).analyze().size)
+            val locked = busy.replace("14800024", "14800025")
+            assertTrue(name, DatabaseErrorHandlingAnalyzer(locked + suffix).analyze().isEmpty())
+            val reassigned = suffix.replace("if (", "$name = other; if (")
+            assertEquals(name, 1, DatabaseErrorHandlingAnalyzer(locked + reassigned).analyze().size)
+        }
     }
 
     @Test

@@ -53,14 +53,14 @@ internal class DatabaseErrorBindings private constructor(
         val parameter = parsed.scopes.filter {
             position in it.bodyStartOffset until it.endOffset &&
                 name in JavaScriptAnalyzer.parameterNames(code, it) &&
-                (name != root.name || it.bodyStartOffset > root.position)
+                (name != root.name || root.position !in it.bodyStartOffset until it.endOffset)
         }.maxByOrNull { it.bodyStartOffset }
         val declaration = code.tokens.indices.filter {
             code.text(it) in setOf("const", "let", "var") && code.text(it + 1) == name &&
                 code.tokens[it].start < position && code.isVisibleAt(code.tokens[it].start, position)
         }.maxOfOrNull { code.tokens[it].start } ?: 0
         val minimum = maxOf(declaration, parameter?.bodyStartOffset ?: 0,
-            if (name == root.name) root.position else 0)
+            if (name == root.name && parameter == null) root.position else 0)
         val binding = parsed.assignments.filter {
             it.variableName == name && it.startOffset < position && it.startOffset >= minimum &&
                 code.isVisibleAt(it.startOffset, position)
