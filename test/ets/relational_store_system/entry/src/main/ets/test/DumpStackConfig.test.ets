@@ -43,7 +43,7 @@ export default function dumpStackConfigTest() {
     it('testDumpStackConfig0001', 0, async function () {
       console.info("[RDB_DUMP_STACK_CONFIG_TEST]************* testDumpStackConfig0001 start *************");
       try {
-        let storeConfig: relationalStore.StoreConfig = {
+        let storeConfig: Record<string, Object> = {
           name: "dump_stack_config.db",
           securityLevel: relationalStore.SecurityLevel.S1,
           dumpStackOnFileDel: true
@@ -84,12 +84,12 @@ export default function dumpStackConfigTest() {
      * @tc.desc invalid dumpStackOnFileDel type falls back to default without crash
      */
     it('testDumpStackConfig0003', 0, async function () {
-      console.info("[RDB_DUMP_STACK_CONFIG_TEST]************* testDumpStackConfig0003 start *************");
+      console.info("[RDB_DUMP_STACK_TEST]************* testDumpStackConfig0003 start *************");
       try {
-        let storeConfig: relationalStore.StoreConfig = {
+        let storeConfig: Record<string, Object> = {
           name: "dump_stack_config.db",
           securityLevel: relationalStore.SecurityLevel.S1,
-          dumpStackOnFileDel: "notBoolean" as unknown as boolean
+          dumpStackOnFileDel: "notBoolean"
         }
         let store = await relationalStore.getRdbStore(storeConfig, 1);
         expect(store !== null && store !== undefined).assertTrue();
