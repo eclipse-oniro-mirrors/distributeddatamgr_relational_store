@@ -17,7 +17,7 @@
 ### 开发环境
 
 - **编程语言**：使用 1.9.25 版本的编程语言
-- **构建工具**：Gradle 8.12.1 (使用KotlinDSL)
+- **构建工具**：Gradle 8.12.1 (使用DSL配置)
 - **Java 版本**：JDK 17
 - **编译平台**：IntelliJ Platform 2023.3.6；安装要求平台构建号 233 及以上，不设版本上限
 - **插件框架**：IntelliJ Platform Plugin SDK 1.17.3
@@ -46,18 +46,8 @@ DatabaseCheck_Release/
 │       └── JavaScriptAnalyzer.kt   # JavaScript代码分析工具
 ├── src/main/resources/META-INF/
 │   └── plugin.xml             # 插件配置文件
-├── src/test/kotlin/com/example/databasecheck/
-│   └── testdata/              # 测试数据（正例和反例）
-│       ├── Rule1/             # 规则1 测试文件
-│       ├── Rule2/             # 规则2 测试文件
-│       ├── Rule3/             # 规则3 测试文件
-│       ├── Rule4/             # 规则4 测试文件
-│       ├── Rule5/             # 规则5 测试文件
-│       ├── Rule6/             # 规则6 测试文件
-│       ├── Rule7/             # 规则7 测试文件
-│       ├── Rule9/             # 规则9 测试文件
-│       ├── Rule12/            # 规则12 测试文件
-│       └── Rule14/            # 规则14 测试文件
+├── src/test/                  # 自动化测试和既有样例，按包路径组织
+├── EtsAcceptance/             # 根目录ETS验收输入，按Rule*分组
 ├── Doc/                       # 规则文档与参考文档
 ├── build.gradle.kts           # Gradle 构建配置
 └── README.md                  # 本文件
@@ -100,7 +90,7 @@ DatabaseCheck_Release/
 ### 编译插件与执行全量用例
 
 所有命令均在当前仓库的 `DatabaseCheckPlugin` 目录执行。推荐使用 JDK 21、Gradle 8.12.1，
-插件输出 JVM 17 字节码；首次构建需要下载 Maven 依赖和 IntelliJ IDEA Community 2023.3.6 SDK。
+插件输出 JVM 17 字节码；依赖未缓存时，构建需要下载 Maven 依赖和 IntelliJ IDEA Community 2023.3.6 SDK。
 当前仓库没有 `gradle-wrapper.jar`，请使用已安装的 `gradle`：
 
 ```bash
@@ -129,8 +119,18 @@ build/test-results/test/TEST-*.xml      JUnit XML，包含逐 ETS 文件的 PASS
 可将 `DatabaseCheck-1.0.0.zip` 直接交给 IDE 的 `Install Plugin from Disk` 安装。
 只执行 `buildPlugin` 不代表已运行全量测试；请检查上述 `test` 的结果。
 `test` 已将根目录 `EtsAcceptance/` 声明为输入，修改 ETS 文件后会触发重新验证。
-如果构建停留在 `initializeIntelliJPlugin` 在线版本查询，按
-[ETS测试用例设计第2.3节](ETS测试用例设计.md)使用仅关闭该查询的 init 脚本，不跳过编译或测试。
+如果构建停留在 `initializeIntelliJPlugin` 在线版本查询，可将以下配置保存为插件目录外的
+`local.init.gradle`，仅关闭该查询，不跳过编译或测试：
+
+```groovy
+allprojects {
+    tasks.matching { it.name == 'initializeIntelliJPlugin' }.configureEach {
+        selfUpdateCheck.set(false)
+    }
+}
+```
+
+再执行 `gradle -I /path/to/local.init.gradle cleanTest test buildPlugin --no-daemon --console=plain`。
 
 ### 单项验证与调试
 
@@ -150,9 +150,12 @@ gradle cleanTest test --tests '*EtsAcceptanceInspectionTest.testRule1EtsCases' -
 gradle runIde --no-daemon --console=plain
 ```
 
-[ETS测试用例设计](ETS测试用例设计.md)按“用例名、测试点、预期结果”列出67个场景，
-同时说明 DevEco Studio 安装、启用检查和手工验收方法；[本地验证记录](ETS测试验证结果.md)
-区分插件自动化验证、基础语法检查以及未执行的 DevEco 手工安装/Hvigor应用编译。
+每个 ETS 文件的头部注释包含目标规则预期 `Expected`，以及全部10条规则启用时的
+`ExpectedAll` 告警分布。自动验证同时核对两种结果，不把目标规则条数当作全部告警总数。
+例如 `R04_MissingRollback_Warn`：只开Rule4时1条；开启Rule4和Rule9时2条；
+全部规则启用时还有Rule3的单操作事务告警，合计3条。
+`_Pass` 仅表示目标规则的正例，不承诺其余规则均无告警。
+ETS 文件用于静态检查，不运行应用；DevEco手工安装和Hvigor应用编译需要在目标环境单独验收。
 
 ### 安装插件
 
@@ -235,7 +238,7 @@ class RuleXXXInspection : BaseDatabaseInspection() {
 
 ### 测试文件说明
 
-项目包含完整的测试用例，位于 `src/test/kotlin/com/example/databasecheck/testdata/` 目录：
+项目包含完整的测试用例，位于 `src/test/` 源码树中的 `testdata` 子目录 目录：
 
 **测试文件结构**：
 - 每个规则都有独立的测试目录（Rule1/ ~ Rule14/）
@@ -245,7 +248,7 @@ class RuleXXXInspection : BaseDatabaseInspection() {
 
 **示例**：
 ```
-src/test/kotlin/com/example/databasecheck/testdata/
+testdata/（位于 src/test/ 源码树）
 ├── Rule1/
 │   ├── test-rule1-violations.js    # 反例：使用非RDB接口
 │   └── test-rule1-correct.js       # 正例：使用RDB接口
@@ -273,7 +276,7 @@ src/test/kotlin/com/example/databasecheck/testdata/
 ### 调试方法
 
 1. 使用 `gradle runIde` 启动调试实例
-2. 在调试实例中打开 `src/test/kotlin/com/example/databasecheck/testdata/` 目录下的测试文件
+2. 在调试实例中打开 `src/test/` 源码树中的 `testdata` 子目录 目录下的测试文件
 3. 观察 IDE 中是否正确显示警告标记（黄色波浪线）
 4. 使用 IDE 的 `Analyze` → `Inspect Code` 功能查看完整检查结果
 5. 对比正例和反例文件，验证检测的准确性

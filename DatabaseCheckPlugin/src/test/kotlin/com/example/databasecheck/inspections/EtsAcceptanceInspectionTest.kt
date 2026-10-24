@@ -17,6 +17,7 @@ package com.example.databasecheck.inspections
 
 import com.intellij.codeInspection.InspectionManager
 import com.intellij.codeInspection.ProblemsHolder
+import com.intellij.psi.PsiFile
 import com.intellij.testFramework.fixtures.LightPlatformCodeInsightFixtureTestCase
 import java.io.File
 
@@ -68,9 +69,32 @@ class EtsAcceptanceInspectionTest : LightPlatformCodeInsightFixtureTestCase() {
                 assertTrue("${input.name}: invalid diagnostic range $range",
                     range!!.startOffset >= 0 && range.startOffset < range.endOffset && range.endOffset <= source.length)
             }
+            assertAllRules(file, source, input.name)
             println("PASS ${input.name}: Rule$number expected=$expected actual=${holder.results.size}")
         }
     }
+
+    private fun assertAllRules(file: PsiFile, source: String, name: String) {
+        val encoded = metadata(source, "ExpectedAll")
+        val expected = if (encoded == "none") emptyMap() else encoded.split(',').associate {
+            val pair = it.split(':')
+            pair[0].toInt() to pair[1].toInt()
+        }
+        val actual = allRules().mapNotNull { rule ->
+            val holder = ProblemsHolder(InspectionManager.getInstance(project), file, false)
+            rule.buildVisitor(holder, false).visitFile(file)
+            if (holder.results.isEmpty()) null else rule.getRuleNumber() to holder.results.size
+        }.toMap()
+        assertEquals("$name: all enabled rules must match the documented warning distribution", expected, actual)
+        println("ALL-RULES $name: expected=$expected actual=$actual")
+    }
+
+    private fun allRules(): List<BaseDatabaseInspection> = listOf(
+        Rule1NonRdbInterfaceInspection(), Rule2DatabaseCopyInspection(), Rule3TransactionUsageInspection(),
+        Rule4TransactionCommitInspection(), Rule5TransactionNestingInspection(), Rule6DatabaseDeletionInspection(),
+        Rule7DatabasePermissionInspection(), Rule9DatabaseErrorHandlingInspection(),
+        Rule12PragmaRestrictionInspection(), Rule14DatabaseConfigConsistencyInspection()
+    )
 
     private fun metadata(source: String, key: String): String {
         val prefix = "// $key:"
