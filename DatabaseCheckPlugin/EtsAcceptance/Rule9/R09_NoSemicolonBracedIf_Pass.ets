@@ -13,17 +13,17 @@
  * limitations under the License.
  */
 
-// Case: R09_NoSemicolonSingleIf_Pass
+// Case: R09_NoSemicolonBracedIf_Pass
 // Rule: 9
 // Expected: 0
 // ExpectedAll: none
 // Message:
-// Point: 无花括号且无分号的末尾单语句仍识别已执行辅助函数
+// Point: 带大括号的分支省略末尾分号仍识别已执行辅助函数
 
 import relationalStore from '@ohos.data.relationalStore';
 import { BusinessError } from '@ohos.base';
 
-export async function R09_NoSemicolonSingleIf_Pass(
+export async function R09_NoSemicolonBracedIf_Pass(
   store: relationalStore.RdbStore,
   delay: () => Promise<void>,
   other: BusinessError
@@ -36,6 +36,8 @@ export async function R09_NoSemicolonSingleIf_Pass(
   try {
     await store.insert('users', values);
   } catch (error) {
-    if (error.code === 14800024) await repeatInsert()
+    if (error.code === 14800024) {
+      await repeatInsert()
+    }
   }
 }
