@@ -132,7 +132,10 @@ int32_t SqliteConnection::Rename(const RdbStoreConfig &config, const std::string
     const std::string &backupPath)
 {
     auto path = config.GetPath();
-    // delete aux files (not db) before rename
+    // Delete stale aux files before rename. In restore flow the old db is being replaced,
+    // so losing its wal/shm is acceptable. This avoids stale wal/shm lingering alongside
+    // the new db if delete is interrupted after rename success, which would cause SQLite to
+    // apply stale wal frames to the new db on next open.
     for (const auto &suffix : FILE_SUFFIXES) {
         if (suffix.suffix_[0] != '\0') {
             SqliteUtils::DeleteFile(path + suffix.suffix_);

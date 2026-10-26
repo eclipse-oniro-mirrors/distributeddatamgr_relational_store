@@ -20,8 +20,14 @@
 #include "logger.h"
 #include "task_executor.h"
 
+#include <cstdio>
+
 namespace OHOS {
 namespace NativeRdb {
+namespace {
+constexpr int64_t MOCK_RETRY_INTERVAL_MS = 3;
+constexpr uint64_t MOCK_RETRY_COUNT = 50;
+}
 using namespace OHOS::Rdb;
 
 SqlTimeoutGuard::SqlTimeoutGuard(int64_t timeoutMs)
@@ -54,8 +60,8 @@ void SqlTimeoutGuard::SetConnection(std::weak_ptr<Connection> conn)
             }
         },
         delay,
-        std::chrono::milliseconds(INTERRUPT_RETRY_INTERVAL_MS),
-        INTERRUPT_RETRY_COUNT);
+        std::chrono::milliseconds(MOCK_RETRY_INTERVAL_MS),
+        MOCK_RETRY_COUNT);
 }
 
 SqlTimeoutGuard::~SqlTimeoutGuard()

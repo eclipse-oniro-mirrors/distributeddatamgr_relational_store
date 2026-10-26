@@ -38,7 +38,7 @@ constexpr int LARGE_BLOB_SIZE = 8 * 1024 * 1024; // 8MB, ensures single-row INSE
 constexpr int LARGE_ROW_COUNT = 16000;
 constexpr int BATCH_ROW_COUNT = 10000;
 constexpr int EXECUTE_BATCH_ROW_COUNT = 10000;
-constexpr int64_t TEST_TIMEOUT_MS = 5;
+constexpr int64_t TEST_TIMEOUT_MS = 3;
 } // namespace
 
 class RdbTimeoutInterruptTest : public testing::Test {
@@ -194,7 +194,7 @@ HWTEST_F(RdbTimeoutInterruptTest, Insert_Timeout_001, TestSize.Level1)
     newRow.PutBlob("data", blobData);
 
     InsertConfig config;
-    config.timeoutMs = 50;
+    config.timeoutMs = 30;
     auto start = std::chrono::steady_clock::now();
     auto [errCode, rowId] =
         store_->Insert(tableName, newRow, config);
@@ -412,7 +412,7 @@ HWTEST_F(RdbTimeoutInterruptTest, Transaction_Insert_Timeout_001, TestSize.Level
     newRow.PutBlob("data", blobData);
 
     InsertConfig config;
-    config.timeoutMs = 50;
+    config.timeoutMs = 30;
     auto start = std::chrono::steady_clock::now();
     auto [errCode, rowId] = trans->Insert(tableName, newRow, config);
     auto end = std::chrono::steady_clock::now();
@@ -503,7 +503,7 @@ HWTEST_F(RdbTimeoutInterruptTest, Transaction_Update_Timeout_001, TestSize.Level
     predicates.EqualTo("name", "nonexistent"); // Force full table scan
 
     UpdateConfig config;
-    config.timeoutMs = 50;
+    config.timeoutMs = 30;
     auto start = std::chrono::steady_clock::now();
     auto [errCode, updateResult] =
         trans->Update(updateRow, predicates, config);

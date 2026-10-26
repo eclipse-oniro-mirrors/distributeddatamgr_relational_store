@@ -51,6 +51,7 @@
 #include "string_utils.h"
 #include "rdb_time_utils.h"
 #include "relational_store_client.h"
+#include "rdb_fault_hiview_reporter.h"
 
 namespace OHOS {
 namespace NativeRdb {
@@ -58,6 +59,7 @@ using namespace OHOS::Rdb;
 using namespace OHOS::DATABASE_UTILS;
 using DBStatus = DistributedDB::DBStatus;
 using RdbStatus = OHOS::DistributedRdb::RdbStatus;
+using Reportor = RdbFaultHiViewReporter;
 /* A continuous number must contain at least eight digits, because the employee ID has eight digits,
     and the mobile phone number has 11 digits. The UUID is longer */
 constexpr int32_t CONTINUOUS_DIGITS_MINI_SIZE = 6;
@@ -453,12 +455,18 @@ bool SqliteUtils::CopyFile(const std::string &srcFile, const std::string &destFi
     if (!dst) {
         LOG_WARN("write to destFile failed errno %{public}d %{public}s",
             errno, SqliteUtils::Anonymous(destFile).c_str());
+        Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_EX_FILE, errno,
+            "", "CopyFile write to destFile failed"));
     }
     src.close();
     dst.close();
     return true;
 }
 
+// This function only serves as an ENOSPC pre-check, not space reservation.
+// The subsequent CopyFile opens dest with O_TRUNC (ofstream default), which truncates
+// and releases the pre-allocated blocks. Do NOT relax CopyFile failure checks based on
+// the assumption that space is reserved here.
 bool SqliteUtils::AllocateFileSpace(const std::string &filePath, int64_t length, mode_t mode)
 {
     if (length <= 0) {
