@@ -698,7 +698,6 @@ HWTEST_F(RdbTimeoutInterruptTest, Update_Returning_Timeout_001, TestSize.Level1)
 
     UpdateConfig config;
     config.timeoutMs = 100;
-
     config.returning.columns = { "id" };
     auto start = std::chrono::steady_clock::now();
     auto [errCode, updateResult] =
@@ -733,7 +732,6 @@ HWTEST_F(RdbTimeoutInterruptTest, Delete_Returning_Timeout_001, TestSize.Level1)
 
     DeleteConfig config;
     config.timeoutMs = 100;
-
     config.returning.columns = { "id", "name" };
     auto start = std::chrono::steady_clock::now();
     auto [errCode, deleteResult] = store_->Delete(predicates, config);
@@ -819,7 +817,6 @@ HWTEST_F(RdbTimeoutInterruptTest, Transaction_Update_Returning_Timeout_001, Test
 
     UpdateConfig config;
     config.timeoutMs = 100;
-
     config.returning.columns = { "id" };
     auto start = std::chrono::steady_clock::now();
     auto [errCode, updateResult] =
@@ -862,7 +859,6 @@ HWTEST_F(RdbTimeoutInterruptTest, Transaction_Delete_Returning_Timeout_001, Test
 
     DeleteConfig config;
     config.timeoutMs = 100;
-
     config.returning.columns = { "id", "name" };
     auto start = std::chrono::steady_clock::now();
     auto [errCode, deleteResult] = trans->Delete(predicates, config);
