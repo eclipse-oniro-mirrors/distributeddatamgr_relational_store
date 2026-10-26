@@ -22,6 +22,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -96,7 +97,7 @@ protected:
                     ready->SetValue(true);
                 }
                 if (start->GetValue()) {
-                    (*results)[i] = store->RegisterDataChangeCallback(false);
+                    (*results)[i] = store->RegisterDataChangeCallback();
                 }
             });
         }
@@ -117,28 +118,44 @@ protected:
 
 /**
  * @tc.name: RegisterDataChangeCallback_001
- * @tc.desc: Concurrent registration subscribes once; forced registration still subscribes again
+ * @tc.desc: Concurrent callbacks deliver changes to the same fully initialized notifier
  * @tc.type: FUNC
  * @tc.require: issue2777
  */
 HWTEST_F(RdbStoreImplNotifierTest, RegisterDataChangeCallback_001, TestSize.Level2)
 {
-    ASSERT_FALSE(store_->config_.GetRegisterInfo(RegisterType::CLIENT_OBSERVER));
-    Connection::Notifier callback;
-    EXPECT_CALL(*connection_, SubscribeTableChanges(_)).Times(1).WillOnce(DoAll(SaveArg<0>(&callback), Return(E_OK)));
+    // Arrange: retain each callback so its target can be verified after registration.
+    std::mutex callbacksMutex;
+    std::vector<Connection::Notifier> callbacks;
+    EXPECT_CALL(*connection_, SubscribeTableChanges(_))
+        .Times(registrationThreads)
+        .WillRepeatedly([&](const Connection::Notifier &callback) {
+            std::lock_guard<std::mutex> lock(callbacksMutex);
+            callbacks.push_back(callback);
+            return E_OK;
+        });
+
+    // Act: release all registering threads together.
     for (auto result : RegisterConcurrently()) {
-        EXPECT_EQ(E_OK, result);
+        EXPECT_EQ(E_OK, result) << "Concurrent callback registration failed";
     }
-    EXPECT_TRUE(callback);
-    EXPECT_TRUE(store_->config_.GetRegisterInfo(RegisterType::CLIENT_OBSERVER));
-    EXPECT_TRUE(Mock::VerifyAndClearExpectations(connection_.get()));
 
-    EXPECT_CALL(*connection_, SubscribeTableChanges(_)).Times(0);
-    EXPECT_EQ(E_OK, store_->RegisterDataChangeCallback(false));
-    EXPECT_TRUE(Mock::VerifyAndClearExpectations(connection_.get()));
-
-    EXPECT_CALL(*connection_, SubscribeTableChanges(_)).Times(1).WillOnce(Return(E_OK));
-    EXPECT_EQ(E_OK, store_->RegisterDataChangeCallback());
+    // Assert: every captured callback must update the published notifier.
+    ASSERT_EQ(registrationThreads, callbacks.size()) << "A registering thread did not supply a callback";
+    auto notifier = store_->GetDelayNotifier();
+    ASSERT_NE(nullptr, notifier) << "The notifier was not published";
+    EXPECT_NE(nullptr, notifier->pool_) << "The notifier executor was not initialized";
+    EXPECT_TRUE(notifier->task_) << "The notification task was not initialized";
+    // Disable scheduling before invoking callbacks to isolate delivery from service notifications.
+    notifier->pool_.reset();
+    for (size_t i = 0; i < callbacks.size(); ++i) {
+        ASSERT_TRUE(callbacks[i]) << "Empty callback at index " << i;
+        auto table = "table_" + std::to_string(i);
+        DistributedRdb::RdbChangedData changes;
+        changes.tableData[table].isP2pSyncDataChange = true;
+        callbacks[i](changes);
+        EXPECT_EQ(1u, notifier->changedData_.tableData.count(table)) << "Callback target differs at index " << i;
+    }
 }
 
 /**
@@ -187,8 +204,7 @@ HWTEST_F(RdbStoreImplNotifierTest, GetDelayNotifier_001, TestSize.Level2)
     auto writer = pool_->AcquireConnection(false);
     ASSERT_NE(nullptr, writer);
     EXPECT_CALL(*connection_, SubscribeTableChanges(_)).Times(1).WillOnce(Return(E_OK));
-    std::packaged_task<int32_t()> registerCallback(
-        [store = store_]() { return store->RegisterDataChangeCallback(false); });
+    std::packaged_task<int32_t()> registerCallback([store = store_]() { return store->RegisterDataChangeCallback(); });
     auto registered = registerCallback.get_future();
     std::thread registering(std::move(registerCallback));
     EXPECT_TRUE(WaitForInitializationStart());

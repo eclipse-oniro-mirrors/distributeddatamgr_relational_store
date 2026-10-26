@@ -753,8 +753,8 @@ int RdbStoreImpl::SetDistributedTables(
         LOG_ERROR("Fail to set distributed tables, error=%{public}d.", errorCode);
         return errorCode;
     }
-    if (type == DistributedRdb::DISTRIBUTED_DEVICE) {
-        RegisterDataChangeCallback(false);
+    if (type == DistributedRdb::DISTRIBUTED_DEVICE && !config_.GetRegisterInfo(RegisterType::CLIENT_OBSERVER)) {
+        RegisterDataChangeCallback();
     }
     if (type != DistributedRdb::DISTRIBUTED_CLOUD) {
         return E_OK;
@@ -1403,12 +1403,8 @@ std::shared_ptr<DelayNotify> RdbStoreImpl::GetDelayNotifier() const
     return delayNotifier_;
 }
 
-int RdbStoreImpl::RegisterDataChangeCallback(bool force)
+int RdbStoreImpl::RegisterDataChangeCallback()
 {
-    std::lock_guard<std::mutex> lock(dataChangeMutex_);
-    if (!force && config_.GetRegisterInfo(RegisterType::CLIENT_OBSERVER)) {
-        return E_OK;
-    }
     InitDelayNotifier();
     auto connPool = GetPool();
     if (connPool == nullptr) {
