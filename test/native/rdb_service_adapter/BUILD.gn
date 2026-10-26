@@ -41,6 +41,7 @@ ohos_unittest("RdbManagerImplTest") {
     "unittest/rdb_manager_impl_test.cpp",
     "${relational_store_native_path}/rdb/src/rdb_manager.cpp",
     "${relational_store_native_path}/rdb/src/sqlite_utils.cpp",
+    "${relational_store_native_path}/rdb/src/hmfs_tag_util.cpp",
     "${relational_store_native_path}/rdb/src/global_resource.cpp",
     "${relational_store_native_path}/rdb_service_adapter/src/marshal_utils_impl.cpp",
     "${relational_store_native_path}/rdb_service_adapter/src/rdb_manager_impl.cpp",
@@ -99,6 +100,7 @@ ohos_unittest("ResultSetProxyTest") {
     "unittest/result_set_proxy_test.cpp",
     "unittest/result_set_proxy_adapter_test.cpp",
     "${relational_store_native_path}/rdb/src/sqlite_utils.cpp",
+    "${relational_store_native_path}/rdb/src/hmfs_tag_util.cpp",
     "${relational_store_native_path}/rdb/src/global_resource.cpp",
     "${relational_store_native_path}/rdb/src/rdb_manager.cpp",
     "${relational_store_native_path}/rdb_service_adapter/src/marshal_utils_impl.cpp",
@@ -167,6 +169,7 @@ ohos_unittest("RdbServiceProxyTest") {
   sources = [
     "unittest/rdb_service_proxy_test.cpp",
     "${relational_store_native_path}/rdb/src/sqlite_utils.cpp",
+    "${relational_store_native_path}/rdb/src/hmfs_tag_util.cpp",
     "${relational_store_native_path}/rdb/src/global_resource.cpp",
     "${relational_store_native_path}/rdb/src/rdb_manager.cpp",
     "${relational_store_native_path}/rdb_service_adapter/src/marshal_utils_impl.cpp",

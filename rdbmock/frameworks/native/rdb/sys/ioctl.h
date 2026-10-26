@@ -21,10 +21,26 @@ extern "C" {
 
 #define _IOC(a, b, c, d) (((a) << 30) | ((b) << 8) | (c) | ((d) << 16))
 #define _IOC_READ 2U
+#define _IOC_WRITE 1U
 #define _IOR(a, b, c) _IOC(_IOC_READ, (a), (b), sizeof(c))
+#define _IOW(a, b, c) _IOC(_IOC_WRITE, (a), (b), sizeof(c))
+#define _IOWR(a, b, c) _IOC(_IOC_READ | _IOC_WRITE, (a), (b), sizeof(c))
 
-static int ioctl(int fd, int req, unsigned int *flags)
+// Open flags not defined by the Windows headers; the values are irrelevant
+// because every ioctl call on the Windows host is a no-op.
+#ifndef O_DIRECTORY
+#define O_DIRECTORY 0
+#endif
+#ifndef O_CLOEXEC
+#define O_CLOEXEC 0
+#endif
+
+// Mimics the POSIX ioctl name so the shared sources compile unchanged; the
+// variadic form accepts any request argument type and always succeeds.
+static int ioctl(int fd, int req, ...) /* NOLINT */
 {
+    (void)fd;
+    (void)req;
     return 0;
 }
 

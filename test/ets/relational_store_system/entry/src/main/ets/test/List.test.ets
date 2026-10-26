@@ -17,10 +17,12 @@ import UpdateDistributedInfo from './UpdateDistributedInfo.test';
 import CleanDeviceDirtyData from './CleanDeviceDirtyData.test';
 import RequestFullDataDonation from './RequestFullDataDonation.test';
 import AssetExtensionTest from './AssetExtension.test';
+import DumpStackConfigTest from './DumpStackConfig.test';
 export default function testsuite() {
   RetainDeviceData();
   UpdateDistributedInfo();
   CleanDeviceDirtyData();
   RequestFullDataDonation();
   AssetExtensionTest();
+  DumpStackConfigTest();
 }

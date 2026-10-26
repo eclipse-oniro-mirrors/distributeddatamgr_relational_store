@@ -60,6 +60,7 @@
 #include "relational_store_client.h"
 #include "relational_store_manager.h"
 #include "security_policy.h"
+#include "hmfs_tag_util.h"
 #include "sqlite_global_config.h"
 #include "sqlite_sql_builder.h"
 #include "sqlite_utils.h"
@@ -159,6 +160,7 @@ void RdbStoreImpl::InitSyncerParam(const RdbStoreConfig &config, bool created)
     syncerParam_.subUser_ = config.GetSubUser();
     syncerParam_.isLocalOnly_ = config.IsLocalOnly();
     syncerParam_.replicaPath_ = config.GetReplicaPath();
+    syncerParam_.dumpStackOnFileDel_ = config.IsDumpStackOnFileDelEnabled();
     syncerParam_.dfxInfo_.lastOpenTime_ = RdbTimeUtils::GetCurSysTimeWithMs();
     std::string serverPath = config.GetServerPath();
     if (!serverPath.empty() && (serverPath.find(syncerParam_.bundleName_) != std::string::npos) &&
@@ -1682,9 +1684,11 @@ int32_t RdbStoreImpl::Init(int version, RdbOpenCallback &openCallback, bool isNe
         return initStatus_;
     }
     isSilentAccessible_ = isSilentAccessible;
-    // If it is a distributeddata request, never need ACL
+    // If it is a distributeddata request, never need ACL. Dump-stack-on-file-deletion
+    // reuses the existing ACL path (the service tags db/wal/shm like distributed sync).
     isNeedSetAcl = RdbMgr::GetInstance().IsProxy() &&
-                   (isNeedSetAcl || SqliteUtils::HasAccessAcl(config_.GetPath(), SERVICE_GID) ||
+                   (isNeedSetAcl || config_.IsDumpStackOnFileDelEnabled() ||
+                    SqliteUtils::HasAccessAcl(config_.GetPath(), SERVICE_GID) ||
                     SqliteUtils::HasAccessAcl(SqliteUtils::GetSlavePath(config_), SERVICE_GID));
     std::lock_guard<std::mutex> lock(initMutex_);
     if (initStatus_ != -1) {
@@ -2656,6 +2660,7 @@ int RdbStoreImpl::AttachInner(const RdbStoreConfig &config, const std::string &a
     }
 
     if (!isMemoryRdb_ && conn->GetJournalMode() == static_cast<int32_t>(JournalMode::MODE_WAL)) {
+        HmfsTagUtil::ClearDbFileTags(path_);
         // close first to prevent the connection from being put back.
         pool->CloseAllConnections();
         conn = nullptr;
@@ -2783,6 +2788,14 @@ std::pair<int32_t, int32_t> RdbStoreImpl::Detach(const std::string &attachName, 
         connection = nullptr;
         readers.clear();
         errCode = pool->EnableWal();
+        if (errCode == E_OK && config_.IsDumpStackOnFileDelEnabled()) {
+            // AC-2.5: wal/shm files are re-created in WAL mode; notify the service to
+            // re-tag db/wal/shm (idempotent, BR-6). Failures degrade silently (BR-5).
+            auto [err, service] = RdbMgr::GetInstance().GetRdbService(syncerParam_);
+            if (service != nullptr) {
+                service->Enable(syncerParam_);
+            }
+        }
     }
     return { errCode, 0 };
 }

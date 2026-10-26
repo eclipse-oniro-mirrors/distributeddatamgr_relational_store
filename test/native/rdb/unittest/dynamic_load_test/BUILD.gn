@@ -106,6 +106,7 @@ ohos_unittest("DynamicLoadTest") {
     "${relational_store_native_path}/rdb/src/sqlite_sql_builder.cpp",
     "${relational_store_native_path}/rdb/src/sqlite_statement.cpp",
     "${relational_store_native_path}/rdb/src/sqlite_utils.cpp",
+    "${relational_store_native_path}/rdb/src/hmfs_tag_util.cpp",
     "${relational_store_native_path}/rdb/src/step_result_set.cpp",
     "${relational_store_native_path}/rdb/src/string_utils.cpp",
     "${relational_store_native_path}/rdb/src/suspender.cpp",

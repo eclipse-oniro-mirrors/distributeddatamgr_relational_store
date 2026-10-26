@@ -62,6 +62,7 @@ struct RdbConfig {
     bool isSearchable = false;
     bool isAutoClean = true;
     bool isAutoCleanDevice = true;
+    bool dumpStackOnFileDel = false;
     bool vector = false;
     bool allowRebuild = false;
     bool isReadOnly = false;
