@@ -26,7 +26,7 @@ namespace NativeRdb {
  * @brief Utility of the HMFS key-file dump-stack tag (deletion dump-stack for db/wal/shm).
  *
  * The tag state is owned by the HMFS file system (inode level); this utility only forwards
- * set/get/clear requests through HMFS ioctl commands. All methods degrade silently: on
+ * get/clear requests through HMFS ioctl commands. All methods degrade silently: on
  * failure a negative value is returned and callers must not block database business flows.
  */
 class HmfsTagUtil {
@@ -34,14 +34,6 @@ public:
     // Return contract of the query API: FLAG_SET (1) means the dump-stack tag is set;
     // 0 means not set; a negative value means failure (silent degrade).
     static constexpr int FLAG_SET = 1; /* NOLINT */
-
-    /**
-     * @brief Sets the dump-stack tag of the file. The path is split into the parent
-     * directory and the file name internally, and the directory fd is opened for the
-     * HMFS key-file ioctl.
-     * @return 0 on success; a negative value on failure.
-     */
-    static int SetKeyFileFlag(const std::string &path);
 
     /**
      * @brief Queries the dump-stack tag of the file.
@@ -63,7 +55,7 @@ public:
     static void ClearDbFileTags(const std::string &dbPath);
 
 private:
-    static constexpr int FLAG_UNSET = 0; /* NOLINT */
+    static constexpr int FLAG_UNSET = 0;                       /* NOLINT */
     static constexpr int MAX_FILE_NAME_LEN = 255; /* NOLINT */ // bytes, excluding the terminator
 
     /**
@@ -72,13 +64,6 @@ private:
      * MAX_FILE_NAME_LEN) is allowed, which prevents directory traversal.
      */
     static bool IsValidFileName(const std::string &fileName);
-
-    /**
-     * @brief Sets the dump-stack tag of the file. dirFd is the fd of the directory
-     * that directly contains fileName.
-     * @return 0 on success; a negative value on failure.
-     */
-    static int SetKeyFileFlag(int dirFd, const std::string &fileName);
 
     /**
      * @brief Queries the dump-stack tag of the file.

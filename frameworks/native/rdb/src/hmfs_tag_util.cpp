@@ -37,14 +37,13 @@ constexpr unsigned long HMFS_IOCTL_MAGIC = 0xF5;
 
 // Mirrors the HMFS kernel uapi contract: fd is the fd of the file's parent directory;
 // filename is the file name within that directory (at most 255 bytes); flags is reserved
-// and must be 0 when SETFLAGS/CLEARFLAGS is invoked, and is the output of GETFLAGS
+// and must be 0 when CLEARFLAGS is invoked, and is the output of GETFLAGS
 // (1 means the tag is set).
 struct HmfsKeyFileArgs {
     char filename[256];
     uint32_t flags;
 };
 
-constexpr unsigned long HMFS_IOC_KEY_FILE_SETFLAGS = _IOW(HMFS_IOCTL_MAGIC, 72, HmfsKeyFileArgs);
 constexpr unsigned long HMFS_IOC_KEY_FILE_GETFLAGS = _IOWR(HMFS_IOCTL_MAGIC, 73, HmfsKeyFileArgs);
 constexpr unsigned long HMFS_IOC_KEY_FILE_CLEARFLAGS = _IOW(HMFS_IOCTL_MAGIC, 74, HmfsKeyFileArgs);
 } // namespace
@@ -52,8 +51,8 @@ constexpr unsigned long HMFS_IOC_KEY_FILE_CLEARFLAGS = _IOW(HMFS_IOCTL_MAGIC, 74
 int HmfsTagUtil::ExecuteIoctl(int dirFd, unsigned long cmd, const std::string &fileName, uint32_t *outFlags)
 {
     if (!IsValidFileName(fileName)) {
-        LOG_WARN("invalid file name for hmfs key file ioctl, name %{public}s",
-            SqliteUtils::Anonymous(fileName).c_str());
+        LOG_WARN(
+            "invalid file name for hmfs key file ioctl, name %{public}s", SqliteUtils::Anonymous(fileName).c_str());
         return -EINVAL;
     }
     HmfsKeyFileArgs args = { { 0 }, 0 };
@@ -65,7 +64,7 @@ int HmfsTagUtil::ExecuteIoctl(int dirFd, unsigned long cmd, const std::string &f
     int ret = ioctl(dirFd, cmd, &args);
     if (ret != 0) {
         // GETFLAGS failures are expected on non-HMFS file systems (silent skip); only
-        // SET/CLEAR failures indicate a tagging problem worth logging.
+        // CLEAR failures indicate a tagging problem worth logging.
         if (cmd != HMFS_IOC_KEY_FILE_GETFLAGS) {
             LOG_WARN("hmfs key file ioctl failed, errno %{public}d, name %{public}s", errno,
                 SqliteUtils::Anonymous(fileName).c_str());
@@ -92,8 +91,8 @@ int HmfsTagUtil::ExecuteByPath(unsigned long cmd, const std::string &path, uint3
     std::string fileName = path.substr(pos + 1);
     int dirFd = open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (dirFd < 0) {
-        LOG_WARN("open directory failed, errno %{public}d, path %{public}s", errno,
-            SqliteUtils::Anonymous(path).c_str());
+        LOG_WARN(
+            "open directory failed, errno %{public}d, path %{public}s", errno, SqliteUtils::Anonymous(path).c_str());
         return (errno != 0) ? -errno : -EIO;
     }
     uint64_t tag = fdsan_create_owner_tag(FDSAN_OWNER_TYPE_FILE, 0xD001650);
@@ -114,11 +113,6 @@ bool HmfsTagUtil::IsValidFileName(const std::string &fileName)
     return fileName.find('/') == std::string::npos;
 }
 
-int HmfsTagUtil::SetKeyFileFlag(int dirFd, const std::string &fileName)
-{
-    return ExecuteIoctl(dirFd, HMFS_IOC_KEY_FILE_SETFLAGS, fileName, nullptr);
-}
-
 int HmfsTagUtil::GetKeyFileFlag(int dirFd, const std::string &fileName)
 {
     uint32_t flags = 0;
@@ -132,11 +126,6 @@ int HmfsTagUtil::GetKeyFileFlag(int dirFd, const std::string &fileName)
 int HmfsTagUtil::ClearKeyFileFlag(int dirFd, const std::string &fileName)
 {
     return ExecuteIoctl(dirFd, HMFS_IOC_KEY_FILE_CLEARFLAGS, fileName, nullptr);
-}
-
-int HmfsTagUtil::SetKeyFileFlag(const std::string &path)
-{
-    return ExecuteByPath(HMFS_IOC_KEY_FILE_SETFLAGS, path, nullptr);
 }
 
 int HmfsTagUtil::GetKeyFileFlag(const std::string &path)
@@ -166,8 +155,8 @@ void HmfsTagUtil::ClearDbFileTags(const std::string &dbPath)
             continue;
         }
         if (ClearKeyFileFlag(file) != 0) {
-            LOG_WARN("clear dump stack tag for mode switch fail, file %{public}s",
-                SqliteUtils::Anonymous(file).c_str());
+            LOG_WARN(
+                "clear dump stack tag for mode switch fail, file %{public}s", SqliteUtils::Anonymous(file).c_str());
         }
     }
 }

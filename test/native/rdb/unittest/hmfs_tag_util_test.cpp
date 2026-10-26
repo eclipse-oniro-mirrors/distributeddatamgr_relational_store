@@ -15,9 +15,8 @@
 
 #include "hmfs_tag_util.h"
 
-#include <gtest/gtest.h>
-
 #include <fcntl.h>
+#include <gtest/gtest.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -63,7 +62,7 @@ HWTEST_F(HmfsTagUtilTest, HmfsTagUtil_IsValidFileName_001, TestSize.Level1)
 
 /**
  * @tc.name: HmfsTagUtil_Degrade_001
- * @tc.desc: test HmfsTagUtil set/get/clear degrade silently on non-HMFS file systems
+ * @tc.desc: test HmfsTagUtil get/clear degrade silently on non-HMFS file systems
  * @tc.type: FUNC
  */
 HWTEST_F(HmfsTagUtilTest, HmfsTagUtil_Degrade_001, TestSize.Level1)
@@ -77,7 +76,6 @@ HWTEST_F(HmfsTagUtilTest, HmfsTagUtil_Degrade_001, TestSize.Level1)
     // On non-HMFS file systems (unit-test environments such as ext4/tmpfs), the ioctl
     // is not supported and a negative value must be returned without crashing.
     // Behavior on real HMFS devices (0 / FLAG_SET) is validated by device integration.
-    EXPECT_LT(HmfsTagUtil::SetKeyFileFlag(filePath), 0);
     EXPECT_LT(HmfsTagUtil::GetKeyFileFlag(filePath), 0);
     EXPECT_LT(HmfsTagUtil::ClearKeyFileFlag(filePath), 0);
 
@@ -92,10 +90,8 @@ HWTEST_F(HmfsTagUtilTest, HmfsTagUtil_Degrade_001, TestSize.Level1)
  */
 HWTEST_F(HmfsTagUtilTest, HmfsTagUtil_InvalidPath_001, TestSize.Level1)
 {
-    EXPECT_LT(HmfsTagUtil::SetKeyFileFlag(""), 0);
     EXPECT_LT(HmfsTagUtil::GetKeyFileFlag(""), 0);
     EXPECT_LT(HmfsTagUtil::ClearKeyFileFlag(""), 0);
-    EXPECT_LT(HmfsTagUtil::SetKeyFileFlag("noSlash.db"), 0);
     EXPECT_LT(HmfsTagUtil::GetKeyFileFlag("/"), 0);
     EXPECT_LT(HmfsTagUtil::ClearKeyFileFlag("/trailingSlash/"), 0);
 }
@@ -112,12 +108,10 @@ HWTEST_F(HmfsTagUtilTest, HmfsTagUtil_DirFd_001, TestSize.Level1)
     ASSERT_GE(dirFd, 0);
 
     // Invalid file names must be rejected before ioctl.
-    EXPECT_LT(HmfsTagUtil::SetKeyFileFlag(dirFd, ""), 0);
     EXPECT_LT(HmfsTagUtil::GetKeyFileFlag(dirFd, "../escape.db"), 0);
     EXPECT_LT(HmfsTagUtil::ClearKeyFileFlag(dirFd, std::string(300, 'a')), 0);
 
     // Valid file name on a non-HMFS file system degrades with a negative return.
-    EXPECT_LT(HmfsTagUtil::SetKeyFileFlag(dirFd, "valid.db"), 0);
     EXPECT_LT(HmfsTagUtil::GetKeyFileFlag(dirFd, "valid.db"), 0);
     EXPECT_LT(HmfsTagUtil::ClearKeyFileFlag(dirFd, "valid.db"), 0);
 
