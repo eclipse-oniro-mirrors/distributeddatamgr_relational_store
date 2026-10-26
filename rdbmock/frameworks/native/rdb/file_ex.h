@@ -19,7 +19,8 @@
 #include <string>
 #include <vector>
 
-static inline bool SaveBufferToFile(const std::string &filePath, const std::vector<char> &content, bool truncated = true)
+static inline bool SaveBufferToFile(
+    const std::string &filePath, const std::vector<char> &content, bool truncated = true)
 {
     return true;
 }
