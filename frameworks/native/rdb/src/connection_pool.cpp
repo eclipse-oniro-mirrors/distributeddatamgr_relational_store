@@ -665,7 +665,7 @@ bool ConnPool::TryRestoreByRename(const std::string &backupPath, const std::stri
     if (!SqliteUtils::AllocateFileSpace(tmpPath, backupSize, oldMode)) {
         return false;
     }
-    if (!SqliteUtils::CopyFile(backupPath, tmpPath, config_.GetBundleName())) {
+    if (!SqliteUtils::CopyFile(backupPath, tmpPath)) {
         return false;
     }
     // Checkpoint WAL into the main db file before deleting WAL, so that deleting WAL won't lose data.
@@ -690,7 +690,7 @@ int ConnPool::RestoreByCopy(const std::string &newPath, const std::string &backu
         config.SetPath(newPath);
         Connection::Delete(config);
     }
-    bool copyRet = SqliteUtils::CopyFile(backupPath, newPath, config_.GetBundleName());
+    bool copyRet = SqliteUtils::CopyFile(backupPath, newPath);
     int errCode = ReopenRestoredDb();
     return copyRet ? errCode : E_ERROR;
 }

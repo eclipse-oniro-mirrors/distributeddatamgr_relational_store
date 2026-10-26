@@ -433,8 +433,7 @@ bool SqliteUtils::DeleteFiles(const std::vector<std::string> &filePaths)
     return true;
 }
 
-bool SqliteUtils::CopyFile(const std::string &srcFile, const std::string &destFile,
-    const std::string &bundleName)
+bool SqliteUtils::CopyFile(const std::string &srcFile, const std::string &destFile)
 {
     std::ifstream src(srcFile.c_str(), std::ios::binary);
     if (!src.is_open()) {
@@ -452,7 +451,7 @@ bool SqliteUtils::CopyFile(const std::string &srcFile, const std::string &destFi
         LOG_WARN("write to destFile failed errno %{public}d %{public}s",
             errno, SqliteUtils::Anonymous(destFile).c_str());
         Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_EX_FILE, errno,
-            bundleName, "CopyFile write to destFile failed"));
+            "", "CopyFile write to destFile failed"));
     }
     src.close();
     dst.close();
