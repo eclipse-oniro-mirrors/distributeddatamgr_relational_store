@@ -189,6 +189,7 @@ struct CloudSyncConfig {
     int32_t mode = 0;
     bool isDownloadOnly = false;
     bool isEnablePredicate = false;
+    bool isFullSync = false;
     std::shared_ptr<NativeRdb::RdbPredicates> predicates = nullptr;
 };
 

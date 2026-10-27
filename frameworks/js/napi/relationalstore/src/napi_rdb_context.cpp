@@ -200,13 +200,34 @@ int ParseCloudSyncCallback(const napi_env env, const napi_value arg, std::shared
     return OK;
 }
 
+static int ParseSystemApiBoolField(const napi_env env, const napi_value arg, const char *fieldName,
+    const std::shared_ptr<RdbStoreContext> &context, bool &output)
+{
+    napi_value value = nullptr;
+    napi_status status = napi_get_named_property(env, arg, fieldName, &value);
+    if (status != napi_ok) {
+        return ERR;
+    }
+    if (JSUtils::IsNull(env, value)) {
+        return OK;
+    }
+    RdbStoreProxy *obj = reinterpret_cast<RdbStoreProxy *>(context->boundObj);
+    if (obj == nullptr) {
+        return ERR;
+    }
+    if (!obj->IsSystemAppCalled()) {
+        return OK;
+    }
+    int32_t ret = JSUtils::Convert2Value(env, value, output);
+    return ret == JSUtils::OK ? OK : ERR;
+}
+
 int ParseCloudSyncConfig(const napi_env env, const napi_value arg, std::shared_ptr<RdbStoreContext> context)
 {
     napi_valuetype type = napi_undefined;
     napi_typeof(env, arg, &type);
     CHECK_RETURN_SET(type == napi_object, std::make_shared<ParamError>("config", "a CloudSyncConfig object."));
 
-    // 解析 mode（必填）
     napi_value modeValue = nullptr;
     napi_status status = napi_get_named_property(env, arg, "mode", &modeValue);
     CHECK_RETURN_SET(status == napi_ok, std::make_shared<ParamError>("mode", "a SyncMode."));
@@ -218,21 +239,10 @@ int ParseCloudSyncConfig(const napi_env env, const napi_value arg, std::shared_p
     CHECK_RETURN_SET(checked, std::make_shared<ParamError>("mode", "a SyncMode of cloud."));
     context->cloudSyncConfig.mode = mode;
     context->syncMode = mode;
-    // 解析 downloadOnly（系统接口，需要判断是否为系统应用）
-    napi_value downloadOnlyValue = nullptr;
-    status = napi_get_named_property(env, arg, "downloadOnly", &downloadOnlyValue);
-    if (status == napi_ok && !JSUtils::IsNull(env, downloadOnlyValue)) {
-        RdbStoreProxy *obj = reinterpret_cast<RdbStoreProxy *>(context->boundObj);
-        if (obj != nullptr && obj->IsSystemAppCalled()) {
-            ret = JSUtils::Convert2Value(env, downloadOnlyValue, context->cloudSyncConfig.isDownloadOnly);
-            if (ret != JSUtils::OK) {
-                return ERR;
-            }
-        }
-        // 非系统应用：不解析，使用默认值 false，不抛异常
-    }
 
-    // 解析 enablePredicate（可选）
+    CHECK_RETURN_ERR(ParseSystemApiBoolField(env, arg, "downloadOnly", context,
+        context->cloudSyncConfig.isDownloadOnly) == OK);
+
     napi_value enablePredicateValue = nullptr;
     status = napi_get_named_property(env, arg, "enablePredicate", &enablePredicateValue);
     if (status == napi_ok && !JSUtils::IsNull(env, enablePredicateValue)) {
@@ -240,7 +250,9 @@ int ParseCloudSyncConfig(const napi_env env, const napi_value arg, std::shared_p
         CHECK_RETURN_SET(ret == JSUtils::OK, std::make_shared<ParamError>("enablePredicate", "a boolean."));
     }
 
-    // 解析 predicates（可选）
+    CHECK_RETURN_ERR(ParseSystemApiBoolField(env, arg, "fullSync", context,
+        context->cloudSyncConfig.isFullSync) == OK);
+
     napi_value predicatesValue = nullptr;
     status = napi_get_named_property(env, arg, "predicate", &predicatesValue);
     if (status == napi_ok && !JSUtils::IsNull(env, predicatesValue)) {

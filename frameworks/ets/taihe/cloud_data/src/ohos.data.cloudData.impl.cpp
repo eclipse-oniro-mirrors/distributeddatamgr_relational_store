@@ -476,13 +476,14 @@ void ConfigImpl::CloudSyncWithConfigImpl(::ohos::data::cloudData::BundleInfo bun
     }
     bool downloadOnly = config.downloadOnly.has_value() ? config.downloadOnly.value() : false;
     bool enablePredicate = config.enablePredicate.has_value() ? config.enablePredicate.value() : false;
+    bool fullSync = config.fullSync.has_value() ? config.fullSync.value() : false;
     if (enablePredicate && !config.predicates.has_value()) {
         ThrowAniError(CloudService::Status::INVALID_ARGUMENT_V20,
             "predicates cannot be null when enablePredicate is true.");
         return;
     }
 
-    auto work = [bundleInfo, mode, downloadOnly, progress](std::shared_ptr<CloudService> proxy) {
+    auto work = [bundleInfo, mode, downloadOnly, fullSync, progress](std::shared_ptr<CloudService> proxy) {
         auto async = [progress](const OHOS::DistributedRdb::Details &details) {
             if (details.empty()) {
                 LOG_ERROR("details is nullptr");
@@ -493,6 +494,7 @@ void ConfigImpl::CloudSyncWithConfigImpl(::ohos::data::cloudData::BundleInfo bun
         CloudService::Option option;
         option.syncMode = ani_rdbutils::SyncModeToNative(mode);
         option.isDownloadOnly = downloadOnly;
+        option.isFullSync = fullSync;
         option.seqNum = GetSeqNum();
         auto status = proxy->CloudSync(
             std::string(bundleInfo.bundleName),

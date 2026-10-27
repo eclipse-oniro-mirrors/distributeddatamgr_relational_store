@@ -110,6 +110,7 @@ public:
         int32_t syncMode = 0;
         uint32_t seqNum = 0;
         bool isDownloadOnly = false;
+        bool isFullSync = false;
     };
 
     static const int INVALID_USER_ID = -1;

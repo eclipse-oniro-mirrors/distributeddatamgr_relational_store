@@ -699,6 +699,64 @@ HWTEST_F(CloudDataTest, CloudSync004, TestSize.Level1)
 }
 
 /* *
+ * @tc.name: CloudSyncFullSync001
+ * @tc.desc: Test CloudSync with isFullSync=true in Option
+ * @tc.type: FUNC
+ * @tc.require:
+ */
+HWTEST_F(CloudDataTest, CloudSyncFullSync001, TestSize.Level1)
+{
+    AllocSystemHapToken(g_systemPolicy);
+    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
+    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+    auto progress = [](DistributedRdb::Details &&) {};
+    CloudService::Option option;
+    option.syncMode = DistributedRdb::TIME_FIRST;
+    option.seqNum = 200;
+    option.isDownloadOnly = false;
+    option.isFullSync = true;
+    auto status = proxy->CloudSync(TEST_BUNDLE_NAME, TEST_STORE_ID, option, progress);
+    EXPECT_EQ(status, CloudService::SUCCESS);
+    LOG_INFO("CloudSyncFullSync001 test end.");
+}
+
+/* *
+ * @tc.name: CloudSyncFullSync002
+ * @tc.desc: Test CloudSync with isFullSync=false (default) in Option
+ * @tc.type: FUNC
+ * @tc.require:
+ */
+HWTEST_F(CloudDataTest, CloudSyncFullSync002, TestSize.Level1)
+{
+    AllocSystemHapToken(g_systemPolicy);
+    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
+    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+    auto progress = [](DistributedRdb::Details &&) {};
+    CloudService::Option option;
+    option.syncMode = DistributedRdb::TIME_FIRST;
+    option.seqNum = 201;
+    option.isFullSync = false;
+    auto status = proxy->CloudSync(TEST_BUNDLE_NAME, TEST_STORE_ID, option, progress);
+    EXPECT_EQ(status, CloudService::SUCCESS);
+    LOG_INFO("CloudSyncFullSync002 test end.");
+}
+
+/* *
+ * @tc.name: CloudSyncConfigFullSync001
+ * @tc.desc: Test CloudSyncConfig has isFullSync field with default false
+ * @tc.type: FUNC
+ * @tc.require:
+ */
+HWTEST_F(CloudDataTest, CloudSyncConfigFullSync001, TestSize.Level1)
+{
+    DistributedRdb::CloudSyncConfig config;
+    EXPECT_FALSE(config.isFullSync);
+    config.isFullSync = true;
+    EXPECT_TRUE(config.isFullSync);
+    LOG_INFO("CloudSyncConfigFullSync001 test end.");
+}
+
+/* *
  * @tc.name: CloudSync005
  * @tc.desc: Test the permissions of the CloudSync API
  * @tc.type: FUNC

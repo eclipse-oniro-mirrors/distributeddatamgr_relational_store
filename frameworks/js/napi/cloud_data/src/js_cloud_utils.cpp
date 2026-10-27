@@ -220,6 +220,7 @@ int32_t Convert2Value(napi_env env, napi_value input, CloudSyncConfig &output)
     NAPI_CALL_RETURN_ERR(GetNamedProperty(env, input, "downloadOnly", output.isDownloadOnly, true), napi_invalid_arg);
     NAPI_CALL_RETURN_ERR(GetNamedProperty(env, input, "enablePredicate", output.isEnablePredicate, true),
         napi_invalid_arg);
+    NAPI_CALL_RETURN_ERR(GetNamedProperty(env, input, "fullSync", output.isFullSync, true), napi_invalid_arg);
 
     napi_value predicatesValue = nullptr;
     status = napi_get_named_property(env, input, "predicates", &predicatesValue);
