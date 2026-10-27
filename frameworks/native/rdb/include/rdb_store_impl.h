@@ -287,6 +287,7 @@ private:
     int UnSubscribeRemote(const SubscribeOption &option, std::shared_ptr<RdbStoreObserver> observer);
     int RegisterDataChangeCallback();
     void InitDelayNotifier();
+    std::shared_ptr<DelayNotify> GetDelayNotifier() const;
     void TryDump(int32_t code, const char *dumpHeader);
     static std::pair<int32_t, std::shared_ptr<Connection>> CreateWritableConn(const RdbStoreConfig &config,
         const std::weak_ptr<ConnectionPool> &pool = {});
@@ -379,6 +380,7 @@ private:
     const std::unique_ptr<RdbAuditLogger> auditLoggerHolder_;
     RdbAuditLogger& auditLogger_;
     std::shared_ptr<ConnectionPool> connectionPool_ = nullptr;
+    mutable std::mutex delayNotifierMutex_;
     std::shared_ptr<DelayNotify> delayNotifier_ = nullptr;
     std::shared_ptr<CloudTables> cloudInfo_ = std::make_shared<CloudTables>();
     RdbObsManager obsManger_;
