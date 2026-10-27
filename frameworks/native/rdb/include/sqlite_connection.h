@@ -184,6 +184,7 @@ private:
     void DeleteCorruptSlave(const std::string &path);
     static std::pair<int32_t, std::shared_ptr<SqliteConnection>> InnerCreate(
         const RdbStoreConfig &config, bool isWrite, bool isReusableReplica = false);
+    static int32_t InnerRepair(const RdbStoreConfig &config);
     static void BinlogOnErrFunc(void *pCtx, int errNo, char *errMsg, const char *dbPath);
     static void BinlogCloseHandle(sqlite3 *dbHandle);
     static int CheckPathExist(const std::string &dbPath);
