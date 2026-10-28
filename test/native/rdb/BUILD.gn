@@ -365,6 +365,7 @@ ohos_unittest("NativeRdbTest") {
     "unittest/dump_stack_acl_test.cpp",
     "unittest/dump_stack_attach_test.cpp",
     "unittest/dump_stack_delete_test.cpp",
+    "unittest/dump_stack_rename_test.cpp",
     "unittest/dump_stack_restore_test.cpp",
     "unittest/hmfs_tag_util_test.cpp",
     "unittest/raw_data_parser_test.cpp",

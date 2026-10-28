@@ -110,3 +110,48 @@ HWTEST_F(DumpStackAttachTest, DumpStackAttach_ModeSwitchWithFlag_001, TestSize.L
     RdbHelper::DeleteRdbStore(mainPath);
     RdbHelper::DeleteRdbStore(attachedPath);
 }
+
+/**
+ * @tc.name: DumpStackAttach_ModeSwitchWithoutFlag_002
+ * @tc.desc: test Attach/Detach mode switch on a store without the dump-stack flag keeps legacy behavior
+ * @tc.type: FUNC
+ */
+HWTEST_F(DumpStackAttachTest, DumpStackAttach_ModeSwitchWithoutFlag_002, TestSize.Level1)
+{
+    const std::string mainPath = std::string(TEST_DIR) + "attach_main_noflag.db";
+    const std::string attachedPath = std::string(TEST_DIR) + "attach_target_noflag.db";
+    RdbStoreConfig mainConfig(mainPath);
+    DumpStackAttachCallback helper;
+    int errCode = E_ERROR;
+    std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(mainConfig, 1, helper, errCode);
+    ASSERT_NE(store, nullptr);
+    EXPECT_EQ(errCode, E_OK);
+
+    // Prepare the attached database without the flag.
+    RdbStoreConfig attachedConfig(attachedPath);
+    std::shared_ptr<RdbStore> attachedStore = RdbHelper::GetRdbStore(attachedConfig, 1, helper, errCode);
+    ASSERT_NE(attachedStore, nullptr);
+    EXPECT_EQ(errCode, E_OK);
+    attachedStore = nullptr;
+    RdbHelper::ClearCache();
+
+    // Regression: without the flag the mode switch path performs no tag clearing and
+    // the Attach/Detach round-trip must behave exactly as before the feature was introduced.
+    auto [attachErr, count] = store->Attach(attachedConfig, ATTACH_NAME);
+    EXPECT_EQ(attachErr, E_OK);
+    EXPECT_EQ(count, 1);
+
+    auto [detachErr, detachCount] = store->Detach(ATTACH_NAME);
+    EXPECT_EQ(detachErr, E_OK);
+    EXPECT_EQ(detachCount, 0);
+
+    int64_t id = 0;
+    ValuesBucket values;
+    values.PutInt("id", 1);
+    values.PutString("name", std::string("after_attach_noflag"));
+    EXPECT_EQ(store->Insert(id, "test", values), E_OK);
+
+    store = nullptr;
+    RdbHelper::DeleteRdbStore(mainPath);
+    RdbHelper::DeleteRdbStore(attachedPath);
+}
