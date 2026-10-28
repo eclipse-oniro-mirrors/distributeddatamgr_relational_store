@@ -91,7 +91,7 @@ export default function dumpStackConfigTest() {
     /**
      * @tc.name getRdbStore with invalid dumpStackOnFileDel type
      * @tc.number SUB_DDM_APPDATAFWK_JSRDB_DumpStackConfig_003
-     * @tc.desc invalid dumpStackOnFileDel type falls back to default without crash
+     * @tc.desc invalid dumpStackOnFileDel type throws error, consistent with autoCleanDeviceDirtyData
      */
     it('testDumpStackConfig0003', 0, async function () {
       console.info(TAG + "************* testDumpStackConfig0003 start *************");
@@ -102,10 +102,10 @@ export default function dumpStackConfigTest() {
           dumpStackOnFileDel: "notBoolean" as unknown as boolean
         }
         rdbStore = await relationalStore.getRdbStore(context, storeConfig);
-        expect(rdbStore !== null && rdbStore !== undefined).assertTrue();
-      } catch (err) {
-        console.log(TAG + `failed, errcode:${JSON.stringify(err)}.`);
         expect().assertFail()
+      } catch (err) {
+        console.log(TAG + `expected error, errcode:${JSON.stringify(err)}.`);
+        expect(err.code).assertEqual(401)
       }
       console.info(TAG + "************* testDumpStackConfig0003 end   *************");
     })
