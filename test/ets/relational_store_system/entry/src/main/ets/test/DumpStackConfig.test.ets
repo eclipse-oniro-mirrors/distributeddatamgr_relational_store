@@ -20,16 +20,7 @@ import AbilityDelegatorRegistry from '@ohos.app.ability.abilityDelegatorRegistry
 const TAG = "[RDB_DUMP_STACK_CONFIG_TEST]";
 const delegator = AbilityDelegatorRegistry.getAbilityDelegator();
 const context = delegator.getAppContext().getApplicationContext();
-const STORE_CONFIG: relationalStore.StoreConfig = {
-  name: "dump_stack_config.db",
-  securityLevel: relationalStore.SecurityLevel.S1,
-  dumpStackOnFileDel: true
-};
-const STORE_CONFIG_FALSE: relationalStore.StoreConfig = {
-  name: "dump_stack_config.db",
-  securityLevel: relationalStore.SecurityLevel.S1,
-  dumpStackOnFileDel: false
-};
+const STORE_NAME = "dump_stack_config.db";
 let rdbStore: relationalStore.RdbStore | undefined;
 
 export default function dumpStackConfigTest() {
@@ -48,7 +39,7 @@ export default function dumpStackConfigTest() {
         await rdbStore.close();
       }
       rdbStore = undefined;
-      await relationalStore.deleteRdbStore(context, "dump_stack_config.db");
+      await relationalStore.deleteRdbStore(context, STORE_NAME);
     })
 
     afterAll(function () {
@@ -63,7 +54,12 @@ export default function dumpStackConfigTest() {
     it('testDumpStackConfig0001', 0, async function () {
       console.info(TAG + "************* testDumpStackConfig0001 start *************");
       try {
-        rdbStore = await relationalStore.getRdbStore(context, STORE_CONFIG);
+        let storeConfig: relationalStore.StoreConfig = {
+          name: STORE_NAME,
+          securityLevel: relationalStore.SecurityLevel.S1,
+          dumpStackOnFileDel: true
+        };
+        rdbStore = await relationalStore.getRdbStore(context, storeConfig);
         expect(rdbStore !== null && rdbStore !== undefined).assertTrue();
       } catch (err) {
         console.log(TAG + `failed, errcode:${JSON.stringify(err)}.`);
@@ -80,7 +76,12 @@ export default function dumpStackConfigTest() {
     it('testDumpStackConfig0002', 0, async function () {
       console.info(TAG + "************* testDumpStackConfig0002 start *************");
       try {
-        rdbStore = await relationalStore.getRdbStore(context, STORE_CONFIG_FALSE);
+        let storeConfig: relationalStore.StoreConfig = {
+          name: STORE_NAME,
+          securityLevel: relationalStore.SecurityLevel.S1,
+          dumpStackOnFileDel: false
+        };
+        rdbStore = await relationalStore.getRdbStore(context, storeConfig);
         expect(rdbStore !== null && rdbStore !== undefined).assertTrue();
       } catch (err) {
         console.log(TAG + `failed, errcode:${JSON.stringify(err)}.`);
