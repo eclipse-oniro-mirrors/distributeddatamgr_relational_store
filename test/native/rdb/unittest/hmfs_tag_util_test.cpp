@@ -118,3 +118,30 @@ HWTEST_F(HmfsTagUtilTest, HmfsTagUtil_DirFd_001, TestSize.Level1)
     close(dirFd);
     rmdir(TEST_DIR.c_str());
 }
+
+/**
+ * @tc.name: HmfsTagUtil_ClearDbFileTags_001
+ * @tc.desc: test HmfsTagUtil ClearDbFileTags degrades silently on non-HMFS for db/wal/shm
+ * @tc.type: FUNC
+ */
+HWTEST_F(HmfsTagUtilTest, HmfsTagUtil_ClearDbFileTags_001, TestSize.Level1)
+{
+    mkdir(TEST_DIR.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+    const std::string dbPath = TEST_DIR + "clear_tags.db";
+    int fd = open(dbPath.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    ASSERT_GE(fd, 0);
+    close(fd);
+
+    // AC-2.5/BR-4: ClearDbFileTags walks db/wal/shm, queries GETFLAGS and clears only
+    // tagged files. On non-HMFS hosts every GETFLAGS returns a negative value (not
+    // FLAG_SET), so no CLEARFLAGS is issued and the call must complete without crashing.
+    // Real tag lifecycle is validated on HMFS devices (device integration).
+    HmfsTagUtil::ClearDbFileTags(dbPath);
+
+    // Calling on a path whose wal/shm do not exist yet (EX-3 lazy creation) must also
+    // be safe: the GETFLAGS for the missing files returns negative and is skipped.
+    HmfsTagUtil::ClearDbFileTags(TEST_DIR + "nonexistent.db");
+
+    unlink(dbPath.c_str());
+    rmdir(TEST_DIR.c_str());
+}

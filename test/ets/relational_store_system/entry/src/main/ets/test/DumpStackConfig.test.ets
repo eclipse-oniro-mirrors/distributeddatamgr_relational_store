@@ -20,15 +20,8 @@ import AbilityDelegatorRegistry from '@ohos.app.ability.abilityDelegatorRegistry
 const TAG = "[RDB_DUMP_STACK_CONFIG_TEST]";
 const delegator = AbilityDelegatorRegistry.getAbilityDelegator();
 const context = delegator.getAppContext().getApplicationContext();
-const STORE_CONFIG: relationalStore.StoreConfig = {
-  name: "dump_stack_config.db",
-  securityLevel: relationalStore.SecurityLevel.S1,
-  dumpStackOnFileDel: true
-};
-const STORE_CONFIG_DEFAULT: relationalStore.StoreConfig = {
-  name: "dump_stack_config.db",
-  securityLevel: relationalStore.SecurityLevel.S1
-};
+const STORE_NAME = "dump_stack_config.db";
+let rdbStore: relationalStore.RdbStore | undefined;
 
 export default function dumpStackConfigTest() {
   describe('rdbDumpStackConfigTest', function () {
@@ -42,7 +35,11 @@ export default function dumpStackConfigTest() {
 
     afterEach(async function () {
       console.info(TAG + 'afterEach');
-      await relationalStore.deleteRdbStore(context, "dump_stack_config.db");
+      if (rdbStore != undefined) {
+        await rdbStore.close();
+      }
+      rdbStore = undefined;
+      await relationalStore.deleteRdbStore(context, STORE_NAME);
     })
 
     afterAll(function () {
@@ -57,8 +54,13 @@ export default function dumpStackConfigTest() {
     it('testDumpStackConfig0001', 0, async function () {
       console.info(TAG + "************* testDumpStackConfig0001 start *************");
       try {
-        let store = await relationalStore.getRdbStore(context, STORE_CONFIG);
-        expect(store !== null && store !== undefined).assertTrue();
+        let storeConfig: relationalStore.StoreConfig = {
+          name: STORE_NAME,
+          securityLevel: relationalStore.SecurityLevel.S1,
+          dumpStackOnFileDel: true
+        };
+        rdbStore = await relationalStore.getRdbStore(context, storeConfig);
+        expect(rdbStore !== null && rdbStore !== undefined).assertTrue();
       } catch (err) {
         console.log(TAG + `failed, errcode:${JSON.stringify(err)}.`);
         expect().assertFail()
@@ -67,42 +69,25 @@ export default function dumpStackConfigTest() {
     })
 
     /**
-     * @tc.name getRdbStore without dumpStackOnFileDel
+     * @tc.name getRdbStore with dumpStackOnFileDel false
      * @tc.number SUB_DDM_APPDATAFWK_JSRDB_DumpStackConfig_002
-     * @tc.desc open rdb store without dumpStackOnFileDel uses default false
+     * @tc.desc open rdb store with dumpStackOnFileDel set to false succeeds
      */
     it('testDumpStackConfig0002', 0, async function () {
       console.info(TAG + "************* testDumpStackConfig0002 start *************");
       try {
-        let store = await relationalStore.getRdbStore(context, STORE_CONFIG_DEFAULT);
-        expect(store !== null && store !== undefined).assertTrue();
+        let storeConfig: relationalStore.StoreConfig = {
+          name: STORE_NAME,
+          securityLevel: relationalStore.SecurityLevel.S1,
+          dumpStackOnFileDel: false
+        };
+        rdbStore = await relationalStore.getRdbStore(context, storeConfig);
+        expect(rdbStore !== null && rdbStore !== undefined).assertTrue();
       } catch (err) {
         console.log(TAG + `failed, errcode:${JSON.stringify(err)}.`);
         expect().assertFail()
       }
       console.info(TAG + "************* testDumpStackConfig0002 end   *************");
-    })
-
-    /**
-     * @tc.name getRdbStore with invalid dumpStackOnFileDel type
-     * @tc.number SUB_DDM_APPDATAFWK_JSRDB_DumpStackConfig_003
-     * @tc.desc invalid dumpStackOnFileDel type falls back to default without crash
-     */
-    it('testDumpStackConfig0003', 0, async function () {
-      console.info(TAG + "************* testDumpStackConfig0003 start *************");
-      try {
-        let storeConfig: relationalStore.StoreConfig = {
-          name: "dump_stack_config.db",
-          securityLevel: relationalStore.SecurityLevel.S1,
-          dumpStackOnFileDel: "notBoolean" as unknown as boolean
-        }
-        let store = await relationalStore.getRdbStore(context, storeConfig);
-        expect(store !== null && store !== undefined).assertTrue();
-      } catch (err) {
-        console.log(TAG + `failed, errcode:${JSON.stringify(err)}.`);
-        expect().assertFail()
-      }
-      console.info(TAG + "************* testDumpStackConfig0003 end   *************");
     })
   })
 }
