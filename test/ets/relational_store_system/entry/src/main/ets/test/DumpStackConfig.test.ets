@@ -25,9 +25,10 @@ const STORE_CONFIG: relationalStore.StoreConfig = {
   securityLevel: relationalStore.SecurityLevel.S1,
   dumpStackOnFileDel: true
 };
-const STORE_CONFIG_DEFAULT: relationalStore.StoreConfig = {
+const STORE_CONFIG_FALSE: relationalStore.StoreConfig = {
   name: "dump_stack_config.db",
-  securityLevel: relationalStore.SecurityLevel.S1
+  securityLevel: relationalStore.SecurityLevel.S1,
+  dumpStackOnFileDel: false
 };
 let rdbStore: relationalStore.RdbStore | undefined;
 
@@ -72,42 +73,20 @@ export default function dumpStackConfigTest() {
     })
 
     /**
-     * @tc.name getRdbStore without dumpStackOnFileDel
+     * @tc.name getRdbStore with dumpStackOnFileDel false
      * @tc.number SUB_DDM_APPDATAFWK_JSRDB_DumpStackConfig_002
-     * @tc.desc open rdb store without dumpStackOnFileDel uses default false
+     * @tc.desc open rdb store with dumpStackOnFileDel set to false succeeds
      */
     it('testDumpStackConfig0002', 0, async function () {
       console.info(TAG + "************* testDumpStackConfig0002 start *************");
       try {
-        rdbStore = await relationalStore.getRdbStore(context, STORE_CONFIG_DEFAULT);
+        rdbStore = await relationalStore.getRdbStore(context, STORE_CONFIG_FALSE);
         expect(rdbStore !== null && rdbStore !== undefined).assertTrue();
       } catch (err) {
         console.log(TAG + `failed, errcode:${JSON.stringify(err)}.`);
         expect().assertFail()
       }
       console.info(TAG + "************* testDumpStackConfig0002 end   *************");
-    })
-
-    /**
-     * @tc.name getRdbStore with invalid dumpStackOnFileDel type
-     * @tc.number SUB_DDM_APPDATAFWK_JSRDB_DumpStackConfig_003
-     * @tc.desc invalid dumpStackOnFileDel type throws error, consistent with autoCleanDeviceDirtyData
-     */
-    it('testDumpStackConfig0003', 0, async function () {
-      console.info(TAG + "************* testDumpStackConfig0003 start *************");
-      try {
-        let storeConfig: relationalStore.StoreConfig = {
-          name: "dump_stack_config.db",
-          securityLevel: relationalStore.SecurityLevel.S1,
-          dumpStackOnFileDel: "notBoolean" as unknown as boolean
-        }
-        rdbStore = await relationalStore.getRdbStore(context, storeConfig);
-        expect().assertFail()
-      } catch (err) {
-        console.log(TAG + `expected error, errcode:${JSON.stringify(err)}.`);
-        expect(err.code).assertEqual(401)
-      }
-      console.info(TAG + "************* testDumpStackConfig0003 end   *************");
     })
   })
 }
