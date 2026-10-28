@@ -733,8 +733,9 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaDbStatFromConfig_001, TestSize.Level1)
 
 /**
  * @tc.name: PrimaryReplicaInfo_NoSlaveConnection_001
- * @tc.desc: AC-4.2/4.4: A standalone connection without slaveConnection_ reports partial results —
- *           replica DB stat'd from config path (E_OK), WAL/replay/replica-checkpoint skipped (E_NOT_SUPPORT).
+ * @tc.desc: AC-4.2: A standalone read connection starts without slaveConnection_;
+ *           when the replica DB exists the diagnostic force-creates the replica
+ *           connection (CreateSlaveConnection), so replica info is fully collected.
  * @tc.type: FUNC
  */
 HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnection_001, TestSize.Level1)
@@ -753,11 +754,18 @@ HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnection_001, TestSize.Level1)
 
     auto [ret, info] = conn->GetPrimaryAndReplicaInfo({});
 
-    // Overall E_OK: partial results preserved, no fatal failure.
+    // Overall E_OK: the replica connection was force-created during collection.
     EXPECT_EQ(ret, E_OK);
 
     // Replica DB stat'd from config path — file exists from the fixture pool.
     EXPECT_GE(info.replicaInfo.dbInfo.size, 0);
+
+    // The force-created connection enables replica WAL stat (mtime > 0 proves the
+    // stat ran on the live slave handle; a skipped stat would leave defaults 0).
+    EXPECT_GT(info.replicaInfo.walInfo.mtime, 0);
+    // PRAGMA user_version replicates via statement-level double-write, so the
+    // replica version read through the force-created connection matches primary.
+    EXPECT_EQ(info.replicaInfo.userVersion, info.primaryInfo.userVersion);
 
     // Diagnostic did not create or remove the replica file.
     EXPECT_EQ(access(slaveDbName.c_str(), F_OK), 0);
@@ -1004,8 +1012,9 @@ HWTEST_F(PrimaryReplicaInfoTest, EmptyStringInTableNames_001, TestSize.Level1)
 
 /**
  * @tc.name: PrimaryReplicaInfo_NoSlaveConnectionWithTable_001
- * @tc.desc: AC-4.2: Standalone connection (no slave) with non-empty tableNames —
- *           primary tables populated, replica tables empty (slaveConnection_ null).
+ * @tc.desc: AC-4.2: Standalone connection with non-empty tableNames — the diagnostic
+ *           force-creates the replica connection, so both primary and replica tables
+ *           are counted and their results match.
  * @tc.type: FUNC
  */
 HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnectionWithTable_001, TestSize.Level1)
@@ -1020,8 +1029,8 @@ HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnectionWithTable_001, TestSize.Level1
     ASSERT_EQ(createErr, E_OK);
     ASSERT_NE(conn, nullptr);
 
-    // Non-empty tableNames exercises the counting loop with slaveConnection_ == nullptr (B7J).
-    // The `if (slaveConnection_ != nullptr)` false branch skips replica CountTable.
+    // Non-empty tableNames: the force-created replica connection makes the
+    // counting loop run CountTable on BOTH primary and replica.
     auto [ret, info] = conn->GetPrimaryAndReplicaInfo({ "test" });
     EXPECT_EQ(ret, E_OK);
 
@@ -1030,10 +1039,11 @@ HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnectionWithTable_001, TestSize.Level1
     ASSERT_NE(it, info.primaryInfo.tables.end());
     EXPECT_EQ(it->second.count, 2);
 
-    // Replica tables map is empty — slaveConnection_ is null, so CountTable is never called for replica.
-    EXPECT_TRUE(info.replicaInfo.tables.empty());
-    // Replica userVersion stays at default (slaveConnection_ null → QueryUserVersion skipped).
-    EXPECT_EQ(info.replicaInfo.userVersion, 0);
+    // Replica tables are counted via the force-created connection.
+    auto rit = info.replicaInfo.tables.find("test");
+    ASSERT_NE(rit, info.replicaInfo.tables.end());
+    EXPECT_EQ(rit->second.count, 2) << "Replica count must match primary after force-create";
+    EXPECT_EQ(info.replicaInfo.userVersion, info.primaryInfo.userVersion);
 }
 
 /**
@@ -1105,8 +1115,8 @@ HWTEST_F(PrimaryReplicaInfoTest, PrimaryDbStatFailure_001, TestSize.Level1)
 
 /**
  * @tc.name: PrimaryReplicaInfo_ReplicaDbStatFailure_001
- * @tc.desc: AC-4.4: When replica DB file does not exist, stat fails silently —
- *           replicaInfo.dbInfo stays zeroed, overall ret is E_OK.
+ * @tc.desc: AC-4.4: When the replica DB file does not exist, the diagnostic fails
+ *           as a whole — the replica stat failure is propagated, not silently skipped.
  * @tc.type: FUNC
  */
 HWTEST_F(PrimaryReplicaInfoTest, ReplicaDbStatFailure_001, TestSize.Level1)
@@ -1115,7 +1125,7 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaDbStatFailure_001, TestSize.Level1)
     store_ = nullptr;
     RdbHelper::ClearCache();
 
-    // Delete the slave DB file so replica DB stat fails (B4F/B8H).
+    // Delete the slave DB file so replica DB stat fails.
     RdbHelper::DeleteRdbStore(slaveDbName);
     ASSERT_NE(access(slaveDbName.c_str(), F_OK), 0) << "Slave DB should be deleted";
 
@@ -1125,13 +1135,13 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaDbStatFailure_001, TestSize.Level1)
     ASSERT_EQ(createErr, E_OK);
     ASSERT_NE(conn, nullptr);
 
-    // Replica DB stat fails silently (file missing) — not fatal, ret stays E_OK.
+    // Replica DB stat fails (file missing) — the diagnostic fails as a whole.
     auto [ret, info] = conn->GetPrimaryAndReplicaInfo({});
-    EXPECT_EQ(ret, E_OK);
-    // Replica DB info stays at default zero values.
+    EXPECT_NE(ret, E_OK) << "Missing replica DB must fail the whole diagnostic";
+    // Replica DB info stays at default zero values (early return before assignment).
     EXPECT_EQ(info.replicaInfo.dbInfo.size, 0);
     EXPECT_EQ(info.replicaInfo.dbInfo.mtime, 0);
-    // Primary DB info should still be valid.
+    // Primary DB info was collected before the failure and remains valid.
     EXPECT_GT(info.primaryInfo.dbInfo.size, 0);
 }
 
@@ -1351,9 +1361,9 @@ HWTEST_F(PrimaryReplicaInfoTest, SlaveCountTableErrorPath_001, TestSize.Level1)
 
 /**
  * @tc.name: PrimaryReplicaInfo_SlaveCountTableErrorPath_002
- * @tc.desc: AC-4.3: When slave DB is missing (stat fails), slave CountTable is skipped —
- *           replica tables map is empty, but primary tables are still counted correctly.
- *           This verifies the slave CountTable error path is handled gracefully.
+ * @tc.desc: AC-4.3: A standalone read connection gets its replica connection
+ *           force-created during the diagnostic, so slave CountTable runs and
+ *           replica table results match the primary.
  * @tc.type: FUNC
  */
 HWTEST_F(PrimaryReplicaInfoTest, SlaveCountTableErrorPath_002, TestSize.Level1)
@@ -1369,18 +1379,20 @@ HWTEST_F(PrimaryReplicaInfoTest, SlaveCountTableErrorPath_002, TestSize.Level1)
     ASSERT_EQ(createErr, E_OK);
     ASSERT_NE(conn, nullptr);
 
-    // Act: call diagnostic with table names — slaveConnection_ is null,
-    // so slave CountTable is never called (the `if (slaveConnection_ != nullptr)` branch is false)
+    // Act: call diagnostic with table names — the replica connection is
+    // force-created, so slave CountTable runs on the live slave handle.
     auto [ret, info] = conn->GetPrimaryAndReplicaInfo({ "test" });
-    EXPECT_EQ(ret, E_OK) << "Overall ret should be E_OK when slave CountTable is skipped (no slave connection)";
+    EXPECT_EQ(ret, E_OK) << "Overall ret should be E_OK with the force-created replica connection";
 
     // Assert: primary table is counted correctly
     auto pit = info.primaryInfo.tables.find("test");
     ASSERT_NE(pit, info.primaryInfo.tables.end()) << "Primary 'test' should be counted";
     EXPECT_EQ(pit->second.count, 4) << "Primary 'test' should have 4 rows";
 
-    // Assert: replica tables map is empty — slave CountTable was not called
-    EXPECT_TRUE(info.replicaInfo.tables.empty()) << "Replica tables should be empty when slave CountTable is skipped";
+    // Assert: replica table is counted too and matches the primary
+    auto rit = info.replicaInfo.tables.find("test");
+    ASSERT_NE(rit, info.replicaInfo.tables.end()) << "Replica 'test' should be counted after force-create";
+    EXPECT_EQ(rit->second.count, 4) << "Replica 'test' should match primary (4 rows)";
 }
 
 /**

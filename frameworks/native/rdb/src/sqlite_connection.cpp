@@ -2789,8 +2789,23 @@ int SqliteConnection::CollectInitialFileInfo(PrimaryAndReplicaInfo &info)
     }
 
     auto [rDbErr, rDbInfo] = StatToFileInfo(replicaDbPath);
-    if (rDbErr == E_OK) {
-        info.replicaInfo.dbInfo = rDbInfo;
+    if (rDbErr != E_OK) {
+        LOG_ERROR("CollectInitialFileInfo: replica db stat failed, err: %{public}d", rDbErr);
+        return rDbErr;
+    }
+    info.replicaInfo.dbInfo = rDbInfo;
+
+    // The replica DB exists on disk. Force-create the replica connection when
+    // missing (e.g. a standalone read connection) so WAL stat, binlog replay,
+    // checkpoint and table counting all operate on a live slave handle.
+    if (slaveConnection_ == nullptr) {
+        RdbStoreConfig rdbSlaveStoreConfig = GetSlaveRdbStoreConfig(config_);
+        auto [createErr, conn] = CreateSlaveConnection(rdbSlaveStoreConfig, SlaveOpenPolicy::FORCE_OPEN);
+        if (createErr != E_OK || conn == nullptr) {
+            LOG_ERROR("CollectInitialFileInfo: create slave connection failed, err: %{public}d", createErr);
+            return createErr != E_OK ? createErr : E_ERROR;
+        }
+        slaveConnection_ = std::move(conn);
     }
 
     if (slaveConnection_ != nullptr) {
@@ -2845,6 +2860,11 @@ int SqliteConnection::CheckpointDatabases(PrimaryAndReplicaInfo &info)
 
 int SqliteConnection::RefreshSizesAfterCheckpoint(PrimaryAndReplicaInfo &info)
 {
+    LOG_INFO("RefreshSizesAfterCheckpoint: before refresh, primaryDb.size=%{public}" PRId64
+        ", primaryWal.size=%{public}" PRId64 ", replicaDb.size=%{public}" PRId64
+        ", replicaWal.size=%{public}" PRId64,
+        info.primaryInfo.dbInfo.size, info.primaryInfo.walInfo.size,
+        info.replicaInfo.dbInfo.size, info.replicaInfo.walInfo.size);
     std::string primaryDbPath = config_.GetPath();
     auto [dbErr, dbInfo] = StatToFileInfo(primaryDbPath);
     if (dbErr != E_OK) {
@@ -2862,15 +2882,22 @@ int SqliteConnection::RefreshSizesAfterCheckpoint(PrimaryAndReplicaInfo &info)
     if (slaveConnection_ != nullptr) {
         std::string replicaDbPath = SqliteUtils::GetSlavePath(config_);
         auto [rDbErr, rDbInfo] = StatToFileInfo(replicaDbPath);
-        if (rDbErr == E_OK) {
-            info.replicaInfo.dbInfo.size = rDbInfo.size;
+        if (rDbErr != E_OK) {
+            LOG_ERROR("RefreshSizesAfterCheckpoint: replica db stat failed, err: %{public}d", rDbErr);
+            return rDbErr;
         }
+        info.replicaInfo.dbInfo.size = rDbInfo.size;
         std::string replicaWalPath = slaveConnection_->GetWalName().second;
         auto [rWalErr, rWalInfo] = StatToFileInfo(replicaWalPath);
         if (rWalErr == E_OK) {
             info.replicaInfo.walInfo.size = rWalInfo.size;
         }
     }
+    LOG_INFO("RefreshSizesAfterCheckpoint: after refresh, primaryDb.size=%{public}" PRId64
+        ", primaryWal.size=%{public}" PRId64 ", replicaDb.size=%{public}" PRId64
+        ", replicaWal.size=%{public}" PRId64,
+        info.primaryInfo.dbInfo.size, info.primaryInfo.walInfo.size,
+        info.replicaInfo.dbInfo.size, info.replicaInfo.walInfo.size);
     return E_OK;
 }
 
@@ -2894,6 +2921,16 @@ int SqliteConnection::CollectVersionsAndTables(PrimaryAndReplicaInfo &info, cons
             auto [rErr, rTable] = slaveConnection_->CountTable(tableName);
             info.replicaInfo.tables[tableName] = std::move(rTable);
         }
+    }
+    LOG_INFO("CollectVersionsAndTables: primaryUserVersion=%{public}" PRId64
+        ", replicaUserVersion=%{public}" PRId64 ", tableCount=%{public}zu",
+        info.primaryInfo.userVersion, info.replicaInfo.userVersion, info.primaryInfo.tables.size());
+    for (const auto &entry : info.primaryInfo.tables) {
+        auto replicaIt = info.replicaInfo.tables.find(entry.first);
+        int64_t replicaCount = (replicaIt != info.replicaInfo.tables.end()) ? replicaIt->second.count : -1;
+        LOG_INFO("CollectVersionsAndTables: table=%{public}s, primaryCount=%{public}" PRId64
+            ", replicaCount=%{public}" PRId64,
+            SqliteUtils::Anonymous(entry.first).c_str(), entry.second.count, replicaCount);
     }
     return E_OK;
 }
