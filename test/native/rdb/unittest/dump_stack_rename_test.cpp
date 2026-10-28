@@ -28,11 +28,12 @@
 
 using namespace testing::ext;
 using namespace OHOS::NativeRdb;
-
+static constexpr const char *TEST_DIR = "/data/test/dump_stack_rename_test/";
+static constexpr const char *CREATE_TABLE_TEST =
+    "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)";
 namespace RdbTest {
 class DumpStackRenameTest : public testing::Test {
 public:
-    static constexpr const char *TEST_DIR = "/data/test/dump_stack_rename_test/";
     static void SetUpTestCase(void){};
     static void TearDownTestCase(void){};
     void SetUp(void)
@@ -44,15 +45,13 @@ public:
 
 class DumpStackRenameCallback : public RdbOpenCallback {
 public:
-    static constexpr const char *CREATE_TABLE_TEST =
-        "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)";
     int OnCreate(RdbStore &store) override;
     int OnUpgrade(RdbStore &store, int oldVersion, int newVersion) override;
 };
 
 int DumpStackRenameCallback::OnCreate(RdbStore &store)
 {
-    return store.ExecuteSql(DumpStackRenameCallback::CREATE_TABLE_TEST);
+    return store.ExecuteSql(CREATE_TABLE_TEST);
 }
 
 int DumpStackRenameCallback::OnUpgrade(RdbStore &store, int oldVersion, int newVersion)
