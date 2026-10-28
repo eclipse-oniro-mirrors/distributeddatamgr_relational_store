@@ -2795,25 +2795,14 @@ int SqliteConnection::CollectInitialFileInfo(PrimaryAndReplicaInfo &info)
     }
     info.replicaInfo.dbInfo = rDbInfo;
 
-    // The replica DB exists on disk. Force-create the replica connection when
-    // missing (e.g. a standalone read connection) so WAL stat, binlog replay,
-    // checkpoint and table counting all operate on a live slave handle.
-    if (slaveConnection_ == nullptr) {
-        RdbStoreConfig rdbSlaveStoreConfig = GetSlaveRdbStoreConfig(config_);
-        auto [createErr, conn] = CreateSlaveConnection(rdbSlaveStoreConfig, SlaveOpenPolicy::FORCE_OPEN);
-        if (createErr != E_OK || conn == nullptr) {
-            LOG_ERROR("CollectInitialFileInfo: create slave connection failed, err: %{public}d", createErr);
-            return createErr != E_OK ? createErr : E_ERROR;
-        }
-        slaveConnection_ = std::move(conn);
-    }
-
-    if (slaveConnection_ != nullptr) {
-        auto [replicaWalErr, replicaWalPath] = slaveConnection_->GetWalName();
-        auto [rWalErr, rWalInfo] = StatToFileInfo(replicaWalPath);
-        if (rWalErr == E_OK) {
-            info.replicaInfo.walInfo = rWalInfo;
-        }
+    // Pure file stat: the replica WAL path is derived from the replica DB path
+    // (path + "-wal", the same suffix sqlite3_filename_wal appends), so no
+    // replica connection is needed for the initial collection. The connection
+    // is created on demand only when SQL is executed against the slave
+    // (binlog replay, checkpoint, version/table queries).
+    auto [rWalErr, rWalInfo] = StatToFileInfo(replicaDbPath + "-wal");
+    if (rWalErr == E_OK) {
+        info.replicaInfo.walInfo = rWalInfo;
     }
 
     info.binlogInfo = SqliteUtils::CaptureBinlogInfo(config_);
@@ -2822,14 +2811,24 @@ int SqliteConnection::CollectInitialFileInfo(PrimaryAndReplicaInfo &info)
 
 int SqliteConnection::TryReplayBinlog(PrimaryAndReplicaInfo &info)
 {
-    sqlite3 *replicaHandle = (slaveConnection_ != nullptr) ? slaveConnection_->dbHandle_ : nullptr;
-    if (!SqliteUtils::IsSupportBinlog(config_) || replicaHandle == nullptr || dbHandle_ == nullptr) {
+    if (!SqliteUtils::IsSupportBinlog(config_) || dbHandle_ == nullptr) {
         return E_OK;
     }
     if (!info.binlogInfo.exist) {
         return E_OK;
     }
-    int replayErr = ReplayBinlogSqlite(dbHandle_, replicaHandle, config_);
+    // Binlog replay executes against the slave handle — create the replica
+    // connection on demand (the replica DB was verified by CollectInitialFileInfo).
+    if (slaveConnection_ == nullptr) {
+        RdbStoreConfig rdbSlaveStoreConfig = GetSlaveRdbStoreConfig(config_);
+        auto [createErr, conn] = CreateSlaveConnection(rdbSlaveStoreConfig, SlaveOpenPolicy::FORCE_OPEN);
+        if (createErr != E_OK || conn == nullptr) {
+            LOG_ERROR("TryReplayBinlog: create slave connection failed, err: %{public}d", createErr);
+            return createErr != E_OK ? createErr : E_ERROR;
+        }
+        slaveConnection_ = std::move(conn);
+    }
+    int replayErr = ReplayBinlogSqlite(dbHandle_, slaveConnection_->dbHandle_, config_);
     if (replayErr != E_OK) {
         LOG_ERROR("replay failed: %{public}s, err: %{public}d",
             SqliteUtils::Anonymous(config_.GetPath()).c_str(), replayErr);
@@ -2846,6 +2845,18 @@ int SqliteConnection::CheckpointDatabases(PrimaryAndReplicaInfo &info)
             LOG_ERROR("primary checkpoint failed err: %{public}d", ckptErr);
             return SQLiteError::ErrNo(ckptErr);
         }
+    }
+    // The replica checkpoint executes against the slave handle — create the
+    // replica connection on demand before checkpointing (the replica DB was
+    // verified by CollectInitialFileInfo).
+    if (slaveConnection_ == nullptr) {
+        RdbStoreConfig rdbSlaveStoreConfig = GetSlaveRdbStoreConfig(config_);
+        auto [createErr, conn] = CreateSlaveConnection(rdbSlaveStoreConfig, SlaveOpenPolicy::FORCE_OPEN);
+        if (createErr != E_OK || conn == nullptr) {
+            LOG_ERROR("CheckpointDatabases: create slave connection failed, err: %{public}d", createErr);
+            return createErr != E_OK ? createErr : E_ERROR;
+        }
+        slaveConnection_ = std::move(conn);
     }
     if (slaveConnection_ != nullptr && slaveConnection_->dbHandle_ != nullptr) {
         int ckptErr = sqlite3_wal_checkpoint_v2(slaveConnection_->dbHandle_, nullptr,
