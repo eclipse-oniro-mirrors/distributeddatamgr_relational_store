@@ -1579,3 +1579,119 @@ HWTEST_F(PrimaryReplicaInfoTest, CheckpointFailure_002, TestSize.Level1)
         EXPECT_GE(pit->second.count, 5) << "Primary should have at least 5 rows";
     }
 }
+
+/**
+ * @tc.name: PrimaryReplicaInfo_ReplicaWalMissing_001
+ * @tc.desc: AC-1.1: When the replica WAL/SHM files are missing at diagnostic time,
+ *           the initial replica WAL stat fails softly (walInfo stays zeroed) while
+ *           the replica DB stat and the rest of the diagnostic still succeed.
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, ReplicaWalMissing_001, TestSize.Level1)
+{
+    InsertRows(store_, 1, 5);
+    store_ = nullptr;
+    RdbHelper::ClearCache();
+
+    // Delete the replica WAL/SHM while no connection holds the slave. The
+    // initial replica WAL stat (a pure file stat that runs before the
+    // temporary slave connection is created) then fails and is skipped.
+    std::string slaveWalPath = slaveDbName + "-wal";
+    std::string slaveShmPath = slaveDbName + "-shm";
+    if (access(slaveWalPath.c_str(), F_OK) == 0) {
+        EXPECT_EQ(unlink(slaveWalPath.c_str()), 0) << "Should delete replica WAL file";
+    }
+    if (access(slaveShmPath.c_str(), F_OK) == 0) {
+        EXPECT_EQ(unlink(slaveShmPath.c_str()), 0) << "Should delete replica SHM file";
+    }
+    ASSERT_NE(access(slaveWalPath.c_str(), F_OK), 0) << "Replica WAL should be gone";
+
+    RdbStoreConfig config(dbName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    auto [createErr, conn] = SqliteConnection::Create(config, false);
+    ASSERT_EQ(createErr, E_OK);
+    ASSERT_NE(conn, nullptr);
+
+    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({});
+    EXPECT_EQ(ret, E_OK) << "Missing replica WAL is tolerated (soft skip)";
+    // Replica DB info is still collected (the DB file stat succeeds).
+    EXPECT_GT(info.replicaInfo.dbInfo.size, 0);
+    // mtime is only ever set by the initial WAL stat (the post-checkpoint
+    // refresh updates size only), so a failed initial stat leaves it at 0.
+    EXPECT_EQ(info.replicaInfo.walInfo.mtime, 0) << "Initial replica WAL stat must have failed";
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_SlaveConnCreateFailure_001
+ * @tc.desc: AC-5.1: When the replica DB path exists as a directory, the stat succeeds
+ *           but the temporary slave connection cannot be created — the diagnostic
+ *           fails as a whole with the creation error.
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, SlaveConnCreateFailure_001, TestSize.Level1)
+{
+    InsertRows(store_, 1, 2);
+    store_ = nullptr;
+    RdbHelper::ClearCache();
+
+    // Replace the slave DB file with a directory: stat() succeeds on it, but
+    // CreateSlaveConnection cannot open a database there.
+    RdbHelper::DeleteRdbStore(slaveDbName);
+    ASSERT_EQ(mkdir(slaveDbName.c_str(), 0755), 0) << "Slave path should become a directory";
+    ScopeGuard removeDir([&]() { rmdir(slaveDbName.c_str()); });
+
+    RdbStoreConfig config(dbName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    auto [createErr, conn] = SqliteConnection::Create(config, false);
+    ASSERT_EQ(createErr, E_OK);
+    ASSERT_NE(conn, nullptr);
+
+    // The replica "DB" exists (stat on the directory succeeds), so the
+    // diagnostic proceeds to the SQL phase and tries to create the temporary
+    // slave connection — which fails and fails the whole diagnostic.
+    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({});
+    EXPECT_NE(ret, E_OK) << "Slave connection creation failure must fail the diagnostic";
+    // Results collected before the failure remain available.
+    EXPECT_GT(info.primaryInfo.dbInfo.size, 0);
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_ReplicaCheckpointBusy_001
+ * @tc.desc: AC-5.2: When a concurrent reader holds a read transaction on the slave DB,
+ *           the replica TRUNCATE checkpoint returns BUSY and the diagnostic propagates
+ *           the failure instead of swallowing it.
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, ReplicaCheckpointBusy_001, TestSize.Level1)
+{
+    InsertRows(store_, 1, 5);
+
+    // Open a raw read on the slave and keep the statement stepped-but-not-reset:
+    // it pins a WAL read-mark at the current WAL head (frame P).
+    sqlite3 *rawSlave = nullptr;
+    ASSERT_EQ(sqlite3_open(slaveDbName.c_str(), &rawSlave), SQLITE_OK);
+    sqlite3_stmt *rawStmt = nullptr;
+    ScopeGuard closeRaw([&]() {
+        if (rawStmt != nullptr) {
+            sqlite3_finalize(rawStmt);
+        }
+        if (rawSlave != nullptr) {
+            sqlite3_close(rawSlave);
+        }
+    });
+    ASSERT_EQ(sqlite3_prepare_v2(rawSlave, "SELECT * FROM test", -1, &rawStmt, nullptr), SQLITE_OK);
+    ASSERT_EQ(sqlite3_step(rawStmt), SQLITE_ROW) << "Raw read on the slave should hold an active row";
+
+    // Grow the slave WAL beyond the reader's mark (frames P+1..Q): the
+    // double-write replicates these inserts to the slave.
+    InsertRows(store_, 100, 5);
+
+    // The replica checkpoint can only backfill up to the reader's mark (P),
+    // leaving nBackfill < mxFrame — the RESTART requirement fails and
+    // sqlite3_wal_checkpoint_v2(TRUNCATE) returns SQLITE_BUSY, which the
+    // diagnostic propagates.
+    auto [ret, info] = store_->GetPrimaryReplicaInfo({});
+    EXPECT_NE(ret, E_OK) << "Replica checkpoint BUSY must fail the diagnostic";
+    // Partial results collected before the failure remain available.
+    EXPECT_GT(info.primaryInfo.dbInfo.size, 0);
+}
