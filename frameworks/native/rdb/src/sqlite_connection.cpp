@@ -2809,7 +2809,28 @@ int SqliteConnection::CollectInitialFileInfo(PrimaryAndReplicaInfo &info)
     return E_OK;
 }
 
-int SqliteConnection::TryReplayBinlog(PrimaryAndReplicaInfo &info)
+std::pair<int, std::shared_ptr<SqliteConnection>> SqliteConnection::GetDiagnosticSlaveConnection(
+    std::shared_ptr<SqliteConnection> &tempSlaveConn)
+{
+    if (slaveConnection_ != nullptr) {
+        return { E_OK, slaveConnection_ };
+    }
+    if (tempSlaveConn == nullptr) {
+        // Temporary replica connection scoped to the current diagnostic call —
+        // never assigned to slaveConnection_; it closes automatically (RAII)
+        // when GetPrimaryAndReplicaInfo returns.
+        RdbStoreConfig rdbSlaveStoreConfig = GetSlaveRdbStoreConfig(config_);
+        auto [createErr, conn] = CreateSlaveConnection(rdbSlaveStoreConfig, SlaveOpenPolicy::FORCE_OPEN);
+        if (createErr != E_OK || conn == nullptr) {
+            LOG_ERROR("GetDiagnosticSlaveConnection: create slave connection failed, err: %{public}d", createErr);
+            return { createErr != E_OK ? createErr : E_ERROR, nullptr };
+        }
+        tempSlaveConn = std::move(conn);
+    }
+    return { E_OK, tempSlaveConn };
+}
+
+int SqliteConnection::TryReplayBinlog(PrimaryAndReplicaInfo &info, std::shared_ptr<SqliteConnection> &tempSlaveConn)
 {
     if (!SqliteUtils::IsSupportBinlog(config_) || dbHandle_ == nullptr) {
         return E_OK;
@@ -2817,18 +2838,16 @@ int SqliteConnection::TryReplayBinlog(PrimaryAndReplicaInfo &info)
     if (!info.binlogInfo.exist) {
         return E_OK;
     }
-    // Binlog replay executes against the slave handle — create the replica
-    // connection on demand (the replica DB was verified by CollectInitialFileInfo).
-    if (slaveConnection_ == nullptr) {
-        RdbStoreConfig rdbSlaveStoreConfig = GetSlaveRdbStoreConfig(config_);
-        auto [createErr, conn] = CreateSlaveConnection(rdbSlaveStoreConfig, SlaveOpenPolicy::FORCE_OPEN);
-        if (createErr != E_OK || conn == nullptr) {
-            LOG_ERROR("TryReplayBinlog: create slave connection failed, err: %{public}d", createErr);
-            return createErr != E_OK ? createErr : E_ERROR;
-        }
-        slaveConnection_ = std::move(conn);
+    // Binlog replay executes against the slave handle — resolve the replica
+    // connection on demand (member first, temporary otherwise).
+    auto [connErr, slaveConn] = GetDiagnosticSlaveConnection(tempSlaveConn);
+    if (connErr != E_OK) {
+        return connErr;
     }
-    int replayErr = ReplayBinlogSqlite(dbHandle_, slaveConnection_->dbHandle_, config_);
+    if (slaveConn->dbHandle_ == nullptr) {
+        return E_OK;
+    }
+    int replayErr = ReplayBinlogSqlite(dbHandle_, slaveConn->dbHandle_, config_);
     if (replayErr != E_OK) {
         LOG_ERROR("replay failed: %{public}s, err: %{public}d",
             SqliteUtils::Anonymous(config_.GetPath()).c_str(), replayErr);
@@ -2837,7 +2856,7 @@ int SqliteConnection::TryReplayBinlog(PrimaryAndReplicaInfo &info)
     return E_OK;
 }
 
-int SqliteConnection::CheckpointDatabases(PrimaryAndReplicaInfo &info)
+int SqliteConnection::CheckpointDatabases(PrimaryAndReplicaInfo &info, std::shared_ptr<SqliteConnection> &tempSlaveConn)
 {
     if (dbHandle_ != nullptr && isWriter_) {
         int ckptErr = sqlite3_wal_checkpoint_v2(dbHandle_, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
@@ -2846,20 +2865,14 @@ int SqliteConnection::CheckpointDatabases(PrimaryAndReplicaInfo &info)
             return SQLiteError::ErrNo(ckptErr);
         }
     }
-    // The replica checkpoint executes against the slave handle — create the
-    // replica connection on demand before checkpointing (the replica DB was
-    // verified by CollectInitialFileInfo).
-    if (slaveConnection_ == nullptr) {
-        RdbStoreConfig rdbSlaveStoreConfig = GetSlaveRdbStoreConfig(config_);
-        auto [createErr, conn] = CreateSlaveConnection(rdbSlaveStoreConfig, SlaveOpenPolicy::FORCE_OPEN);
-        if (createErr != E_OK || conn == nullptr) {
-            LOG_ERROR("CheckpointDatabases: create slave connection failed, err: %{public}d", createErr);
-            return createErr != E_OK ? createErr : E_ERROR;
-        }
-        slaveConnection_ = std::move(conn);
+    // The replica checkpoint executes against the slave handle — resolve the
+    // replica connection on demand (member first, temporary otherwise).
+    auto [connErr, slaveConn] = GetDiagnosticSlaveConnection(tempSlaveConn);
+    if (connErr != E_OK) {
+        return connErr;
     }
-    if (slaveConnection_ != nullptr && slaveConnection_->dbHandle_ != nullptr) {
-        int ckptErr = sqlite3_wal_checkpoint_v2(slaveConnection_->dbHandle_, nullptr,
+    if (slaveConn != nullptr && slaveConn->dbHandle_ != nullptr) {
+        int ckptErr = sqlite3_wal_checkpoint_v2(slaveConn->dbHandle_, nullptr,
             SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
         if (ckptErr != SQLITE_OK) {
             LOG_ERROR("replica checkpoint failed err: %{public}d", ckptErr);
@@ -2890,20 +2903,21 @@ int SqliteConnection::RefreshSizesAfterCheckpoint(PrimaryAndReplicaInfo &info)
         info.primaryInfo.walInfo.size = walInfo.size;
     }
 
-    if (slaveConnection_ != nullptr) {
-        std::string replicaDbPath = SqliteUtils::GetSlavePath(config_);
-        auto [rDbErr, rDbInfo] = StatToFileInfo(replicaDbPath);
-        if (rDbErr != E_OK) {
-            LOG_ERROR("RefreshSizesAfterCheckpoint: replica db stat failed, err: %{public}d", rDbErr);
-            return rDbErr;
-        }
-        info.replicaInfo.dbInfo.size = rDbInfo.size;
-        std::string replicaWalPath = slaveConnection_->GetWalName().second;
-        auto [rWalErr, rWalInfo] = StatToFileInfo(replicaWalPath);
-        if (rWalErr == E_OK) {
-            info.replicaInfo.walInfo.size = rWalInfo.size;
-        }
+    // Pure file stat: replica paths derived directly from the config (the WAL
+    // path uses the same "-wal" suffix sqlite3_filename_wal appends), so this
+    // step needs no replica connection.
+    std::string replicaDbPath = SqliteUtils::GetSlavePath(config_);
+    auto [rDbErr, rDbInfo] = StatToFileInfo(replicaDbPath);
+    if (rDbErr != E_OK) {
+        LOG_ERROR("RefreshSizesAfterCheckpoint: replica db stat failed, err: %{public}d", rDbErr);
+        return rDbErr;
     }
+    info.replicaInfo.dbInfo.size = rDbInfo.size;
+    auto [rWalErr, rWalInfo] = StatToFileInfo(replicaDbPath + "-wal");
+    if (rWalErr == E_OK) {
+        info.replicaInfo.walInfo.size = rWalInfo.size;
+    }
+
     LOG_INFO("RefreshSizesAfterCheckpoint: after refresh, primaryDb.size=%{public}" PRId64
         ", primaryWal.size=%{public}" PRId64 ", replicaDb.size=%{public}" PRId64
         ", replicaWal.size=%{public}" PRId64,
@@ -2912,11 +2926,18 @@ int SqliteConnection::RefreshSizesAfterCheckpoint(PrimaryAndReplicaInfo &info)
     return E_OK;
 }
 
-int SqliteConnection::CollectVersionsAndTables(PrimaryAndReplicaInfo &info, const std::vector<std::string> &tableNames)
+int SqliteConnection::CollectVersionsAndTables(PrimaryAndReplicaInfo &info,
+    const std::vector<std::string> &tableNames, std::shared_ptr<SqliteConnection> &tempSlaveConn)
 {
     info.primaryInfo.userVersion = QueryUserVersion();
-    if (slaveConnection_ != nullptr) {
-        info.replicaInfo.userVersion = slaveConnection_->QueryUserVersion();
+    // The replica version/table queries execute SQL — resolve the replica
+    // connection on demand (member first, temporary otherwise).
+    auto [connErr, slaveConn] = GetDiagnosticSlaveConnection(tempSlaveConn);
+    if (connErr != E_OK) {
+        return connErr;
+    }
+    if (slaveConn != nullptr) {
+        info.replicaInfo.userVersion = slaveConn->QueryUserVersion();
     }
 
     for (const auto &tableName : tableNames) {
@@ -2928,8 +2949,8 @@ int SqliteConnection::CollectVersionsAndTables(PrimaryAndReplicaInfo &info, cons
         }
         auto [pErr, pTable] = CountTable(tableName);
         info.primaryInfo.tables[tableName] = std::move(pTable);
-        if (slaveConnection_ != nullptr) {
-            auto [rErr, rTable] = slaveConnection_->CountTable(tableName);
+        if (slaveConn != nullptr) {
+            auto [rErr, rTable] = slaveConn->CountTable(tableName);
             info.replicaInfo.tables[tableName] = std::move(rTable);
         }
     }
@@ -2950,19 +2971,23 @@ std::pair<int, PrimaryAndReplicaInfo> SqliteConnection::GetPrimaryAndReplicaInfo
     const std::vector<std::string> &tableNames)
 {
     PrimaryAndReplicaInfo info{};
+    // Temporary replica connection used only within this diagnostic call when
+    // slaveConnection_ is missing. It is never assigned to the member — it
+    // closes automatically (RAII) when this call returns.
+    std::shared_ptr<SqliteConnection> tempSlaveConn;
 
     int err = CollectInitialFileInfo(info);
     if (err != E_OK) {
         return { err, std::move(info) };
     }
 
-    err = TryReplayBinlog(info);
+    err = TryReplayBinlog(info, tempSlaveConn);
     if (err != E_OK) {
         LOG_ERROR("GetPrimaryAndReplicaInfo: binlog replay failed, err: %{public}d", err);
         return { err, std::move(info) };
     }
 
-    err = CheckpointDatabases(info);
+    err = CheckpointDatabases(info, tempSlaveConn);
     if (err != E_OK) {
         LOG_ERROR("GetPrimaryAndReplicaInfo: checkpoint failed, err: %{public}d", err);
         return { err, std::move(info) };
@@ -2974,7 +2999,7 @@ std::pair<int, PrimaryAndReplicaInfo> SqliteConnection::GetPrimaryAndReplicaInfo
         return { err, std::move(info) };
     }
 
-    err = CollectVersionsAndTables(info, tableNames);
+    err = CollectVersionsAndTables(info, tableNames, tempSlaveConn);
     return { err, std::move(info) };
 }
 } // namespace NativeRdb

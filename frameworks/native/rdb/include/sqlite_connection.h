@@ -168,11 +168,19 @@ private:
     std::pair<int, RdbFileInfo> StatToFileInfo(const std::string &path);
     std::pair<int, TableInfo> CountTable(const std::string &table);
     int64_t QueryUserVersion();
+    // Resolves the replica connection for a diagnostic call: the member
+    // connection first; otherwise a temporary connection is created via
+    // CreateSlaveConnection and cached in tempSlaveConn. The temporary
+    // connection is scoped to the current GetPrimaryAndReplicaInfo call and
+    // is never stored in slaveConnection_.
+    std::pair<int, std::shared_ptr<SqliteConnection>> GetDiagnosticSlaveConnection(
+        std::shared_ptr<SqliteConnection> &tempSlaveConn);
     int CollectInitialFileInfo(PrimaryAndReplicaInfo &info);
-    int TryReplayBinlog(PrimaryAndReplicaInfo &info);
-    int CheckpointDatabases(PrimaryAndReplicaInfo &info);
+    int TryReplayBinlog(PrimaryAndReplicaInfo &info, std::shared_ptr<SqliteConnection> &tempSlaveConn);
+    int CheckpointDatabases(PrimaryAndReplicaInfo &info, std::shared_ptr<SqliteConnection> &tempSlaveConn);
     int RefreshSizesAfterCheckpoint(PrimaryAndReplicaInfo &info);
-    int CollectVersionsAndTables(PrimaryAndReplicaInfo &info, const std::vector<std::string> &tableNames);
+    int CollectVersionsAndTables(PrimaryAndReplicaInfo &info, const std::vector<std::string> &tableNames,
+        std::shared_ptr<SqliteConnection> &tempSlaveConn);
     std::pair<int32_t, Stmt> CreateStatementInner(
         const std::string &sql, SConn conn, sqlite3 *db, bool isFromReplica, const std::string &returningSql = "");
     ExchangeStrategy CompareWithSlave(int64_t mCount, int64_t mIdxCount,
