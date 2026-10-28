@@ -438,7 +438,9 @@ int32_t Convert2Value(napi_env env, napi_value jsValue, RdbConfig &rdbConfig)
     ASSERT(OK == status, "get autoCleanDeviceDirtyData failed.", napi_invalid_arg);
 
     status = GetNamedProperty(env, jsValue, "dumpStackOnFileDel", rdbConfig.dumpStackOnFileDel, true);
-    ASSERT(OK == status, "get dumpStackOnFileDel failed.", napi_invalid_arg);
+    if (status != OK) {
+        rdbConfig.dumpStackOnFileDel = false;
+    }
 
     status = GetNamedProperty(env, jsValue, "name", rdbConfig.name);
     ASSERT(OK == status, "get name failed.", napi_invalid_arg);

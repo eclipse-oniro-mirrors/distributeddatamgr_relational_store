@@ -416,6 +416,9 @@ OHOS::AppDataMgrJsKit::JSUtils::RdbConfig AniGetRdbConfig(const ohos::data::rela
     if (storeConfig.autoCleanDeviceDirtyData.has_value()) {
         rdbConfig.isAutoCleanDevice = storeConfig.autoCleanDeviceDirtyData.value();
     }
+    if (storeConfig.dumpStackOnFileDel.has_value()) {
+        rdbConfig.dumpStackOnFileDel = storeConfig.dumpStackOnFileDel.value();
+    }
     rdbConfig.name = std::string(storeConfig.name);
     if (storeConfig.customDir.has_value()) {
         rdbConfig.customDir = std::string(storeConfig.customDir.value());
@@ -508,6 +511,7 @@ void InitRdbStoreConfig(OHOS::NativeRdb::RdbStoreConfig &nativeStoreConfig,
     nativeStoreConfig.SetStorageMode(rdbConfig.persist ? StorageMode::MODE_DISK : StorageMode::MODE_MEMORY);
     nativeStoreConfig.SetAutoClean(rdbConfig.isAutoClean);
     nativeStoreConfig.SetAutoCleanDevice(rdbConfig.isAutoCleanDevice);
+    nativeStoreConfig.EnableDumpStackOnFileDel(rdbConfig.dumpStackOnFileDel);
     nativeStoreConfig.SetSecurityLevel(rdbConfig.securityLevel);
     nativeStoreConfig.SetDataGroupId(rdbConfig.dataGroupId);
     nativeStoreConfig.SetName(rdbConfig.name);
