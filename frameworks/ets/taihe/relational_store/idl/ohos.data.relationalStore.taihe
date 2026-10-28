@@ -263,6 +263,7 @@ struct CloudSyncConfig {
     mode: SyncMode;
     downloadOnly: Optional<bool>;
     enablePredicate: Optional<bool>;
+    fullSync: Optional<bool>;
     predicates: Optional<RdbPredicates>;
 }
 

@@ -993,8 +993,9 @@ void RdbStoreImpl::CloudSyncWithConfig(
     OHOS::DistributedRdb::SyncOption option{ .mode = ani_rdbutils::SyncModeToNative(config.mode),
         .isBlock = false,
         .isDownloadOnly = config.downloadOnly.has_value() ? config.downloadOnly.value() : false,
-        .isEnablePredicate = config.enablePredicate.has_value() ? config.enablePredicate.value() : false };
-
+        .isEnablePredicate = config.enablePredicate.has_value() ? config.enablePredicate.value() : false,
+        .isFullSync = config.fullSync.has_value() ? config.fullSync.value() : false
+    };
     std::shared_ptr<OHOS::NativeRdb::RdbPredicates> nativePredicates;
     if (config.predicates.has_value()) {
         nativePredicates = ani_rdbutils::GetNativePredicatesFromTaihe(config.predicates.value());

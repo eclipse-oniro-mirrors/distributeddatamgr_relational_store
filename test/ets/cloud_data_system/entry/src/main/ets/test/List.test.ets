@@ -14,7 +14,9 @@
  */
 
 import CloudConfigSystemEtsTest from './CloudConfigEtsTest.test.ets';
+import CloudSyncFullSyncEtsTest from './CloudSyncFullSyncEtsTest.test.ets';
 
 export default function testsuite() {
   CloudConfigSystemEtsTest();
+  CloudSyncFullSyncEtsTest();
 }

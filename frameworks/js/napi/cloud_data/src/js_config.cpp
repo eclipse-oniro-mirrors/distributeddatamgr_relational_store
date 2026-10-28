@@ -607,6 +607,7 @@ void JsConfig::ParseCloudSyncArgs(napi_env env, size_t argc, napi_value *argv,
         &ctxt->asyncHolder) == napi_ok, Status::INVALID_ARGUMENT_V20, "create reference failed");
 
     ctxt->downloadOnly = false;
+    ctxt->isFullSync = false;
 }
 
 void JsConfig::ParseCloudSyncArgsWithConfig(napi_env env, size_t argc, napi_value *argv,
@@ -634,6 +635,7 @@ void JsConfig::ParseCloudSyncArgsWithConfig(napi_env env, size_t argc, napi_valu
 
     ctxt->syncMode = config.mode;
     ctxt->downloadOnly = config.isDownloadOnly;
+    ctxt->isFullSync = config.isFullSync;
 
     napi_valuetype progressType = napi_undefined;
     napi_status status = napi_typeof(env, argv[2], &progressType);
@@ -682,6 +684,7 @@ napi_value JsConfig::CloudSync(napi_env env, napi_callback_info info)
         option.syncMode = ctxt->syncMode;
         option.seqNum = GetSeqNum();
         option.isDownloadOnly = ctxt->downloadOnly;
+        option.isFullSync = ctxt->isFullSync;
         int32_t status = 0;
         if (ctxt->isStoreIdEmpty) {
             BundleInfo bundleInfo = { ctxt->bundleName, ctxt->storeId };

@@ -2045,6 +2045,7 @@ napi_value RdbStoreProxy::CloudSync(napi_env env, napi_callback_info info)
         option.mode = static_cast<DistributedRdb::SyncMode>(context->syncMode);
         option.isDownloadOnly = context->cloudSyncConfig.isDownloadOnly;
         option.isEnablePredicate = context->cloudSyncConfig.isEnablePredicate;
+        option.isFullSync = context->cloudSyncConfig.isFullSync;
         option.isBlock = false;
         CHECK_RETURN_ERR(obj != nullptr && context->rdbStore != nullptr);
         auto rdbStore = context->StealRdbStore();

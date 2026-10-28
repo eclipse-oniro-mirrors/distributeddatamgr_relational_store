@@ -18,6 +18,7 @@ import CleanDeviceDirtyData from './CleanDeviceDirtyData.test';
 import RequestFullDataDonation from './RequestFullDataDonation.test';
 import AssetExtensionTest from './AssetExtension.test';
 import DumpStackConfigTest from './DumpStackConfig.test';
+import RdbCloudSyncFullSyncTest from './RdbCloudSyncFullSync.test';
 export default function testsuite() {
   RetainDeviceData();
   UpdateDistributedInfo();
@@ -25,4 +26,5 @@ export default function testsuite() {
   RequestFullDataDonation();
   AssetExtensionTest();
   DumpStackConfigTest();
+  RdbCloudSyncFullSyncTest();
 }
