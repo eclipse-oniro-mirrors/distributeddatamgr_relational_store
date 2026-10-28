@@ -2939,22 +2939,20 @@ std::pair<int, PrimaryAndReplicaInfo> SqliteConnection::GetPrimaryAndReplicaInfo
     }
 
     // The remaining steps execute against the slave handle (binlog replay,
-    // replica checkpoint, replica version/table queries). Resolve the replica
-    // connection once: the member connection when present, otherwise a
-    // temporary one created via CreateSlaveConnection — scoped to this call,
-    // never stored in slaveConnection_, closed automatically (RAII) on return.
-    std::shared_ptr<SqliteConnection> tempSlaveConn;
-    if (slaveConnection_ == nullptr) {
+    // replica checkpoint, replica version/table queries). Use the member
+    // replica connection when present; otherwise create a temporary one —
+    // scoped to this call, never stored in slaveConnection_, closed
+    // automatically (RAII) on return.
+    std::shared_ptr<SqliteConnection> slaveConn = slaveConnection_;
+    if (slaveConn == nullptr) {
         RdbStoreConfig rdbSlaveStoreConfig = GetSlaveRdbStoreConfig(config_);
         auto [createErr, conn] = CreateSlaveConnection(rdbSlaveStoreConfig, SlaveOpenPolicy::FORCE_OPEN);
         if (createErr != E_OK || conn == nullptr) {
             LOG_ERROR("GetPrimaryAndReplicaInfo: create slave connection failed, err: %{public}d", createErr);
             return { createErr != E_OK ? createErr : E_ERROR, std::move(info) };
         }
-        tempSlaveConn = std::move(conn);
+        slaveConn = std::move(conn);
     }
-    std::shared_ptr<SqliteConnection> slaveConn =
-        (slaveConnection_ != nullptr) ? slaveConnection_ : tempSlaveConn;
 
     err = TryReplayBinlog(info, slaveConn);
     if (err != E_OK) {
