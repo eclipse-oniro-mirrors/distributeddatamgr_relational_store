@@ -1638,7 +1638,7 @@ HWTEST_F(PrimaryReplicaInfoTest, SlaveConnCreateFailure_001, TestSize.Level1)
     // CreateSlaveConnection cannot open a database there.
     RdbHelper::DeleteRdbStore(slaveDbName);
     ASSERT_EQ(mkdir(slaveDbName.c_str(), 0755), 0) << "Slave path should become a directory";
-    ScopeGuard removeDir([&]() { rmdir(slaveDbName.c_str()); });
+    ScopeGuard removeDir([this]() { rmdir(slaveDbName.c_str()); });
 
     RdbStoreConfig config(dbName);
     config.SetHaMode(HAMode::MAIN_REPLICA);
@@ -1671,7 +1671,7 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaCheckpointBusy_001, TestSize.Level1)
     sqlite3 *rawSlave = nullptr;
     ASSERT_EQ(sqlite3_open(slaveDbName.c_str(), &rawSlave), SQLITE_OK);
     sqlite3_stmt *rawStmt = nullptr;
-    ScopeGuard closeRaw([&]() {
+    ScopeGuard closeRaw([&rawStmt, &rawSlave]() {
         if (rawStmt != nullptr) {
             sqlite3_finalize(rawStmt);
         }
