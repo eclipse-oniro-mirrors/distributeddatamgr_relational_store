@@ -21,6 +21,8 @@ const TAG = "[RDB_DUMP_STACK_CONFIG_TEST]";
 const delegator = AbilityDelegatorRegistry.getAbilityDelegator();
 const context = delegator.getAppContext().getApplicationContext();
 const STORE_NAME = "dump_stack_config.db";
+const CREATE_TABLE_SQL = 'CREATE TABLE IF NOT EXISTS dump_stack_config_test ' +
+  '(id INTEGER PRIMARY KEY AUTOINCREMENT, data1 TEXT, data2 INTEGER)';
 let rdbStore: relationalStore.RdbStore | undefined;
 
 export default function dumpStackConfigTest() {
@@ -88,6 +90,71 @@ export default function dumpStackConfigTest() {
         expect().assertFail()
       }
       console.info(TAG + "************* testDumpStackConfig0002 end   *************");
+    })
+
+    /**
+     * @tc.name getRdbStore without dumpStackOnFileDeletion
+     * @tc.number SUB_DDM_APPDATAFWK_JSRDB_DumpStackConfig_003
+     * @tc.desc open rdb store without passing dumpStackOnFileDeletion, create table and insert data succeed
+     */
+    it('testDumpStackConfig0003', 0, async function () {
+      console.info(TAG + "************* testDumpStackConfig0003 start *************");
+      try {
+        let storeConfig: relationalStore.StoreConfig = {
+          name: STORE_NAME,
+          securityLevel: relationalStore.SecurityLevel.S1
+        };
+        rdbStore = await relationalStore.getRdbStore(context, storeConfig);
+        expect(rdbStore !== null && rdbStore !== undefined).assertTrue();
+        await rdbStore.executeSql(CREATE_TABLE_SQL);
+        const valueBucket: relationalStore.ValuesBucket = {
+          'data1': 'test_data_003',
+          'data2': 100
+        };
+        let rowId = await rdbStore.insert('dump_stack_config_test', valueBucket);
+        expect(rowId > 0).assertTrue();
+        let predicates = new relationalStore.RdbPredicates('dump_stack_config_test');
+        let resultSet = await rdbStore.query(predicates);
+        expect(resultSet.rowCount).assertEqual(1);
+        resultSet.close();
+      } catch (err) {
+        console.log(TAG + `failed, errcode:${JSON.stringify(err)}.`);
+        expect().assertFail()
+      }
+      console.info(TAG + "************* testDumpStackConfig0003 end   *************");
+    })
+
+    /**
+     * @tc.name getRdbStore with dumpStackOnFileDeletion undefined
+     * @tc.number SUB_DDM_APPDATAFWK_JSRDB_DumpStackConfig_004
+     * @tc.desc open rdb store with dumpStackOnFileDeletion set to undefined, create table and insert data succeed
+     */
+    it('testDumpStackConfig0004', 0, async function () {
+      console.info(TAG + "************* testDumpStackConfig0004 start *************");
+      try {
+        let storeConfig: relationalStore.StoreConfig = {
+          name: STORE_NAME,
+          securityLevel: relationalStore.SecurityLevel.S1,
+          dumpStackOnFileDeletion: undefined
+        };
+        rdbStore = await relationalStore.getRdbStore(context, storeConfig);
+        expect(rdbStore !== null && rdbStore !== undefined).assertTrue();
+        await rdbStore.executeSql(CREATE_TABLE_SQL);
+        const valueBucket: relationalStore.ValuesBucket = {
+          'data1': 'test_data_004',
+          'data2': 200
+        };
+        let rowId = await rdbStore.insert('dump_stack_config_test', valueBucket);
+        expect(rowId > 0).assertTrue();
+        let predicates = new relationalStore.RdbPredicates('dump_stack_config_test');
+        let resultSet = await rdbStore.query(predicates);
+        expect(resultSet.rowCount).assertEqual(1);
+        resultSet.close();
+      } catch (err) {
+        console.log(TAG + `failed, errcode:${JSON.stringify(err)}.`);
+        expect().assertFail()
+      }
+      console.info(TAG + "************* testDumpStackConfig0004 end   *************");
     })
   })
 }
