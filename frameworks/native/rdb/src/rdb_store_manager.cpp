@@ -124,12 +124,10 @@ std::shared_ptr<RdbStore> RdbStoreManager::GetRdbStore(
     // If it is a distributeddata request, never need ACL
     // If it is a local-only database, never need ACL
     auto isSilentAccessible = [this, &config]() {
-        if (config.IsLocalOnly()) {
-            return false;
-        }
-        return (config.GetSilentAccessibleStatus() == SilentAccessibleStatus::SUPPORT) ||
-            (config.GetSilentAccessibleStatus() == SilentAccessibleStatus::UNKNOWN &&
-                silentProxyManager_.IsSupportSilent(config.GetBundleName(), config.GetName()).second);
+        return !config.IsLocalOnly() &&
+            (config.GetSilentAccessibleStatus() == SilentAccessibleStatus::SUPPORT ||
+                (config.GetSilentAccessibleStatus() == SilentAccessibleStatus::UNKNOWN &&
+                    silentProxyManager_.IsSupportSilent(config.GetBundleName(), config.GetName()).second));
     };
     bool isNeedAcl = (RdbMgr::GetInstance().IsProxy()) && (config.GetRoleType() == OWNER) &&
                     (!config.IsLocalOnly()) && (config.IsSearchable() || isSilentAccessible());
