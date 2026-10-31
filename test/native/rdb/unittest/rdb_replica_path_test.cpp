@@ -934,3 +934,56 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_016, TestSize.Level1)
     store = nullptr;
     RemoveFolder(customSlaveDirA);
 }
+
+/**
+ * @tc.name: RdbStore_ReplicaPath_017
+ * @tc.desc: replicaPath containing ".." path traversal is rejected and degrades to master-only open
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_017, TestSize.Level0)
+{
+    // 1. prepare: an existing custom dir and ".."-containing paths pointing to it
+    std::string customSlaveDir = RDB_TEST_PATH + "custom_slave_dir_017";
+    if (CheckFolderExist(customSlaveDir)) {
+        RemoveFolder(customSlaveDir);
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(customSlaveDir, ec);
+    std::string traversalDir = RDB_TEST_PATH + "custom_slave_dir_017/../custom_slave_dir_017";
+
+    // 2. act: validate replicaPath containing ".."
+    EXPECT_FALSE(SqliteUtils::IsValidReplicaPath(traversalDir))
+        << "resolvable '..' path must be rejected, path=" << traversalDir;
+    EXPECT_FALSE(SqliteUtils::IsValidReplicaPath("/data/../data/test"))
+        << "existing '..' path must be rejected";
+    EXPECT_FALSE(SqliteUtils::IsValidReplicaPath(RDB_TEST_PATH + "../no_such_dir_017"))
+        << "non-existing '..' path must be rejected";
+
+    // 3. act: open MAIN_REPLICA with the ".." replicaPath
+    RdbStoreConfig config(RdbReplicaPathTest::databaseName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    config.SetReplicaPath(traversalDir);
+    int errCode = E_OK;
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(store, nullptr) << "master open should succeed in degraded mode";
+    EXPECT_EQ(errCode, E_OK);
+
+    // 4. assert: slave unavailable, failure flag written, master RW still normal
+    EXPECT_FALSE(store->IsSlaveAvailable());
+    EXPECT_TRUE(store->IsSlaveDiffFromMaster());
+    ASSERT_TRUE(SqliteUtils::IsSlaveInvalid(RdbReplicaPathTest::databaseName));
+    int64_t id = 1;
+    int count = 10;
+    Insert(id, count);
+    CheckNumber(store, count);
+
+    // 5. assert: no slave file lands in the ".." target dir and backup fails
+    EXPECT_NE(access((customSlaveDir + "/dual_write_binlog_test_slave.db").c_str(), F_OK), 0)
+        << "no slave db should be created in the traversal target dir";
+    EXPECT_NE(store->Backup(std::string(""), {}), E_OK);
+
+    store = nullptr;
+    RemoveFolder(customSlaveDir);
+}
+
