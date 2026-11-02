@@ -123,12 +123,15 @@ std::shared_ptr<RdbStore> RdbStoreManager::GetRdbStore(
     // If configured to NOSUPPORT, never need ACL
     // If it is a distributeddata request, never need ACL
     // If it is a local-only database, never need ACL
-    bool isSilentAccessible = (config.GetSilentAccessibleStatus() == SilentAccessibleStatus::SUPPORT) ||
-        (config.GetSilentAccessibleStatus() == SilentAccessibleStatus::UNKNOWN &&
-            silentProxyManager_.IsSupportSilent(config.GetBundleName(), config.GetName()).second);
+    auto isSilentAccessible = [this, &config]() {
+        return !config.IsLocalOnly() &&
+            (config.GetSilentAccessibleStatus() == SilentAccessibleStatus::SUPPORT ||
+                (config.GetSilentAccessibleStatus() == SilentAccessibleStatus::UNKNOWN &&
+                    silentProxyManager_.IsSupportSilent(config.GetBundleName(), config.GetName()).second));
+    };
     bool isNeedAcl = (RdbMgr::GetInstance().IsProxy()) && (config.GetRoleType() == OWNER) &&
-                    (!config.IsLocalOnly()) && (config.IsSearchable() || isSilentAccessible);
-    errCode = rdbStore->Init(version, openCallback, isNeedAcl, isSilentAccessible);
+                    (!config.IsLocalOnly()) && (config.IsSearchable() || isSilentAccessible());
+    errCode = rdbStore->Init(version, openCallback, isNeedAcl, isSilentAccessible());
     if (errCode != E_OK) {
         if (modifyConfig.IsEncrypt() != config.IsEncrypt()) {
             rdbStore = nullptr;
@@ -136,7 +139,7 @@ std::shared_ptr<RdbStore> RdbStoreManager::GetRdbStore(
             if (rdbStore == nullptr) {
                 return rdbStore;
             }
-            errCode = rdbStore->Init(version, openCallback, isNeedAcl, isSilentAccessible);
+            errCode = rdbStore->Init(version, openCallback, isNeedAcl, isSilentAccessible());
         }
         if (errCode != E_OK || rdbStore == nullptr) {
             rdbStore = nullptr;
