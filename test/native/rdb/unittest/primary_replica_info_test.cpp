@@ -1730,3 +1730,41 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaCheckpointBusy_001, TestSize.Level1)
     // Partial results collected before the failure remain available.
     EXPECT_GT(info.primaryInfo.dbInfo.size, 0);
 }
+
+/**
+ * @tc.name: PrimaryReplicaInfo_GetPrimaryReplicaInfo_TableLimitExceeded_001
+ * @tc.desc: AC-4.5: GetPrimaryReplicaInfo rejects more than 16 table names at the
+ *           RdbStoreImpl entry with E_INVALID_ARGS, before any diagnostic work runs.
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, GetPrimaryReplicaInfo_TableLimitExceeded_001, TestSize.Level1)
+{
+    // Arrange: 17 table names exceeds the 16-table entry limit.
+    std::vector<std::string> tableNames(17, "test");
+
+    // Act: call the RdbStoreImpl entry (not the SqliteConnection layer directly).
+    auto [ret, info] = store_->GetPrimaryReplicaInfo(tableNames);
+
+    // Assert: rejected at the entry with E_INVALID_ARGS.
+    EXPECT_EQ(ret, E_INVALID_ARGS) << "17 tables exceeds the 16-table limit, must be rejected at entry";
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_GetPrimaryReplicaInfo_TableLimitBoundary_001
+ * @tc.desc: AC-4.5: Exactly 16 table names is the allowed maximum — the entry does NOT
+ *           reject it as E_INVALID_ARGS (the diagnostic runs normally).
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, GetPrimaryReplicaInfo_TableLimitBoundary_001, TestSize.Level1)
+{
+    // Arrange: insert data so the diagnostic has something to count; 16 table names
+    // is the boundary (the limit is >16 rejected, 16 is the max allowed).
+    InsertRows(store_, 1, 2);
+    std::vector<std::string> tableNames(16, "test");
+
+    // Act: call the RdbStoreImpl entry.
+    auto [ret, info] = store_->GetPrimaryReplicaInfo(tableNames);
+
+    // Assert: not rejected as invalid args at the entry (16 is within the limit).
+    EXPECT_NE(ret, E_INVALID_ARGS) << "16 tables is within the limit, must not be rejected as invalid args";
+}

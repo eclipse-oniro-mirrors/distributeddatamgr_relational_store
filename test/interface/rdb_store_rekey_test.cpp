@@ -436,7 +436,7 @@ HWTEST_F(RdbInterfaceRekeyTest, Rdb_Rekey_07, TestSize.Level1)
     store = nullptr;
 
     {
-        std::ofstream fsDb(encryptedDatabasePath, std::ios_base::binary | std::ios_base::out);
+        std::fstream fsDb(encryptedDatabasePath, std::ios::binary | std::ios::in | std::ios::out);
         fsDb.seekp(64);
         fsDb.write("hello", 5);
         fsDb.close();
@@ -482,7 +482,7 @@ HWTEST_F(RdbInterfaceRekeyTest, Rdb_Rekey_08, TestSize.Level1)
     store = nullptr;
 
     {
-        std::ofstream fsDb(encryptedDatabasePath, std::ios_base::binary | std::ios_base::out);
+        std::fstream fsDb(encryptedDatabasePath, std::ios::binary | std::ios::in | std::ios::out);
         fsDb.seekp(64);
         fsDb.write("hello", 5);
         fsDb.close();
