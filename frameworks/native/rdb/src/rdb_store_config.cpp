@@ -640,14 +640,14 @@ void RdbStoreConfig::SetAuditEnabled(bool isAuditEnabled)
     isAuditEnabled_ = isAuditEnabled;
 }
 
-bool RdbStoreConfig::IsDumpStackOnFileDelEnabled() const
+bool RdbStoreConfig::IsDumpStackOnFileDeletionEnabled() const
 {
-    return dumpStackOnFileDel_;
+    return dumpStackOnFileDeletion_;
 }
 
-void RdbStoreConfig::EnableDumpStackOnFileDel(bool enable)
+void RdbStoreConfig::EnableDumpStackOnFileDeletion(bool enable)
 {
-    dumpStackOnFileDel_ = enable;
+    dumpStackOnFileDeletion_ = enable;
 }
 
 void RdbStoreConfig::SetIntegrityCheck(IntegrityCheck checkType)

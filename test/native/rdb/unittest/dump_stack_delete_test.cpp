@@ -69,7 +69,7 @@ HWTEST_F(DumpStackDeleteTest, DumpStackDelete_ClearTagsBeforeDelete_001, TestSiz
 {
     const std::string dbPath = std::string(TEST_DIR) + "delete_on.db";
     RdbStoreConfig config(dbPath);
-    config.EnableDumpStackOnFileDel(true);
+    config.EnableDumpStackOnFileDeletion(true);
     DumpStackDeleteCallback helper;
     int errCode = E_ERROR;
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 1, helper, errCode);

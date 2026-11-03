@@ -47,9 +47,9 @@ export default function dumpStackConfigTest() {
     })
 
     /**
-     * @tc.name getRdbStore with dumpStackOnFileDel true
+     * @tc.name getRdbStore with dumpStackOnFileDeletion true
      * @tc.number SUB_DDM_APPDATAFWK_JSRDB_DumpStackConfig_001
-     * @tc.desc open rdb store with dumpStackOnFileDel set to true succeeds
+     * @tc.desc open rdb store with dumpStackOnFileDeletion set to true succeeds
      */
     it('testDumpStackConfig0001', 0, async function () {
       console.info(TAG + "************* testDumpStackConfig0001 start *************");
@@ -57,7 +57,7 @@ export default function dumpStackConfigTest() {
         let storeConfig: relationalStore.StoreConfig = {
           name: STORE_NAME,
           securityLevel: relationalStore.SecurityLevel.S1,
-          dumpStackOnFileDel: true
+          dumpStackOnFileDeletion: true
         };
         rdbStore = await relationalStore.getRdbStore(context, storeConfig);
         expect(rdbStore !== null && rdbStore !== undefined).assertTrue();
@@ -69,9 +69,9 @@ export default function dumpStackConfigTest() {
     })
 
     /**
-     * @tc.name getRdbStore with dumpStackOnFileDel false
+     * @tc.name getRdbStore with dumpStackOnFileDeletion false
      * @tc.number SUB_DDM_APPDATAFWK_JSRDB_DumpStackConfig_002
-     * @tc.desc open rdb store with dumpStackOnFileDel set to false succeeds
+     * @tc.desc open rdb store with dumpStackOnFileDeletion set to false succeeds
      */
     it('testDumpStackConfig0002', 0, async function () {
       console.info(TAG + "************* testDumpStackConfig0002 start *************");
@@ -79,7 +79,7 @@ export default function dumpStackConfigTest() {
         let storeConfig: relationalStore.StoreConfig = {
           name: STORE_NAME,
           securityLevel: relationalStore.SecurityLevel.S1,
-          dumpStackOnFileDel: false
+          dumpStackOnFileDeletion: false
         };
         rdbStore = await relationalStore.getRdbStore(context, storeConfig);
         expect(rdbStore !== null && rdbStore !== undefined).assertTrue();

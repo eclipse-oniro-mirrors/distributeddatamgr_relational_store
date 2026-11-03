@@ -159,7 +159,7 @@ void RdbStoreImpl::InitSyncerParam(const RdbStoreConfig &config, bool created)
     syncerParam_.subUser_ = config.GetSubUser();
     syncerParam_.isLocalOnly_ = config.IsLocalOnly();
     syncerParam_.replicaPath_ = config.GetReplicaPath();
-    syncerParam_.dumpStackOnFileDel_ = config.IsDumpStackOnFileDelEnabled();
+    syncerParam_.dumpStackOnFileDeletion_ = config.IsDumpStackOnFileDeletionEnabled();
     syncerParam_.dfxInfo_.lastOpenTime_ = RdbTimeUtils::GetCurSysTimeWithMs();
     std::string serverPath = config.GetServerPath();
     if (!serverPath.empty() && (serverPath.find(syncerParam_.bundleName_) != std::string::npos) &&
@@ -1695,7 +1695,7 @@ int32_t RdbStoreImpl::Init(int version, RdbOpenCallback &openCallback, bool isNe
     // If it is a distributeddata request, never need ACL. Dump-stack-on-file-deletion
     // reuses the existing ACL path (the service tags db/wal/shm like distributed sync).
     isNeedSetAcl = RdbMgr::GetInstance().IsProxy() &&
-                   (isNeedSetAcl || config_.IsDumpStackOnFileDelEnabled() ||
+                   (isNeedSetAcl || config_.IsDumpStackOnFileDeletionEnabled() ||
                     SqliteUtils::HasAccessAcl(config_.GetPath(), SERVICE_GID) ||
                     SqliteUtils::HasAccessAcl(SqliteUtils::GetSlavePath(config_), SERVICE_GID));
     std::lock_guard<std::mutex> lock(initMutex_);
@@ -2796,7 +2796,7 @@ std::pair<int32_t, int32_t> RdbStoreImpl::Detach(const std::string &attachName, 
         connection = nullptr;
         readers.clear();
         errCode = pool->EnableWal();
-        if (errCode == E_OK && config_.IsDumpStackOnFileDelEnabled()) {
+        if (errCode == E_OK && config_.IsDumpStackOnFileDeletionEnabled()) {
             // AC-2.5: wal/shm files are re-created in WAL mode; notify the service to
             // re-tag db/wal/shm (idempotent, BR-6). Failures degrade silently (BR-5).
             auto [err, service] = RdbMgr::GetInstance().GetRdbService(syncerParam_);

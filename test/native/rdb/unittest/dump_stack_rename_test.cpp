@@ -71,7 +71,7 @@ HWTEST_F(DumpStackRenameTest, DumpStackRename_RenameWithTaggedFile_001, TestSize
     const std::string dbPath = std::string(TEST_DIR) + "rename_src.db";
     const std::string destPath = std::string(TEST_DIR) + "rename_dest.db";
     RdbStoreConfig config(dbPath);
-    config.EnableDumpStackOnFileDel(true);
+    config.EnableDumpStackOnFileDeletion(true);
     DumpStackRenameCallback helper;
     int errCode = E_ERROR;
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 1, helper, errCode);

@@ -63,14 +63,14 @@ using namespace RdbTest;
 
 /**
  * @tc.name: DumpStackAcl_GrantedWhenEnabled_001
- * @tc.desc: test dumpStackOnFileDel grants service ACL through the existing isNeedSetAcl path
+ * @tc.desc: test dumpStackOnFileDeletion grants service ACL through the existing isNeedSetAcl path
  * @tc.type: FUNC
  */
 HWTEST_F(DumpStackAclTest, DumpStackAcl_GrantedWhenEnabled_001, TestSize.Level1)
 {
     const std::string dbPath = std::string(TEST_DIR) + "acl_on.db";
     RdbStoreConfig config(dbPath);
-    config.EnableDumpStackOnFileDel(true);
+    config.EnableDumpStackOnFileDeletion(true);
     DumpStackAclCallback helper;
     int errCode = E_ERROR;
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
@@ -95,7 +95,7 @@ HWTEST_F(DumpStackAclTest, DumpStackAcl_GrantedWhenEnabled_001, TestSize.Level1)
 
 /**
  * @tc.name: DumpStackAcl_NotGrantedByDefault_002
- * @tc.desc: test service ACL is not granted when dumpStackOnFileDel is not set
+ * @tc.desc: test service ACL is not granted when dumpStackOnFileDeletion is not set
  * @tc.type: FUNC
  */
 HWTEST_F(DumpStackAclTest, DumpStackAcl_NotGrantedByDefault_002, TestSize.Level1)
