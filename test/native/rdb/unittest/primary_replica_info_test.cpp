@@ -733,9 +733,9 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaDbStatFromConfig_001, TestSize.Level1)
 
 /**
  * @tc.name: PrimaryReplicaInfo_NoSlaveConnection_001
- * @tc.desc: AC-4.2: A standalone read connection starts without slaveConnection_;
- *           when the replica DB exists the diagnostic force-creates the replica
- *           connection (CreateSlaveConnection), so replica info is fully collected.
+ * @tc.desc: AC-4.2: A write connection whose slave is marked invalid starts without
+ *           slaveConnection_; when the replica DB exists the diagnostic force-creates
+ *           the replica connection (CreateSlaveConnection), so replica info is fully collected.
  * @tc.type: FUNC
  */
 HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnection_001, TestSize.Level1)
@@ -745,11 +745,19 @@ HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnection_001, TestSize.Level1)
     store_ = nullptr;
     RdbHelper::ClearCache();
 
+    // Mark the slave invalid AFTER InsertRows (data was double-written to the replica
+    // on disk) so the write connection below skips slave creation (MANUAL_TRIGGER +
+    // OPEN_IF_DB_VALID honors the invalid marker), leaving slaveConnection_ null. The
+    // diagnostic later force-opens the replica via CreateSlaveConnection(FORCE_OPEN).
+    SqliteUtils::SetSlaveInvalid(dbName);
+    ScopeGuard clearInvalid([this]() { SqliteUtils::SetSlaveValid(dbName); });
+
     RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MAIN_REPLICA);
-    // Read connection (isWrite=false) skips slave creation in InnerCreate → slaveConnection_ is null.
-    auto [createErr, conn] = SqliteConnection::Create(config, false);
-    ASSERT_EQ(createErr, E_OK) << "Failed to create standalone read connection";
+    config.SetHaMode(HAMode::MANUAL_TRIGGER);
+    // Write connection (isWrite=true): only a write connection creates a replica.
+    // The invalid marker above keeps slaveConnection_ null at open time.
+    auto [createErr, conn] = SqliteConnection::Create(config, true);
+    ASSERT_EQ(createErr, E_OK) << "Failed to create standalone write connection";
     ASSERT_NE(conn, nullptr);
 
     auto [ret, info] = conn->GetPrimaryAndReplicaInfo({});
@@ -1012,9 +1020,9 @@ HWTEST_F(PrimaryReplicaInfoTest, EmptyStringInTableNames_001, TestSize.Level1)
 
 /**
  * @tc.name: PrimaryReplicaInfo_NoSlaveConnectionWithTable_001
- * @tc.desc: AC-4.2: Standalone connection with non-empty tableNames — the diagnostic
- *           force-creates the replica connection, so both primary and replica tables
- *           are counted and their results match.
+ * @tc.desc: AC-4.2: A write connection with the slave marked invalid and non-empty
+ *           tableNames — the diagnostic force-creates the replica connection, so both
+ *           primary and replica tables are counted and their results match.
  * @tc.type: FUNC
  */
 HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnectionWithTable_001, TestSize.Level1)
@@ -1023,9 +1031,14 @@ HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnectionWithTable_001, TestSize.Level1
     store_ = nullptr;
     RdbHelper::ClearCache();
 
+    // Invalidate the slave AFTER InsertRows so the write connection opens without a
+    // slave connection; the diagnostic force-creates it for the counting loop.
+    SqliteUtils::SetSlaveInvalid(dbName);
+    ScopeGuard clearInvalid([this]() { SqliteUtils::SetSlaveValid(dbName); });
+
     RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MAIN_REPLICA);
-    auto [createErr, conn] = SqliteConnection::Create(config, false);
+    config.SetHaMode(HAMode::MANUAL_TRIGGER);
+    auto [createErr, conn] = SqliteConnection::Create(config, true);
     ASSERT_EQ(createErr, E_OK);
     ASSERT_NE(conn, nullptr);
 
@@ -1129,9 +1142,14 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaDbStatFailure_001, TestSize.Level1)
     RdbHelper::DeleteRdbStore(slaveDbName);
     ASSERT_NE(access(slaveDbName.c_str(), F_OK), 0) << "Slave DB should be deleted";
 
+    // Invalidate the slave AFTER InsertRows so the write connection opens without a
+    // slave connection; the diagnostic then fails at the replica DB stat (file missing).
+    SqliteUtils::SetSlaveInvalid(dbName);
+    ScopeGuard clearInvalid([this]() { SqliteUtils::SetSlaveValid(dbName); });
+
     RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MAIN_REPLICA);
-    auto [createErr, conn] = SqliteConnection::Create(config, false);
+    config.SetHaMode(HAMode::MANUAL_TRIGGER);
+    auto [createErr, conn] = SqliteConnection::Create(config, true);
     ASSERT_EQ(createErr, E_OK);
     ASSERT_NE(conn, nullptr);
 
@@ -1361,21 +1379,25 @@ HWTEST_F(PrimaryReplicaInfoTest, SlaveCountTableErrorPath_001, TestSize.Level1)
 
 /**
  * @tc.name: PrimaryReplicaInfo_SlaveCountTableErrorPath_002
- * @tc.desc: AC-4.3: A standalone read connection gets its replica connection
- *           force-created during the diagnostic, so slave CountTable runs and
- *           replica table results match the primary.
+ * @tc.desc: AC-4.3: A write connection with the slave marked invalid gets its replica
+ *           connection force-created during the diagnostic, so slave CountTable runs
+ *           and replica table results match the primary.
  * @tc.type: FUNC
  */
 HWTEST_F(PrimaryReplicaInfoTest, SlaveCountTableErrorPath_002, TestSize.Level1)
 {
-    // Arrange: insert data and create a standalone read connection (no slave)
+    // Arrange: insert data (double-written to the replica), then open a write
+    // connection whose slave is marked invalid so slaveConnection_ stays null.
     InsertRows(store_, 1, 4);
     store_ = nullptr;
     RdbHelper::ClearCache();
 
+    SqliteUtils::SetSlaveInvalid(dbName);
+    ScopeGuard clearInvalid([this]() { SqliteUtils::SetSlaveValid(dbName); });
+
     RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MAIN_REPLICA);
-    auto [createErr, conn] = SqliteConnection::Create(config, false);
+    config.SetHaMode(HAMode::MANUAL_TRIGGER);
+    auto [createErr, conn] = SqliteConnection::Create(config, true);
     ASSERT_EQ(createErr, E_OK);
     ASSERT_NE(conn, nullptr);
 
@@ -1606,9 +1628,15 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaWalMissing_001, TestSize.Level1)
     }
     ASSERT_NE(access(slaveWalPath.c_str(), F_OK), 0) << "Replica WAL should be gone";
 
+    // Invalidate the slave AFTER InsertRows so the write connection opens without a
+    // slave connection; the diagnostic force-creates it, but the missing WAL is already
+    // gone before that connection exists, so the initial WAL stat fails softly.
+    SqliteUtils::SetSlaveInvalid(dbName);
+    ScopeGuard clearInvalid([this]() { SqliteUtils::SetSlaveValid(dbName); });
+
     RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MAIN_REPLICA);
-    auto [createErr, conn] = SqliteConnection::Create(config, false);
+    config.SetHaMode(HAMode::MANUAL_TRIGGER);
+    auto [createErr, conn] = SqliteConnection::Create(config, true);
     ASSERT_EQ(createErr, E_OK);
     ASSERT_NE(conn, nullptr);
 
@@ -1640,9 +1668,15 @@ HWTEST_F(PrimaryReplicaInfoTest, SlaveConnCreateFailure_001, TestSize.Level1)
     ASSERT_EQ(mkdir(slaveDbName.c_str(), 0755), 0) << "Slave path should become a directory";
     ScopeGuard removeDir([this]() { rmdir(slaveDbName.c_str()); });
 
+    // Invalidate the slave AFTER InsertRows so the write connection opens without a
+    // slave connection; the diagnostic then force-creates the slave and fails because
+    // the replica path is a directory (cannot be opened as a database).
+    SqliteUtils::SetSlaveInvalid(dbName);
+    ScopeGuard clearInvalid([this]() { SqliteUtils::SetSlaveValid(dbName); });
+
     RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MAIN_REPLICA);
-    auto [createErr, conn] = SqliteConnection::Create(config, false);
+    config.SetHaMode(HAMode::MANUAL_TRIGGER);
+    auto [createErr, conn] = SqliteConnection::Create(config, true);
     ASSERT_EQ(createErr, E_OK);
     ASSERT_NE(conn, nullptr);
 
@@ -1667,7 +1701,8 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaCheckpointBusy_001, TestSize.Level1)
     InsertRows(store_, 1, 5);
 
     // Open a raw read on the slave and keep the statement stepped-but-not-reset:
-    // it pins a WAL read-mark at the current WAL head (frame P).
+    // it pins a WAL read-mark at the current WAL head (frame P). Use sqlite_master
+    // (always present) so the raw read does not depend on a user table existing.
     sqlite3 *rawSlave = nullptr;
     ASSERT_EQ(sqlite3_open(slaveDbName.c_str(), &rawSlave), SQLITE_OK);
     sqlite3_stmt *rawStmt = nullptr;
@@ -1679,7 +1714,7 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaCheckpointBusy_001, TestSize.Level1)
             sqlite3_close(rawSlave);
         }
     });
-    ASSERT_EQ(sqlite3_prepare_v2(rawSlave, "SELECT * FROM test", -1, &rawStmt, nullptr), SQLITE_OK);
+    ASSERT_EQ(sqlite3_prepare_v2(rawSlave, "SELECT * FROM sqlite_master", -1, &rawStmt, nullptr), SQLITE_OK);
     ASSERT_EQ(sqlite3_step(rawStmt), SQLITE_ROW) << "Raw read on the slave should hold an active row";
 
     // Grow the slave WAL beyond the reader's mark (frames P+1..Q): the

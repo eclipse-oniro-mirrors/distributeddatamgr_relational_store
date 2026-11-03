@@ -83,6 +83,10 @@ constexpr uint32_t SqliteConnection::WAL_INDEX;
 constexpr int32_t SERVICE_GID = 3012;
 constexpr int32_t BINLOG_FILE_REPLAY_LIMIT = 50;
 constexpr int64_t BINLOG_REPLAY_REPORT_TIME = 15 * 60 * 1000; // ms
+// Cap per-table detail logging in GetPrimaryReplicaInfo diagnostics: print detail
+// for the first MAX_DETAIL_TABLES tables, aggregate the rest into one summary line
+// to avoid log amplification on databases with a large number of tables.
+constexpr size_t MAX_DETAIL_TABLES = 50;
 ConcurrentMap<uint64_t, Connection::ReplayCallBack> SqliteConnection::replayCallback_ = {};
 __attribute__((used))
 const int32_t SqliteConnection::regCreator_ = Connection::RegisterCreator(DB_SQLITE, SqliteConnection::Create);
@@ -2918,12 +2922,19 @@ int SqliteConnection::CollectVersionsAndTables(PrimaryAndReplicaInfo &info,
     LOG_INFO("CollectVersionsAndTables: primaryUserVersion=%{public}" PRId64
         ", replicaUserVersion=%{public}" PRId64 ", tableCount=%{public}zu",
         info.primaryInfo.userVersion, info.replicaInfo.userVersion, info.primaryInfo.tables.size());
+    size_t detailed = 0;
     for (const auto &entry : info.primaryInfo.tables) {
+        if (detailed >= MAX_DETAIL_TABLES) {
+            LOG_INFO("CollectVersionsAndTables: remaining %{public}zu tables detail omitted",
+                info.primaryInfo.tables.size() - detailed);
+            break;
+        }
         auto replicaIt = info.replicaInfo.tables.find(entry.first);
         int64_t replicaCount = (replicaIt != info.replicaInfo.tables.end()) ? replicaIt->second.count : -1;
         LOG_INFO("CollectVersionsAndTables: table=%{public}s, primaryCount=%{public}" PRId64
             ", replicaCount=%{public}" PRId64,
             SqliteUtils::Anonymous(entry.first).c_str(), entry.second.count, replicaCount);
+        detailed++;
     }
     return E_OK;
 }

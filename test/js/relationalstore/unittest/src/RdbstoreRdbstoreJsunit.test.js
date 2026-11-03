@@ -1516,11 +1516,11 @@ describe('rdbStoreTest', function () {
         try {
             let store = await data_relationalStore.getRdbStore(context, storeConfig);
             await store.executeSql(CREATE_TABLE_TEST);
-            store.close();
+            await store.close();
             console.log(TAG + "getRdbStore success 1");
             cryptoParam.encryptionKey = new Uint8Array([6, 5, 4, 3, 2, 1]);
             store = await data_relationalStore.getRdbStore(context, storeConfig);
-            store.close();
+            await store.close();
             console.log(TAG + "getRdbStore success 2");
             expect(false).assertTrue();
         } catch (e) {
