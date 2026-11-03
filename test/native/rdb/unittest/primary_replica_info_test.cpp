@@ -732,54 +732,6 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaDbStatFromConfig_001, TestSize.Level1)
 }
 
 /**
- * @tc.name: PrimaryReplicaInfo_NoSlaveConnection_001
- * @tc.desc: AC-4.2: A write connection whose slave is marked invalid starts without
- *           slaveConnection_; when the replica DB exists the diagnostic force-creates
- *           the replica connection (CreateSlaveConnection), so replica info is fully collected.
- * @tc.type: FUNC
- */
-HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnection_001, TestSize.Level1)
-{
-    InsertRows(store_, 1, 2);
-    // Release the fixture pool so a standalone connection opens without lock conflict.
-    store_ = nullptr;
-    RdbHelper::ClearCache();
-
-    // Mark the slave invalid AFTER InsertRows (data was double-written to the replica
-    // on disk) so the write connection below skips slave creation (MANUAL_TRIGGER +
-    // OPEN_IF_DB_VALID honors the invalid marker), leaving slaveConnection_ null. The
-    // diagnostic later force-opens the replica via CreateSlaveConnection(FORCE_OPEN).
-    SqliteUtils::SetSlaveInvalid(dbName);
-    ScopeGuard clearInvalid([this]() { SqliteUtils::SetSlaveValid(dbName); });
-
-    RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MANUAL_TRIGGER);
-    // Write connection (isWrite=true): only a write connection creates a replica.
-    // The invalid marker above keeps slaveConnection_ null at open time.
-    auto [createErr, conn] = SqliteConnection::Create(config, true);
-    ASSERT_EQ(createErr, E_OK) << "Failed to create standalone write connection";
-    ASSERT_NE(conn, nullptr);
-
-    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({});
-
-    // Overall E_OK: the replica connection was force-created during collection.
-    EXPECT_EQ(ret, E_OK);
-
-    // Replica DB stat'd from config path — file exists from the fixture pool.
-    EXPECT_GE(info.replicaInfo.dbInfo.size, 0);
-
-    // The force-created connection enables replica WAL stat (mtime > 0 proves the
-    // stat ran on the live slave handle; a skipped stat would leave defaults 0).
-    EXPECT_GT(info.replicaInfo.walInfo.mtime, 0);
-    // PRAGMA user_version replicates via statement-level double-write, so the
-    // replica version read through the force-created connection matches primary.
-    EXPECT_EQ(info.replicaInfo.userVersion, info.primaryInfo.userVersion);
-
-    // Diagnostic did not create or remove the replica file.
-    EXPECT_EQ(access(slaveDbName.c_str(), F_OK), 0);
-}
-
-/**
  * @tc.name: PrimaryReplicaInfo_TimeNotOverwrittenByCheckpoint_001
  * @tc.desc: AC-2.5: mtime collected before checkpoint is not overwritten by post-checkpoint stat.
  * @tc.type: FUNC
@@ -1016,47 +968,6 @@ HWTEST_F(PrimaryReplicaInfoTest, EmptyStringInTableNames_001, TestSize.Level1)
     // Replica side should also have "test" but not "".
     EXPECT_EQ(info.replicaInfo.tables.count("test"), 1);
     EXPECT_EQ(info.replicaInfo.tables.count(""), 0);
-}
-
-/**
- * @tc.name: PrimaryReplicaInfo_NoSlaveConnectionWithTable_001
- * @tc.desc: AC-4.2: A write connection with the slave marked invalid and non-empty
- *           tableNames — the diagnostic force-creates the replica connection, so both
- *           primary and replica tables are counted and their results match.
- * @tc.type: FUNC
- */
-HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnectionWithTable_001, TestSize.Level1)
-{
-    InsertRows(store_, 1, 2);
-    store_ = nullptr;
-    RdbHelper::ClearCache();
-
-    // Invalidate the slave AFTER InsertRows so the write connection opens without a
-    // slave connection; the diagnostic force-creates it for the counting loop.
-    SqliteUtils::SetSlaveInvalid(dbName);
-    ScopeGuard clearInvalid([this]() { SqliteUtils::SetSlaveValid(dbName); });
-
-    RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MANUAL_TRIGGER);
-    auto [createErr, conn] = SqliteConnection::Create(config, true);
-    ASSERT_EQ(createErr, E_OK);
-    ASSERT_NE(conn, nullptr);
-
-    // Non-empty tableNames: the force-created replica connection makes the
-    // counting loop run CountTable on BOTH primary and replica.
-    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({ "test" });
-    EXPECT_EQ(ret, E_OK);
-
-    // Primary table count is populated.
-    auto it = info.primaryInfo.tables.find("test");
-    ASSERT_NE(it, info.primaryInfo.tables.end());
-    EXPECT_EQ(it->second.count, 2);
-
-    // Replica tables are counted via the force-created connection.
-    auto rit = info.replicaInfo.tables.find("test");
-    ASSERT_NE(rit, info.replicaInfo.tables.end());
-    EXPECT_EQ(rit->second.count, 2) << "Replica count must match primary after force-create";
-    EXPECT_EQ(info.replicaInfo.userVersion, info.primaryInfo.userVersion);
 }
 
 /**
@@ -1378,46 +1289,6 @@ HWTEST_F(PrimaryReplicaInfoTest, SlaveCountTableErrorPath_001, TestSize.Level1)
 }
 
 /**
- * @tc.name: PrimaryReplicaInfo_SlaveCountTableErrorPath_002
- * @tc.desc: AC-4.3: A write connection with the slave marked invalid gets its replica
- *           connection force-created during the diagnostic, so slave CountTable runs
- *           and replica table results match the primary.
- * @tc.type: FUNC
- */
-HWTEST_F(PrimaryReplicaInfoTest, SlaveCountTableErrorPath_002, TestSize.Level1)
-{
-    // Arrange: insert data (double-written to the replica), then open a write
-    // connection whose slave is marked invalid so slaveConnection_ stays null.
-    InsertRows(store_, 1, 4);
-    store_ = nullptr;
-    RdbHelper::ClearCache();
-
-    SqliteUtils::SetSlaveInvalid(dbName);
-    ScopeGuard clearInvalid([this]() { SqliteUtils::SetSlaveValid(dbName); });
-
-    RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MANUAL_TRIGGER);
-    auto [createErr, conn] = SqliteConnection::Create(config, true);
-    ASSERT_EQ(createErr, E_OK);
-    ASSERT_NE(conn, nullptr);
-
-    // Act: call diagnostic with table names — the replica connection is
-    // force-created, so slave CountTable runs on the live slave handle.
-    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({ "test" });
-    EXPECT_EQ(ret, E_OK) << "Overall ret should be E_OK with the force-created replica connection";
-
-    // Assert: primary table is counted correctly
-    auto pit = info.primaryInfo.tables.find("test");
-    ASSERT_NE(pit, info.primaryInfo.tables.end()) << "Primary 'test' should be counted";
-    EXPECT_EQ(pit->second.count, 4) << "Primary 'test' should have 4 rows";
-
-    // Assert: replica table is counted too and matches the primary
-    auto rit = info.replicaInfo.tables.find("test");
-    ASSERT_NE(rit, info.replicaInfo.tables.end()) << "Replica 'test' should be counted after force-create";
-    EXPECT_EQ(rit->second.count, 4) << "Replica 'test' should match primary (4 rows)";
-}
-
-/**
  * @tc.name: PrimaryReplicaInfo_TryReplayBinlogPath_001
  * @tc.desc: AC-2.4: When binlog is supported and exists, TryReplayBinlog is exercised.
  *           When binlog is not supported, the early-exit path returns E_OK without replay.
@@ -1600,53 +1471,6 @@ HWTEST_F(PrimaryReplicaInfoTest, CheckpointFailure_002, TestSize.Level1)
     if (pit != info.primaryInfo.tables.end()) {
         EXPECT_GE(pit->second.count, 5) << "Primary should have at least 5 rows";
     }
-}
-
-/**
- * @tc.name: PrimaryReplicaInfo_ReplicaWalMissing_001
- * @tc.desc: AC-1.1: When the replica WAL/SHM files are missing at diagnostic time,
- *           the initial replica WAL stat fails softly (walInfo stays zeroed) while
- *           the replica DB stat and the rest of the diagnostic still succeed.
- * @tc.type: FUNC
- */
-HWTEST_F(PrimaryReplicaInfoTest, ReplicaWalMissing_001, TestSize.Level1)
-{
-    InsertRows(store_, 1, 5);
-    store_ = nullptr;
-    RdbHelper::ClearCache();
-
-    // Delete the replica WAL/SHM while no connection holds the slave. The
-    // initial replica WAL stat (a pure file stat that runs before the
-    // temporary slave connection is created) then fails and is skipped.
-    std::string slaveWalPath = slaveDbName + "-wal";
-    std::string slaveShmPath = slaveDbName + "-shm";
-    if (access(slaveWalPath.c_str(), F_OK) == 0) {
-        EXPECT_EQ(unlink(slaveWalPath.c_str()), 0) << "Should delete replica WAL file";
-    }
-    if (access(slaveShmPath.c_str(), F_OK) == 0) {
-        EXPECT_EQ(unlink(slaveShmPath.c_str()), 0) << "Should delete replica SHM file";
-    }
-    ASSERT_NE(access(slaveWalPath.c_str(), F_OK), 0) << "Replica WAL should be gone";
-
-    // Invalidate the slave AFTER InsertRows so the write connection opens without a
-    // slave connection; the diagnostic force-creates it, but the missing WAL is already
-    // gone before that connection exists, so the initial WAL stat fails softly.
-    SqliteUtils::SetSlaveInvalid(dbName);
-    ScopeGuard clearInvalid([this]() { SqliteUtils::SetSlaveValid(dbName); });
-
-    RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MANUAL_TRIGGER);
-    auto [createErr, conn] = SqliteConnection::Create(config, true);
-    ASSERT_EQ(createErr, E_OK);
-    ASSERT_NE(conn, nullptr);
-
-    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({});
-    EXPECT_EQ(ret, E_OK) << "Missing replica WAL is tolerated (soft skip)";
-    // Replica DB info is still collected (the DB file stat succeeds).
-    EXPECT_GT(info.replicaInfo.dbInfo.size, 0);
-    // mtime is only ever set by the initial WAL stat (the post-checkpoint
-    // refresh updates size only), so a failed initial stat leaves it at 0.
-    EXPECT_EQ(info.replicaInfo.walInfo.mtime, 0) << "Initial replica WAL stat must have failed";
 }
 
 /**

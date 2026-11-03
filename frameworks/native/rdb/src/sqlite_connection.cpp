@@ -2819,11 +2819,6 @@ int SqliteConnection::TryReplayBinlog(PrimaryAndReplicaInfo &info,
     if (!info.binlogInfo.exist) {
         return E_OK;
     }
-    if (SqliteUtils::IsSlaveInvalid(config_.GetPath())) {
-        LOG_WARN("replica invalid, skip binlog replay: %{public}s",
-            SqliteUtils::Anonymous(config_.GetPath()).c_str());
-        return E_OK;
-    }
     int replayErr = ReplayBinlogSqlite(dbHandle_, slaveConn->dbHandle_, config_);
     if (replayErr != E_OK) {
         LOG_ERROR("replay failed: %{public}s, err: %{public}d",
