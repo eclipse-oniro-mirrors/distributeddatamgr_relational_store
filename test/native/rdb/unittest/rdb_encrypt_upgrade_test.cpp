@@ -81,7 +81,7 @@ public:
     std::vector<uint8_t> Encrypt(std::vector<uint8_t> &key, std::vector<uint8_t> rootKeyAlias);
     std::vector<uint8_t> Encryptv1(const RDBCryptoParam &param, std::vector<uint8_t> rootKeyAlias);
     bool GetRDBStore(const RdbStoreConfig &config);
-    void InitRootAlias(std::vector<uint8_t> &rootKeyAlias);
+    static void InitRootAlias(std::vector<uint8_t> &rootKeyAlias);
     RdbStoreConfig GetConfig(const std::string &dbPath, const std::string &bundleName);
     bool SaveSecretV0KeyToFile(const std::string &keyPath, RdbSecretKeyDataV0 &keyData);
     bool SaveSecretV1KeyToFile(const std::string &keyPath, RDBCryptoParam &keyData);
@@ -89,8 +89,8 @@ public:
         const struct HksBlob *inData, struct HksBlob *outData);
     int32_t HksEncryptThreeStage(const struct HksBlob *keyAlias, const struct HksParamSet *paramSet,
         const struct HksBlob *plainText, struct HksBlob *cipherText);
-    int32_t CheckRootKeyExists(std::vector<uint8_t> &rootKeyAlias);
-    int32_t GenerateRootKey(const std::vector<uint8_t> &rootKeyAlias);
+    static int32_t CheckRootKeyExists(std::vector<uint8_t> &rootKeyAlias);
+    static int32_t GenerateRootKey(const std::vector<uint8_t> &rootKeyAlias);
     void GetKeyFileV0FromV2(const std::string &keyPathV2, const std::string &keyPathV0, const std::string& bundleName);
     void GetKeyFileV1FromV2(const std::string &keyPathV2, const std::string &keyPathV1, const std::string& bundleName);
     std::mutex mutex_;
@@ -126,21 +126,60 @@ int RdbEncryptUpgradeTestOpenCallback::OnUpgrade(RdbStore &store, int oldVersion
 
 void RdbEncryptUpgradeTest::SetUpTestCase()
 {
-}
-
-void RdbEncryptUpgradeTest::TearDownTestCase()
-{
-}
-
-void RdbEncryptUpgradeTest::SetUp()
-{
+    // Generate HKS root keys once for the whole suite. Doing this per-test made
+    // every test fail in SetUp when HKS was slow (fresh device, first run):
+    // the 5 x 1s retry inside InitRootAlias expired before key generation
+    // completed, and all 43 tests failed with no assertion body.
     std::vector<uint8_t> rootKeyAlias = GetRootKeyAlias(BUNDLE_NAME);
     std::vector<uint8_t> rootKeyAlias1 = GetRootKeyAlias(BUNDLE_NAME_1);
     InitRootAlias(rootKeyAlias);
     InitRootAlias(rootKeyAlias1);
+    // Stale key files from a previous (possibly aborted) run break the
+    // OTA-upgrade assertions: the tests below delete keyPathV2 and expect a
+    // downgrade/upgrade cycle, which misbehaves when an old .pub_key or
+    // .pub_key_v2 for the same DB name is already on disk.
+    std::string keyV2 = ENCRYPT_DATABASE_KEY_DIR + SqliteUtils::RemoveSuffix(ENCRYPT_NAME) + ".pub_key_v2";
+    std::string keyV2_1 = ENCRYPT_DATABASE_KEY_DIR + SqliteUtils::RemoveSuffix(ENCRYPT_NAME_1) + ".pub_key_v2";
+    SqliteUtils::DeleteFile(keyV2);
+    SqliteUtils::DeleteFile(keyV2_1);
+    std::string keyV0 = ENCRYPT_DATABASE_KEY_DIR + SqliteUtils::RemoveSuffix(ENCRYPT_NAME) + ".pub_key";
+    std::string keyV0_1 = ENCRYPT_DATABASE_KEY_DIR + SqliteUtils::RemoveSuffix(ENCRYPT_NAME_1) + ".pub_key";
+    SqliteUtils::DeleteFile(keyV0);
+    SqliteUtils::DeleteFile(keyV0_1);
+}
+
+void RdbEncryptUpgradeTest::TearDownTestCase()
+{
     RdbHelper::ClearCache();
     RdbHelper::DeleteRdbStore(ENCRYPT_PATH);
     RdbHelper::DeleteRdbStore(ENCRYPT_PATH_1);
+    // Leave the key directory clean for whatever runs after this binary.
+    std::string keyV2 = ENCRYPT_DATABASE_KEY_DIR + SqliteUtils::RemoveSuffix(ENCRYPT_NAME) + ".pub_key_v2";
+    std::string keyV2_1 = ENCRYPT_DATABASE_KEY_DIR + SqliteUtils::RemoveSuffix(ENCRYPT_NAME_1) + ".pub_key_v2";
+    SqliteUtils::DeleteFile(keyV2);
+    SqliteUtils::DeleteFile(keyV2_1);
+    std::string keyV0 = ENCRYPT_DATABASE_KEY_DIR + SqliteUtils::RemoveSuffix(ENCRYPT_NAME) + ".pub_key";
+    std::string keyV0_1 = ENCRYPT_DATABASE_KEY_DIR + SqliteUtils::RemoveSuffix(ENCRYPT_NAME_1) + ".pub_key";
+    SqliteUtils::DeleteFile(keyV0);
+    SqliteUtils::DeleteFile(keyV0_1);
+}
+
+void RdbEncryptUpgradeTest::SetUp()
+{
+    RdbHelper::ClearCache();
+    RdbHelper::DeleteRdbStore(ENCRYPT_PATH);
+    RdbHelper::DeleteRdbStore(ENCRYPT_PATH_1);
+    // Per-test residue: an OTA test may leave a .pub_key (downgraded) file if
+    // it aborted mid-way; the next test would then read it as a valid V0/V1
+    // key and take the wrong upgrade path.
+    std::string keyV0 = ENCRYPT_DATABASE_KEY_DIR + SqliteUtils::RemoveSuffix(ENCRYPT_NAME) + ".pub_key";
+    std::string keyV0_1 = ENCRYPT_DATABASE_KEY_DIR + SqliteUtils::RemoveSuffix(ENCRYPT_NAME_1) + ".pub_key";
+    std::string keyV2 = ENCRYPT_DATABASE_KEY_DIR + SqliteUtils::RemoveSuffix(ENCRYPT_NAME) + ".pub_key_v2";
+    std::string keyV2_1 = ENCRYPT_DATABASE_KEY_DIR + SqliteUtils::RemoveSuffix(ENCRYPT_NAME_1) + ".pub_key_v2";
+    SqliteUtils::DeleteFile(keyV0);
+    SqliteUtils::DeleteFile(keyV0_1);
+    SqliteUtils::DeleteFile(keyV2);
+    SqliteUtils::DeleteFile(keyV2_1);
 }
 
 void RdbEncryptUpgradeTest::TearDown()
@@ -149,7 +188,7 @@ void RdbEncryptUpgradeTest::TearDown()
     RdbHelper::DeleteRdbStore(ENCRYPT_PATH);
     RdbHelper::DeleteRdbStore(ENCRYPT_PATH_1);
 }
-void RdbEncryptUpgradeTest::InitRootAlias(std::vector<uint8_t> &rootKeyAlias)
+void RdbEncryptUpgradeTest::InitRootAlias(std::vector<uint8_t> &rootKeyAlias) // static
 {
     constexpr uint32_t RETRY_MAX_TIMES = 5;
     constexpr int RETRY_TIME_INTERVAL_MILLISECOND = 1 * 1000 * 1000;

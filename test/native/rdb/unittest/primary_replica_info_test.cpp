@@ -732,38 +732,6 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaDbStatFromConfig_001, TestSize.Level1)
 }
 
 /**
- * @tc.name: PrimaryReplicaInfo_NoSlaveConnection_001
- * @tc.desc: AC-4.2/4.4: A standalone connection without slaveConnection_ reports partial results —
- *           replica DB stat'd from config path (E_OK), WAL/replay/replica-checkpoint skipped (E_NOT_SUPPORT).
- * @tc.type: FUNC
- */
-HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnection_001, TestSize.Level1)
-{
-    InsertRows(store_, 1, 2);
-    // Release the fixture pool so a standalone connection opens without lock conflict.
-    store_ = nullptr;
-    RdbHelper::ClearCache();
-
-    RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MAIN_REPLICA);
-    // Read connection (isWrite=false) skips slave creation in InnerCreate → slaveConnection_ is null.
-    auto [createErr, conn] = SqliteConnection::Create(config, false);
-    ASSERT_EQ(createErr, E_OK) << "Failed to create standalone read connection";
-    ASSERT_NE(conn, nullptr);
-
-    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({});
-
-    // Overall E_OK: partial results preserved, no fatal failure.
-    EXPECT_EQ(ret, E_OK);
-
-    // Replica DB stat'd from config path — file exists from the fixture pool.
-    EXPECT_GE(info.replicaInfo.dbInfo.size, 0);
-
-    // Diagnostic did not create or remove the replica file.
-    EXPECT_EQ(access(slaveDbName.c_str(), F_OK), 0);
-}
-
-/**
  * @tc.name: PrimaryReplicaInfo_TimeNotOverwrittenByCheckpoint_001
  * @tc.desc: AC-2.5: mtime collected before checkpoint is not overwritten by post-checkpoint stat.
  * @tc.type: FUNC
@@ -1003,40 +971,6 @@ HWTEST_F(PrimaryReplicaInfoTest, EmptyStringInTableNames_001, TestSize.Level1)
 }
 
 /**
- * @tc.name: PrimaryReplicaInfo_NoSlaveConnectionWithTable_001
- * @tc.desc: AC-4.2: Standalone connection (no slave) with non-empty tableNames —
- *           primary tables populated, replica tables empty (slaveConnection_ null).
- * @tc.type: FUNC
- */
-HWTEST_F(PrimaryReplicaInfoTest, NoSlaveConnectionWithTable_001, TestSize.Level1)
-{
-    InsertRows(store_, 1, 2);
-    store_ = nullptr;
-    RdbHelper::ClearCache();
-
-    RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MAIN_REPLICA);
-    auto [createErr, conn] = SqliteConnection::Create(config, false);
-    ASSERT_EQ(createErr, E_OK);
-    ASSERT_NE(conn, nullptr);
-
-    // Non-empty tableNames exercises the counting loop with slaveConnection_ == nullptr (B7J).
-    // The `if (slaveConnection_ != nullptr)` false branch skips replica CountTable.
-    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({ "test" });
-    EXPECT_EQ(ret, E_OK);
-
-    // Primary table count is populated.
-    auto it = info.primaryInfo.tables.find("test");
-    ASSERT_NE(it, info.primaryInfo.tables.end());
-    EXPECT_EQ(it->second.count, 2);
-
-    // Replica tables map is empty — slaveConnection_ is null, so CountTable is never called for replica.
-    EXPECT_TRUE(info.replicaInfo.tables.empty());
-    // Replica userVersion stays at default (slaveConnection_ null → QueryUserVersion skipped).
-    EXPECT_EQ(info.replicaInfo.userVersion, 0);
-}
-
-/**
  * @tc.name: PrimaryReplicaInfo_ReplicaWalStatVerified_001
  * @tc.desc: AC-1.1: Replica WAL file is independently stat'd; mtime matches pre-call value,
  *           size matches post-checkpoint value.
@@ -1105,8 +1039,8 @@ HWTEST_F(PrimaryReplicaInfoTest, PrimaryDbStatFailure_001, TestSize.Level1)
 
 /**
  * @tc.name: PrimaryReplicaInfo_ReplicaDbStatFailure_001
- * @tc.desc: AC-4.4: When replica DB file does not exist, stat fails silently —
- *           replicaInfo.dbInfo stays zeroed, overall ret is E_OK.
+ * @tc.desc: AC-4.4: When the replica DB file does not exist, the diagnostic fails
+ *           as a whole — the replica stat failure is propagated, not silently skipped.
  * @tc.type: FUNC
  */
 HWTEST_F(PrimaryReplicaInfoTest, ReplicaDbStatFailure_001, TestSize.Level1)
@@ -1115,23 +1049,28 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaDbStatFailure_001, TestSize.Level1)
     store_ = nullptr;
     RdbHelper::ClearCache();
 
-    // Delete the slave DB file so replica DB stat fails (B4F/B8H).
+    // Delete the slave DB file so replica DB stat fails.
     RdbHelper::DeleteRdbStore(slaveDbName);
     ASSERT_NE(access(slaveDbName.c_str(), F_OK), 0) << "Slave DB should be deleted";
 
+    // Invalidate the slave AFTER InsertRows so the write connection opens without a
+    // slave connection; the diagnostic then fails at the replica DB stat (file missing).
+    SqliteUtils::SetSlaveInvalid(dbName);
+    ScopeGuard clearInvalid([this]() { SqliteUtils::SetSlaveValid(dbName); });
+
     RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MAIN_REPLICA);
-    auto [createErr, conn] = SqliteConnection::Create(config, false);
+    config.SetHaMode(HAMode::MANUAL_TRIGGER);
+    auto [createErr, conn] = SqliteConnection::Create(config, true);
     ASSERT_EQ(createErr, E_OK);
     ASSERT_NE(conn, nullptr);
 
-    // Replica DB stat fails silently (file missing) — not fatal, ret stays E_OK.
+    // Replica DB stat fails (file missing) — the diagnostic fails as a whole.
     auto [ret, info] = conn->GetPrimaryAndReplicaInfo({});
-    EXPECT_EQ(ret, E_OK);
-    // Replica DB info stays at default zero values.
+    EXPECT_NE(ret, E_OK) << "Missing replica DB must fail the whole diagnostic";
+    // Replica DB info stays at default zero values (early return before assignment).
     EXPECT_EQ(info.replicaInfo.dbInfo.size, 0);
     EXPECT_EQ(info.replicaInfo.dbInfo.mtime, 0);
-    // Primary DB info should still be valid.
+    // Primary DB info was collected before the failure and remains valid.
     EXPECT_GT(info.primaryInfo.dbInfo.size, 0);
 }
 
@@ -1350,40 +1289,6 @@ HWTEST_F(PrimaryReplicaInfoTest, SlaveCountTableErrorPath_001, TestSize.Level1)
 }
 
 /**
- * @tc.name: PrimaryReplicaInfo_SlaveCountTableErrorPath_002
- * @tc.desc: AC-4.3: When slave DB is missing (stat fails), slave CountTable is skipped —
- *           replica tables map is empty, but primary tables are still counted correctly.
- *           This verifies the slave CountTable error path is handled gracefully.
- * @tc.type: FUNC
- */
-HWTEST_F(PrimaryReplicaInfoTest, SlaveCountTableErrorPath_002, TestSize.Level1)
-{
-    // Arrange: insert data and create a standalone read connection (no slave)
-    InsertRows(store_, 1, 4);
-    store_ = nullptr;
-    RdbHelper::ClearCache();
-
-    RdbStoreConfig config(dbName);
-    config.SetHaMode(HAMode::MAIN_REPLICA);
-    auto [createErr, conn] = SqliteConnection::Create(config, false);
-    ASSERT_EQ(createErr, E_OK);
-    ASSERT_NE(conn, nullptr);
-
-    // Act: call diagnostic with table names — slaveConnection_ is null,
-    // so slave CountTable is never called (the `if (slaveConnection_ != nullptr)` branch is false)
-    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({ "test" });
-    EXPECT_EQ(ret, E_OK) << "Overall ret should be E_OK when slave CountTable is skipped (no slave connection)";
-
-    // Assert: primary table is counted correctly
-    auto pit = info.primaryInfo.tables.find("test");
-    ASSERT_NE(pit, info.primaryInfo.tables.end()) << "Primary 'test' should be counted";
-    EXPECT_EQ(pit->second.count, 4) << "Primary 'test' should have 4 rows";
-
-    // Assert: replica tables map is empty — slave CountTable was not called
-    EXPECT_TRUE(info.replicaInfo.tables.empty()) << "Replica tables should be empty when slave CountTable is skipped";
-}
-
-/**
  * @tc.name: PrimaryReplicaInfo_TryReplayBinlogPath_001
  * @tc.desc: AC-2.4: When binlog is supported and exists, TryReplayBinlog is exercised.
  *           When binlog is not supported, the early-exit path returns E_OK without replay.
@@ -1566,4 +1471,82 @@ HWTEST_F(PrimaryReplicaInfoTest, CheckpointFailure_002, TestSize.Level1)
     if (pit != info.primaryInfo.tables.end()) {
         EXPECT_GE(pit->second.count, 5) << "Primary should have at least 5 rows";
     }
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_SlaveConnCreateFailure_001
+ * @tc.desc: AC-5.1: When the replica DB path exists as a directory, the stat succeeds
+ *           but the temporary slave connection cannot be created — the diagnostic
+ *           fails as a whole with the creation error.
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, SlaveConnCreateFailure_001, TestSize.Level1)
+{
+    InsertRows(store_, 1, 2);
+    store_ = nullptr;
+    RdbHelper::ClearCache();
+
+    // Replace the slave DB file with a directory: stat() succeeds on it, but
+    // CreateSlaveConnection cannot open a database there.
+    RdbHelper::DeleteRdbStore(slaveDbName);
+    ASSERT_EQ(mkdir(slaveDbName.c_str(), 0755), 0) << "Slave path should become a directory";
+    ScopeGuard removeDir([this]() { rmdir(slaveDbName.c_str()); });
+
+    // Invalidate the slave AFTER InsertRows so the write connection opens without a
+    // slave connection; the diagnostic then force-creates the slave and fails because
+    // the replica path is a directory (cannot be opened as a database).
+    SqliteUtils::SetSlaveInvalid(dbName);
+    ScopeGuard clearInvalid([this]() { SqliteUtils::SetSlaveValid(dbName); });
+
+    RdbStoreConfig config(dbName);
+    config.SetHaMode(HAMode::MANUAL_TRIGGER);
+    auto [createErr, conn] = SqliteConnection::Create(config, true);
+    ASSERT_EQ(createErr, E_OK);
+    ASSERT_NE(conn, nullptr);
+
+    // The replica "DB" exists (stat on the directory succeeds), so the
+    // diagnostic proceeds to the SQL phase and tries to create the temporary
+    // slave connection — which fails and fails the whole diagnostic.
+    auto [ret, info] = conn->GetPrimaryAndReplicaInfo({});
+    EXPECT_NE(ret, E_OK) << "Slave connection creation failure must fail the diagnostic";
+    // Results collected before the failure remain available.
+    EXPECT_GT(info.primaryInfo.dbInfo.size, 0);
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_GetPrimaryReplicaInfo_TableLimitExceeded_001
+ * @tc.desc: AC-4.5: GetPrimaryReplicaInfo rejects more than 16 table names at the
+ *           RdbStoreImpl entry with E_INVALID_ARGS, before any diagnostic work runs.
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, GetPrimaryReplicaInfo_TableLimitExceeded_001, TestSize.Level1)
+{
+    // Arrange: 17 table names exceeds the 16-table entry limit.
+    std::vector<std::string> tableNames(17, "test");
+
+    // Act: call the RdbStoreImpl entry (not the SqliteConnection layer directly).
+    auto [ret, info] = store_->GetPrimaryReplicaInfo(tableNames);
+
+    // Assert: rejected at the entry with E_INVALID_ARGS.
+    EXPECT_EQ(ret, E_INVALID_ARGS) << "17 tables exceeds the 16-table limit, must be rejected at entry";
+}
+
+/**
+ * @tc.name: PrimaryReplicaInfo_GetPrimaryReplicaInfo_TableLimitBoundary_001
+ * @tc.desc: AC-4.5: Exactly 16 table names is the allowed maximum — the entry does NOT
+ *           reject it as E_INVALID_ARGS (the diagnostic runs normally).
+ * @tc.type: FUNC
+ */
+HWTEST_F(PrimaryReplicaInfoTest, GetPrimaryReplicaInfo_TableLimitBoundary_001, TestSize.Level1)
+{
+    // Arrange: insert data so the diagnostic has something to count; 16 table names
+    // is the boundary (the limit is >16 rejected, 16 is the max allowed).
+    InsertRows(store_, 1, 2);
+    std::vector<std::string> tableNames(16, "test");
+
+    // Act: call the RdbStoreImpl entry.
+    auto [ret, info] = store_->GetPrimaryReplicaInfo(tableNames);
+
+    // Assert: not rejected as invalid args at the entry (16 is within the limit).
+    EXPECT_NE(ret, E_INVALID_ARGS) << "16 tables is within the limit, must not be rejected as invalid args";
 }

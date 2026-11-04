@@ -100,6 +100,10 @@ static constexpr const char *BACKUP_RESTORE = "backup.restore";
 static constexpr const char *ASYNC_RESTORE = "-async.restore";
 constexpr int32_t SERVICE_GID = 3012;
 constexpr int64_t TIME_OUT = 1500;
+// Upper bound on the tableNames accepted by GetPrimaryReplicaInfo: a diagnostic
+// call with more tables than this is rejected at the entry with E_INVALID_ARGS to
+// avoid unbounded per-table logging and work in the diagnostic path.
+constexpr size_t MAX_PRIMARY_REPLICA_INFO_TABLES = 16;
 
 TransAcquireGuard::~TransAcquireGuard()
 {
@@ -4022,6 +4026,11 @@ bool RdbStoreImpl::IsInvalidDistributedConfig(const DistributedRdb::DistributedC
 
 std::pair<int, PrimaryAndReplicaInfo> RdbStoreImpl::GetPrimaryReplicaInfo(const std::vector<std::string> &tableNames)
 {
+    if (tableNames.size() > MAX_PRIMARY_REPLICA_INFO_TABLES) {
+        LOG_ERROR("GetPrimaryReplicaInfo: tableNames size %{public}zu exceeds limit %{public}zu",
+            tableNames.size(), MAX_PRIMARY_REPLICA_INFO_TABLES);
+        return { E_INVALID_ARGS, {} };
+    }
     if (isReadOnly_ || isMemoryRdb_ || config_.GetDBType() == DB_VECTOR) {
         return { E_NOT_SUPPORT, {} };
     }

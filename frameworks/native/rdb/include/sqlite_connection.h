@@ -169,10 +169,11 @@ private:
     std::pair<int, TableInfo> CountTable(const std::string &table);
     int64_t QueryUserVersion();
     int CollectInitialFileInfo(PrimaryAndReplicaInfo &info);
-    int TryReplayBinlog(PrimaryAndReplicaInfo &info);
-    int CheckpointDatabases(PrimaryAndReplicaInfo &info);
+    int TryReplayBinlog(PrimaryAndReplicaInfo &info, const std::shared_ptr<SqliteConnection> &slaveConn);
+    int CheckpointDatabases(PrimaryAndReplicaInfo &info, const std::shared_ptr<SqliteConnection> &slaveConn);
     int RefreshSizesAfterCheckpoint(PrimaryAndReplicaInfo &info);
-    int CollectVersionsAndTables(PrimaryAndReplicaInfo &info, const std::vector<std::string> &tableNames);
+    int CollectVersionsAndTables(PrimaryAndReplicaInfo &info, const std::vector<std::string> &tableNames,
+        const std::shared_ptr<SqliteConnection> &slaveConn);
     std::pair<int32_t, Stmt> CreateStatementInner(
         const std::string &sql, SConn conn, sqlite3 *db, bool isFromReplica, const std::string &returningSql = "");
     ExchangeStrategy CompareWithSlave(int64_t mCount, int64_t mIdxCount,
