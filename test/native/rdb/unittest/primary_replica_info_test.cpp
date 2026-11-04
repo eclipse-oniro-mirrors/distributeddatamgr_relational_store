@@ -1525,8 +1525,7 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaCheckpointBusy_001, TestSize.Level1)
     InsertRows(store_, 1, 5);
 
     // Open a raw read on the slave and keep the statement stepped-but-not-reset:
-    // it pins a WAL read-mark at the current WAL head (frame P). Use sqlite_master
-    // (always present) so the raw read does not depend on a user table existing.
+    // it pins a WAL read-mark at the current WAL head (frame P).
     sqlite3 *rawSlave = nullptr;
     ASSERT_EQ(sqlite3_open(slaveDbName.c_str(), &rawSlave), SQLITE_OK);
     sqlite3_stmt *rawStmt = nullptr;
@@ -1538,7 +1537,7 @@ HWTEST_F(PrimaryReplicaInfoTest, ReplicaCheckpointBusy_001, TestSize.Level1)
             sqlite3_close(rawSlave);
         }
     });
-    ASSERT_EQ(sqlite3_prepare_v2(rawSlave, "SELECT * FROM sqlite_master", -1, &rawStmt, nullptr), SQLITE_OK);
+    ASSERT_EQ(sqlite3_prepare_v2(rawSlave, "SELECT * FROM test", -1, &rawStmt, nullptr), SQLITE_OK);
     ASSERT_EQ(sqlite3_step(rawStmt), SQLITE_ROW) << "Raw read on the slave should hold an active row";
 
     // Grow the slave WAL beyond the reader's mark (frames P+1..Q): the
