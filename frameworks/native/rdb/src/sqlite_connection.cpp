@@ -82,6 +82,7 @@ constexpr uint32_t SqliteConnection::DB_INDEX;
 constexpr uint32_t SqliteConnection::WAL_INDEX;
 constexpr int32_t SERVICE_GID = 3012;
 constexpr int32_t BINLOG_FILE_REPLAY_LIMIT = 50;
+constexpr int32_t BINLOG_FILE_NOTIFY_LIMIT = 30;
 constexpr int64_t BINLOG_REPLAY_REPORT_TIME = 15 * 60 * 1000; // ms
 ConcurrentMap<uint64_t, Connection::ReplayCallBack> SqliteConnection::replayCallback_ = {};
 __attribute__((used))
@@ -2023,6 +2024,15 @@ int SqliteConnection::UpdateTrackerMatrix(const DistributedRdb::RdbChangedData &
     return SqliteUtils::ConvertDBStatusNative(status);
 }
 
+int SqliteConnection::NotifyDataChange()
+{
+    auto status = sqlite3_notify_data_change_binlog(dbHandle_, nullptr, 0);
+    if (status != SQLITE_OK) {
+        LOG_WARN("notify all tables change failed, err:%{public}d", status);
+    }
+    return SQLiteError::ErrNo(status);
+}
+
 int32_t SqliteConnection::Repair(const RdbStoreConfig &config)
 {
     if (config.GetReplicaPath().empty()) {
@@ -2501,6 +2511,11 @@ void SqliteConnection::ReplayBinlog(const RdbStoreConfig &config, bool chkBinlog
         Reportor::ReportSlaveInconsistent(config, "slave binlog over limit");
         SqliteUtils::SetSlaveInvalid(config.GetPath(), SqliteUtils::SlaveInvalidReason::BINLOG_REPLAY_FAILED);
         return;
+    }
+    if (SqliteUtils::GetFileCount(SqliteUtils::GetBinlogFolderPath(config)) >= BINLOG_FILE_NOTIFY_LIMIT) {
+        LOG_INFO("binlog files accumulated, notify all tables change for %{public}s",
+            SqliteUtils::Anonymous(config.GetPath()).c_str());
+        NotifyDataChange();
     }
     int err = SqliteConnection::ReplayBinlogSqlite(dbHandle_, slaveConnection_->dbHandle_, config);
     if (err != E_OK) {
