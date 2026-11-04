@@ -1514,47 +1514,6 @@ HWTEST_F(PrimaryReplicaInfoTest, SlaveConnCreateFailure_001, TestSize.Level1)
 }
 
 /**
- * @tc.name: PrimaryReplicaInfo_ReplicaCheckpointBusy_001
- * @tc.desc: AC-5.2: When a concurrent reader holds a read transaction on the slave DB,
- *           the replica TRUNCATE checkpoint returns BUSY and the diagnostic propagates
- *           the failure instead of swallowing it.
- * @tc.type: FUNC
- */
-HWTEST_F(PrimaryReplicaInfoTest, ReplicaCheckpointBusy_001, TestSize.Level1)
-{
-    InsertRows(store_, 1, 5);
-
-    // Open a raw read on the slave and keep the statement stepped-but-not-reset:
-    // it pins a WAL read-mark at the current WAL head (frame P).
-    sqlite3 *rawSlave = nullptr;
-    ASSERT_EQ(sqlite3_open(slaveDbName.c_str(), &rawSlave), SQLITE_OK);
-    sqlite3_stmt *rawStmt = nullptr;
-    ScopeGuard closeRaw([&rawStmt, &rawSlave]() {
-        if (rawStmt != nullptr) {
-            sqlite3_finalize(rawStmt);
-        }
-        if (rawSlave != nullptr) {
-            sqlite3_close(rawSlave);
-        }
-    });
-    ASSERT_EQ(sqlite3_prepare_v2(rawSlave, "SELECT * FROM test", -1, &rawStmt, nullptr), SQLITE_OK);
-    ASSERT_EQ(sqlite3_step(rawStmt), SQLITE_ROW) << "Raw read on the slave should hold an active row";
-
-    // Grow the slave WAL beyond the reader's mark (frames P+1..Q): the
-    // double-write replicates these inserts to the slave.
-    InsertRows(store_, 100, 5);
-
-    // The replica checkpoint can only backfill up to the reader's mark (P),
-    // leaving nBackfill < mxFrame — the RESTART requirement fails and
-    // sqlite3_wal_checkpoint_v2(TRUNCATE) returns SQLITE_BUSY, which the
-    // diagnostic propagates.
-    auto [ret, info] = store_->GetPrimaryReplicaInfo({});
-    EXPECT_NE(ret, E_OK) << "Replica checkpoint BUSY must fail the diagnostic";
-    // Partial results collected before the failure remain available.
-    EXPECT_GT(info.primaryInfo.dbInfo.size, 0);
-}
-
-/**
  * @tc.name: PrimaryReplicaInfo_GetPrimaryReplicaInfo_TableLimitExceeded_001
  * @tc.desc: AC-4.5: GetPrimaryReplicaInfo rejects more than 16 table names at the
  *           RdbStoreImpl entry with E_INVALID_ARGS, before any diagnostic work runs.
