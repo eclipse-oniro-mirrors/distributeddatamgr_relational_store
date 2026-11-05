@@ -2026,7 +2026,7 @@ int SqliteConnection::UpdateTrackerMatrix(const DistributedRdb::RdbChangedData &
 
 int SqliteConnection::NotifyDataChange()
 {
-    auto status = sqlite3_notify_data_change_binlog(dbHandle_, nullptr, 0);
+    auto status = sqlite3_notify_data_change_binlog(dbHandle_, nullptr);
     if (status != SQLITE_OK) {
         LOG_WARN("notify all tables change failed, err:%{public}d", status);
     }
