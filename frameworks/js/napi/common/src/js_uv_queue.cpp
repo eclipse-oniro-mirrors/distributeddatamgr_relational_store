@@ -28,35 +28,18 @@ std::mutex UvQueue::validEnvsMutex;
 UvQueue::UvQueue(napi_env env) : env_(env)
 {
     if (env != nullptr) {
-        bool needAddHook = false;
-        {
-            std::lock_guard<std::mutex> guard(UvQueue::validEnvsMutex);
-            auto it = UvQueue::validEnvs.find(env);
-            if (it == UvQueue::validEnvs.end()) {
-                isValid_ = std::make_shared<bool>(true);
-                UvQueue::validEnvs.insert({ env, isValid_ });
-                needAddHook = true;
-            } else {
-                isValid_ = it->second;
-            }
-        }
         napi_get_uv_event_loop(env, &loop_);
-        // napi_add_env_cleanup_hook must be registered only once per env; duplicate
-        // registrations cause multiple callbacks on env teardown. Register only on the
-        // first UvQueue for a given env, consistent with the validEnvs dedup logic.
-        if (needAddHook) {
-            napi_status status = napi_add_env_cleanup_hook(env, CleanupHook, env);
-            if (status != napi_ok) {
-                LOG_ERROR("Failed to add cleanup hook, status:%{public}d", status);
-                // On failure: remove the validEnvs entry so later UvQueue instances for the
-                // same env can retry registration, and mark isValid_ false so this UvQueue's
-                // callbacks are skipped to avoid using env without hook protection.
-                std::lock_guard<std::mutex> guard(UvQueue::validEnvsMutex);
-                UvQueue::validEnvs.erase(env);
-                if (isValid_) {
-                    *isValid_ = false;
-                }
-            }
+        std::lock_guard<std::mutex> guard(UvQueue::validEnvsMutex);
+        auto it = UvQueue::validEnvs.find(env);
+        if (it == UvQueue::validEnvs.end()) {
+            isValid_ = std::make_shared<bool>(true);
+            UvQueue::validEnvs.insert({ env, isValid_ });
+            // All UvQueue instances for the same env share the validity flag and
+            // cleanup hook; register only on first creation to avoid duplicate
+            // registration requests and runtime warnings.
+            napi_add_env_cleanup_hook(env, CleanupHook, env);
+        } else {
+            isValid_ = it->second;
         }
     }
     handler_ = AppExecFwk::EventHandler::Current();
