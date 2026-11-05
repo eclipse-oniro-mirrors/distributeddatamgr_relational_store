@@ -28,20 +28,26 @@ std::mutex UvQueue::validEnvsMutex;
 UvQueue::UvQueue(napi_env env) : env_(env)
 {
     if (env != nullptr) {
+        bool needAddHook = false;
         {
             std::lock_guard<std::mutex> guard(UvQueue::validEnvsMutex);
             auto it = UvQueue::validEnvs.find(env);
             if (it == UvQueue::validEnvs.end()) {
                 isValid_ = std::make_shared<bool>(true);
                 UvQueue::validEnvs.insert({ env, isValid_ });
+                needAddHook = true;
             } else {
                 isValid_ = it->second;
             }
         }
         napi_get_uv_event_loop(env, &loop_);
-        napi_status status = napi_add_env_cleanup_hook(env, CleanupHook, env);
-        if (status != napi_ok) {
-            LOG_ERROR("Failed to add cleanup hook, status:%{public}d", status);
+        // napi_add_env_cleanup_hook 对同一 env 只能注册一次，重复注册会导致退出时多次回调。
+        // 仅在该 env 首次创建 UvQueue 时注册，与 validEnvs 的去重逻辑保持一致。
+        if (needAddHook) {
+            napi_status status = napi_add_env_cleanup_hook(env, CleanupHook, env);
+            if (status != napi_ok) {
+                LOG_ERROR("Failed to add cleanup hook, status:%{public}d", status);
+            }
         }
     }
     handler_ = AppExecFwk::EventHandler::Current();
@@ -55,7 +61,7 @@ UvQueue::~UvQueue()
     isValid_ = nullptr;
 }
 
-void UvQueue::AsyncCall(UvCallback callback, Args args, Result result, const char* taskName)
+void UvQueue::AsyncCall(UvCallback callback, Args args, Result result, const char *taskName)
 {
     if (callback.IsNull()) {
         LOG_ERROR("callback is nullptr.");
@@ -76,7 +82,7 @@ void UvQueue::AsyncCall(UvCallback callback, Args args, Result result, const cha
     }
 }
 
-void UvQueue::AsyncCallInOrder(UvCallback callback, Args args, Result result, const char* taskName)
+void UvQueue::AsyncCallInOrder(UvCallback callback, Args args, Result result, const char *taskName)
 {
     if (handler_ == nullptr) {
         AsyncCall(std::move(callback), std::move(args), std::move(result), taskName);
@@ -100,7 +106,7 @@ void UvQueue::AsyncCallInOrder(UvCallback callback, Args args, Result result, co
     }
 }
 
-void UvQueue::AsyncPromise(UvPromise promise, UvQueue::Args args, const char* taskName)
+void UvQueue::AsyncPromise(UvPromise promise, UvQueue::Args args, const char *taskName)
 {
     if (promise.IsNull()) {
         LOG_ERROR("promise is nullptr.");
@@ -117,7 +123,7 @@ void UvQueue::AsyncPromise(UvPromise promise, UvQueue::Args args, const char* ta
     }
 }
 
-bool UvQueue::Execute(UvQueue::Task task, const char* taskName)
+bool UvQueue::Execute(UvQueue::Task task, const char *taskName)
 {
     if (loop_ == nullptr || !task) {
         LOG_ERROR("loop_ or task is nullptr.");
@@ -136,8 +142,8 @@ bool UvQueue::Execute(UvQueue::Task task, const char* taskName)
     }
     *entry = task;
     work->data = entry;
-    int ret = uv_queue_work_internal(loop_, work, DoExecute, [](uv_work_t *work, int status) { delete work; },
-        taskName);
+    int ret = uv_queue_work_internal(
+        loop_, work, DoExecute, [](uv_work_t *work, int status) { delete work; }, taskName);
     if (ret < 0) {
         LOG_ERROR("uv_queue_work_internal failed, errCode:%{public}d", ret);
         delete entry;
@@ -196,7 +202,7 @@ void UvQueue::CleanupHook(void *data)
         LOG_ERROR("CleanupHook: data is null");
         return;
     }
- 
+
     std::lock_guard<std::mutex> guard(UvQueue::validEnvsMutex);
     auto it = UvQueue::validEnvs.find(data);
     if (it == UvQueue::validEnvs.end()) {
