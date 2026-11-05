@@ -73,7 +73,7 @@ HWTEST_F(DumpStackAttachTest, DumpStackAttach_ModeSwitchWithFlag_001, TestSize.L
     const std::string mainPath = std::string(TEST_DIR) + "attach_main.db";
     const std::string attachedPath = std::string(TEST_DIR) + "attach_target.db";
     RdbStoreConfig mainConfig(mainPath);
-    mainConfig.EnableDumpStackOnFileDel(true);
+    mainConfig.EnableDumpStackOnFileDeletion(true);
     DumpStackAttachCallback helper;
     int errCode = E_ERROR;
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(mainConfig, 1, helper, errCode);

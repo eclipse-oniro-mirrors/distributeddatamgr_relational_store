@@ -926,9 +926,9 @@ public:
 
     void SetAuditEnabled(bool isAuditEnabled);
 
-    bool IsDumpStackOnFileDelEnabled() const;
+    bool IsDumpStackOnFileDeletionEnabled() const;
 
-    void EnableDumpStackOnFileDel(bool enable);
+    void EnableDumpStackOnFileDeletion(bool enable);
 
 private:
     void ClearEncryptKey();
@@ -988,7 +988,7 @@ private:
     bool allowRebuilt_ = false;
     bool isLocalOnly_ = false;
     bool isAuditEnabled_ = false;
-    bool dumpStackOnFileDel_ = false;
+    bool dumpStackOnFileDeletion_ = false;
     int32_t subUser_ = 0;
     mutable RegisterInfo registerInfo_;
     ConfigVersion version_ = ConfigVersion::DEFAULT_VERSION;

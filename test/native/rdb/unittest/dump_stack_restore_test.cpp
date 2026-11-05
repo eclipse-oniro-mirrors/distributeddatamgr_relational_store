@@ -72,7 +72,7 @@ HWTEST_F(DumpStackRestoreTest, DumpStackRestore_BackupRestoreWithFlag_001, TestS
 {
     const std::string dbPath = std::string(TEST_DIR) + "restore_on.db";
     RdbStoreConfig config(dbPath);
-    config.EnableDumpStackOnFileDel(true);
+    config.EnableDumpStackOnFileDeletion(true);
     DumpStackRestoreCallback helper;
     int errCode = E_ERROR;
     std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
