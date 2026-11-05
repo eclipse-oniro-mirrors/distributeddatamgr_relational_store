@@ -41,14 +41,16 @@ UvQueue::UvQueue(napi_env env) : env_(env)
             }
         }
         napi_get_uv_event_loop(env, &loop_);
-        // napi_add_env_cleanup_hook 对同一 env 只能注册一次，重复注册会导致退出时多次回调。
-        // 仅在该 env 首次创建 UvQueue 时注册，与 validEnvs 的去重逻辑保持一致。
+        // napi_add_env_cleanup_hook must be registered only once per env; duplicate
+        // registrations cause multiple callbacks on env teardown. Register only on the
+        // first UvQueue for a given env, consistent with the validEnvs dedup logic.
         if (needAddHook) {
             napi_status status = napi_add_env_cleanup_hook(env, CleanupHook, env);
             if (status != napi_ok) {
                 LOG_ERROR("Failed to add cleanup hook, status:%{public}d", status);
-                // 注册失败：移除 validEnvs 条目，使后续为同一 env 创建的 UvQueue 可重试注册；
-                // 同时置 isValid_ 为 false，让本 UvQueue 回调跳过，避免在无 hook 保护下使用 env。
+                // On failure: remove the validEnvs entry so later UvQueue instances for the
+                // same env can retry registration, and mark isValid_ false so this UvQueue's
+                // callbacks are skipped to avoid using env without hook protection.
                 std::lock_guard<std::mutex> guard(UvQueue::validEnvsMutex);
                 UvQueue::validEnvs.erase(env);
                 if (isValid_) {
