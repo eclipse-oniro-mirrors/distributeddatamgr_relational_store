@@ -47,6 +47,13 @@ UvQueue::UvQueue(napi_env env) : env_(env)
             napi_status status = napi_add_env_cleanup_hook(env, CleanupHook, env);
             if (status != napi_ok) {
                 LOG_ERROR("Failed to add cleanup hook, status:%{public}d", status);
+                // 注册失败：移除 validEnvs 条目，使后续为同一 env 创建的 UvQueue 可重试注册；
+                // 同时置 isValid_ 为 false，让本 UvQueue 回调跳过，避免在无 hook 保护下使用 env。
+                std::lock_guard<std::mutex> guard(UvQueue::validEnvsMutex);
+                UvQueue::validEnvs.erase(env);
+                if (isValid_) {
+                    *isValid_ = false;
+                }
             }
         }
     }
