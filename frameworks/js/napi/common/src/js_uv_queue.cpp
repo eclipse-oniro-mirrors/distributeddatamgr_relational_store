@@ -37,7 +37,10 @@ UvQueue::UvQueue(napi_env env) : env_(env)
             // All UvQueue instances for the same env share the validity flag and
             // cleanup hook; register only on first creation to avoid duplicate
             // registration requests and runtime warnings.
-            napi_add_env_cleanup_hook(env, CleanupHook, env);
+            napi_status status = napi_add_env_cleanup_hook(env, CleanupHook, env);
+            if (status != napi_ok) {
+                LOG_ERROR("Failed to add cleanup hook, status:%{public}d", status);
+            }
         } else {
             isValid_ = it->second;
         }
