@@ -436,17 +436,6 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_MultiProcess_Child_001, TestSize.Level0)
 
 // ===== Performance =====
 
-/**
- * @brief Compare CRUD (insert/query/update/delete) time without vs with io_guard.
- *        Pre-load 20k rows, measure 2000 operations per type, degradation <= 1.1x.
- *        Fork+exec child for clean latch state (enable before open).
- */
-HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Degrade_001, TestSize.Level2)
-{
-    RunChildTest("IOGUARD_PERF_CHILD", "IoguardTest.Rdb_IoGuard_Perf_Child_001",
-                 "/data/test/ioguard_perf_child.log");
-}
-
 // Perf helper: pre-load PRE_LOAD rows, then measure N operations of each CRUD type.
 struct PerfResult {
     double insertAvg;
@@ -458,7 +447,6 @@ struct PerfResult {
 static PerfResult MeasureCrud(const std::shared_ptr<RdbStore> &store, int preLoad, int n)
 {
     PerfResult r = {0, 0, 0, 0};
-    // Pre-load data
     for (int i = 0; i < preLoad; i++) {
         ValuesBucket v;
         v.PutInt("id", i);
@@ -467,7 +455,6 @@ static PerfResult MeasureCrud(const std::shared_ptr<RdbStore> &store, int preLoa
         store->Insert(rowId, "test_t", v);
     }
 
-    // Insert
     auto t0 = std::chrono::steady_clock::now();
     for (int i = preLoad; i < preLoad + n; i++) {
         ValuesBucket v;
@@ -479,7 +466,6 @@ static PerfResult MeasureCrud(const std::shared_ptr<RdbStore> &store, int preLoa
     auto t1 = std::chrono::steady_clock::now();
     r.insertAvg = (double)std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / n;
 
-    // Query
     auto t2 = std::chrono::steady_clock::now();
     for (int i = 0; i < n; i++) {
         int target = i % (preLoad + n);
@@ -491,7 +477,6 @@ static PerfResult MeasureCrud(const std::shared_ptr<RdbStore> &store, int preLoa
     auto t3 = std::chrono::steady_clock::now();
     r.queryAvg = (double)std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count() / n;
 
-    // Update
     auto t4 = std::chrono::steady_clock::now();
     for (int i = 0; i < n; i++) {
         int target = i % (preLoad + n);
@@ -501,7 +486,6 @@ static PerfResult MeasureCrud(const std::shared_ptr<RdbStore> &store, int preLoa
     auto t5 = std::chrono::steady_clock::now();
     r.updateAvg = (double)std::chrono::duration_cast<std::chrono::microseconds>(t5 - t4).count() / n;
 
-    // Delete
     auto t6 = std::chrono::steady_clock::now();
     for (int i = 0; i < n; i++) {
         int target = preLoad + i;
@@ -513,6 +497,55 @@ static PerfResult MeasureCrud(const std::shared_ptr<RdbStore> &store, int preLoa
     return r;
 }
 
+constexpr int PERF_PRE_LOAD = 20000;
+constexpr int PERF_N = 2000;
+constexpr const char *PERF_RESULT_FILE = "/data/test/ioguard_perf_guarded.txt";
+
+/**
+ * @brief Baseline (parent) + guarded (fork+exec child), compare CRUD degradation.
+ *        Parent runs baseline (no io_guard), child runs guarded (io_guard enabled).
+ *        Child writes results to file; parent reads and asserts <= 1.1x.
+ */
+HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Degrade_001, TestSize.Level2)
+{
+    RdbHelper::DeleteRdbStore(DB_NAME);
+    RdbHelper::ClearCache();
+
+    // 1. Baseline: no io_guard (in parent — open triggers latch but parent doesn't need enable)
+    auto store = OpenStore(DB_NAME, "com.ohos.ioguard.perf");
+    ASSERT_NE(store, nullptr);
+    auto base = MeasureCrud(store, PERF_PRE_LOAD, PERF_N);
+    store = nullptr;
+    RdbHelper::ClearCache();
+    RdbHelper::DeleteRdbStore(DB_NAME);
+
+    // 2. Guarded: fork+exec child (fresh process, latch=0, can enable)
+    RunChildTest("IOGUARD_PERF_CHILD", "IoguardTest.Rdb_IoGuard_Perf_Child_001",
+                 "/data/test/ioguard_perf_child.log");
+
+    // 3. Read guarded results from file
+    FILE *f = fopen(PERF_RESULT_FILE, "r");
+    ASSERT_NE(f, nullptr) << "cannot open guarded result file: " << PERF_RESULT_FILE;
+    double gInsert, gQuery, gUpdate, gDelete;
+    fscanf(f, "%lf %lf %lf %lf", &gInsert, &gQuery, &gUpdate, &gDelete);
+    fclose(f);
+
+    // 4. Print comparison + assert
+    printf("perf: N=%d, pre_load=%d\n", PERF_N, PERF_PRE_LOAD);
+    printf("  insert: baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n", base.insertAvg, gInsert, gInsert / base.insertAvg);
+    printf("  query:  baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n", base.queryAvg, gQuery, gQuery / base.queryAvg);
+    printf("  update: baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n", base.updateAvg, gUpdate, gUpdate / base.updateAvg);
+    printf("  delete: baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n", base.deleteAvg, gDelete, gDelete / base.deleteAvg);
+
+    EXPECT_LE(gInsert / base.insertAvg, 1.1) << "insert degradation exceeds 1.1x";
+    EXPECT_LE(gQuery / base.queryAvg, 1.1) << "query degradation exceeds 1.1x";
+    EXPECT_LE(gUpdate / base.updateAvg, 1.1) << "update degradation exceeds 1.1x";
+    EXPECT_LE(gDelete / base.deleteAvg, 1.1) << "delete degradation exceeds 1.1x";
+}
+
+/**
+ * @brief Child: fresh process (latch=0). Enable io_guard, run CRUD, write results to file.
+ */
 HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Child_001, TestSize.Level2)
 {
     if (getenv("IOGUARD_PERF_CHILD") == nullptr) {
@@ -521,35 +554,15 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Child_001, TestSize.Level2)
     RdbHelper::DeleteRdbStore(DB_NAME);
     RdbHelper::ClearCache();
 
-    const int PRE_LOAD = 20000;
-    const int N = 2000;
-
-    // Baseline: no io_guard
-    auto store1 = OpenStore(DB_NAME, "com.ohos.ioguard.perf");
-    ASSERT_NE(store1, nullptr);
-    auto base = MeasureCrud(store1, PRE_LOAD, N);
-    store1 = nullptr;
-    RdbHelper::ClearCache();
-    RdbHelper::DeleteRdbStore(DB_NAME);
-
-    // With io_guard
     ASSERT_EQ(RdbHelper::EnableIOGuard(), E_OK);
-    auto store2 = OpenStore(DB_NAME, "com.ohos.ioguard.perf");
-    ASSERT_NE(store2, nullptr);
-    auto guarded = MeasureCrud(store2, PRE_LOAD, N);
+    auto store = OpenStore(DB_NAME, "com.ohos.ioguard.perf");
+    ASSERT_NE(store, nullptr);
+    auto guarded = MeasureCrud(store, PERF_PRE_LOAD, PERF_N);
 
-    printf("perf: N=%d, pre_load=%d\n", N, PRE_LOAD);
-    printf("  insert: baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n",
-           base.insertAvg, guarded.insertAvg, guarded.insertAvg / base.insertAvg);
-    printf("  query:  baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n",
-           base.queryAvg, guarded.queryAvg, guarded.queryAvg / base.queryAvg);
-    printf("  update: baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n",
-           base.updateAvg, guarded.updateAvg, guarded.updateAvg / base.updateAvg);
-    printf("  delete: baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n",
-           base.deleteAvg, guarded.deleteAvg, guarded.deleteAvg / base.deleteAvg);
-
-    EXPECT_LE(guarded.insertAvg / base.insertAvg, 1.1) << "insert degradation exceeds 1.1x";
-    EXPECT_LE(guarded.queryAvg / base.queryAvg, 1.1) << "query degradation exceeds 1.1x";
-    EXPECT_LE(guarded.updateAvg / base.updateAvg, 1.1) << "update degradation exceeds 1.1x";
-    EXPECT_LE(guarded.deleteAvg / base.deleteAvg, 1.1) << "delete degradation exceeds 1.1x";
+    // Write results to file for parent to read
+    FILE *f = fopen(PERF_RESULT_FILE, "w");
+    ASSERT_NE(f, nullptr);
+    fprintf(f, "%.2f %.2f %.2f %.2f",
+            guarded.insertAvg, guarded.queryAvg, guarded.updateAvg, guarded.deleteAvg);
+    fclose(f);
 }
