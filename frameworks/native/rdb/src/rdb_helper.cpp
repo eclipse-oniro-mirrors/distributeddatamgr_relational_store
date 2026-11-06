@@ -108,7 +108,7 @@ std::string RdbHelper::GetSelfBundleName()
 
 int RdbHelper::EnableIOGuard()
 {
-    return RdbStoreManager::SetIOGuardEnabled();
+    return SqliteGlobalConfig::EnableIOGuard();
 }
 
 int RdbHelper::DeleteRdbStore(const std::string &dbFileName, bool shouldClose)

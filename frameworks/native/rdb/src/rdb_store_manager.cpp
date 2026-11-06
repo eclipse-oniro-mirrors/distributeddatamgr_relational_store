@@ -41,16 +41,6 @@ using RdbMgr = DistributedRdb::RdbManager;
 __attribute__((used))
 const bool RdbStoreManager::regCollector_ = RdbFaultHiViewReporter::RegCollector(RdbStoreManager::Collector);
 
-int RdbStoreManager::SetIOGuardEnabled()
-{
-    int rc = sqlite3_config(SQLITE_CONFIG_IO_GUARD, 1);
-    if (rc != SQLITE_OK) {
-        LOG_ERROR("SetIOGuardEnabled failed to configure sqlite, rc=%{public}d", rc);
-        return E_ERROR;
-    }
-    return E_OK;
-}
-
 RdbStoreManager &RdbStoreManager::GetInstance()
 {
     static RdbStoreManager manager;

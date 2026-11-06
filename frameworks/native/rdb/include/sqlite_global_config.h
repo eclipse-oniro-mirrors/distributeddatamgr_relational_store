@@ -86,6 +86,7 @@ public:
     static int GetDbPath(const RdbStoreConfig &config, std::string &dbPath);
     static void Corruption(void *arg, const void *msg);
     static std::string GetLastCorruptionMsg();
+    static int EnableIOGuard();
 
 private:
     static void SqliteErrReport(int err, const char *msg);
