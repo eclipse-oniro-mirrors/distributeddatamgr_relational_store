@@ -23,6 +23,7 @@ group("unittest") {
     "dataability:unittest",
     "rdb:unittest",
     "rdb/unittest/dynamic_load_test:unittest",
+    "rdb/unittest/ioguard_test:unittest",
     "rdb/unittest/mock_obs_manage_test:unittest",
     "rdb/unittest/sqlite_statement_test:unittest",
     "rdb/unittest/mockservice:unittest",

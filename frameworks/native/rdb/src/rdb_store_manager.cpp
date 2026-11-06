@@ -27,6 +27,7 @@
 #include "rdb_time_utils.h"
 #include "restricted_db_manager.h"
 #include "security_policy.h"
+#include "sqlite3sym.h"
 #include "sqlite_global_config.h"
 #include "sqlite_utils.h"
 #include "string_utils.h"
@@ -39,6 +40,17 @@ using Reportor = RdbFaultHiViewReporter;
 using RdbMgr = DistributedRdb::RdbManager;
 __attribute__((used))
 const bool RdbStoreManager::regCollector_ = RdbFaultHiViewReporter::RegCollector(RdbStoreManager::Collector);
+
+int RdbStoreManager::SetIOGuardEnabled()
+{
+    int rc = sqlite3_config(SQLITE_CONFIG_IO_GUARD, 1);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR("SetIOGuardEnabled failed to configure sqlite, rc=%{public}d", rc);
+        return E_ERROR;
+    }
+    return E_OK;
+}
+
 RdbStoreManager &RdbStoreManager::GetInstance()
 {
     static RdbStoreManager manager;

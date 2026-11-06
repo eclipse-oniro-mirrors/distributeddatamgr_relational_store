@@ -106,6 +106,11 @@ std::string RdbHelper::GetSelfBundleName()
     return RdbStoreManager::GetInstance().GetSelfBundleName();
 }
 
+int RdbHelper::EnableIOGuard()
+{
+    return RdbStoreManager::SetIOGuardEnabled();
+}
+
 int RdbHelper::DeleteRdbStore(const std::string &dbFileName, bool shouldClose)
 {
     RdbStoreConfig config(dbFileName);

@@ -108,6 +108,17 @@ public:
      * @note Obtaining the BundleName from the Server.
      */
     API_EXPORT static std::string GetSelfBundleName();
+
+    /**
+     * @brief Enable the process-level IOGuard FD protection.
+     *
+     * Must be called before GetRdbStore. Once enabled, the switch is latched
+     * after the first database open and cannot be changed. After enabling,
+     * RDB interface performance degradation is within 10%.
+     *
+     * @return E_OK on success; E_ERROR if already latched or sqlite rejects.
+     */
+    API_EXPORT static int EnableIOGuard();
 };
 } // namespace NativeRdb
 } // namespace OHOS

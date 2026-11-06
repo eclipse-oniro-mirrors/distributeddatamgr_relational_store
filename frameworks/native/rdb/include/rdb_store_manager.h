@@ -16,6 +16,7 @@
 #ifndef NATIVE_RDB_STORE_MANAGER_H
 #define NATIVE_RDB_STORE_MANAGER_H
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -25,6 +26,7 @@
 #include "lru_bucket.h"
 #include "rdb_open_callback.h"
 #include "rdb_store_config.h"
+#include "rdb_visibility.h"
 #include "silent_proxy.h"
 
 namespace OHOS {
@@ -44,6 +46,16 @@ public:
     bool Remove(const std::string &path, bool shouldClose);
     bool Delete(const RdbStoreConfig &config, bool shouldClose);
     std::string GetSelfBundleName();
+
+    /**
+     * @brief Enable the process-level IOGuard FD protection switch.
+     *
+     * Must be called before any database open. Once latched, further calls
+     * return E_ERROR.
+     *
+     * @return E_OK on success; E_ERROR if latched or sqlite rejects.
+     */
+    API_EXPORT static int SetIOGuardEnabled();
 
 private:
     using Param = DistributedRdb::RdbSyncerParam;
