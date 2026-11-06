@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <cstring>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <errno.h>
@@ -175,7 +176,8 @@ void RunChildTest(const char *envKey, const char *filter, const char *logPath)
             dup2(logFd, STDERR_FILENO);
             close(logFd);
         }
-        execl("/data/test/IoguardTest", "IoguardTest", "--gtest_filter", filter, nullptr);
+        std::string filterArg = std::string("--gtest_filter=") + filter;
+        execl("/data/test/IoguardTest", "IoguardTest", filterArg.c_str(), nullptr);
         _exit(127);
     }
     int status = 0;
