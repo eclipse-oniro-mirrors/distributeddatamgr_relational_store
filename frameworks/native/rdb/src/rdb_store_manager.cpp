@@ -27,7 +27,6 @@
 #include "rdb_time_utils.h"
 #include "restricted_db_manager.h"
 #include "security_policy.h"
-#include "sqlite3sym.h"
 #include "sqlite_global_config.h"
 #include "sqlite_utils.h"
 #include "string_utils.h"
@@ -40,7 +39,6 @@ using Reportor = RdbFaultHiViewReporter;
 using RdbMgr = DistributedRdb::RdbManager;
 __attribute__((used))
 const bool RdbStoreManager::regCollector_ = RdbFaultHiViewReporter::RegCollector(RdbStoreManager::Collector);
-
 RdbStoreManager &RdbStoreManager::GetInstance()
 {
     static RdbStoreManager manager;
