@@ -435,13 +435,80 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_MultiProcess_Child_001, TestSize.Level0)
 // ===== Performance =====
 
 /**
- * @brief Compare CRUD time without vs with io_guard. Degradation must be <= 1.1x.
+ * @brief Compare CRUD (insert/query/update/delete) time without vs with io_guard.
+ *        Pre-load 20k rows, measure 2000 operations per type, degradation <= 1.1x.
  *        Fork+exec child for clean latch state (enable before open).
  */
 HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Degrade_001, TestSize.Level2)
 {
     RunChildTest("IOGUARD_PERF_CHILD", "IoguardTest.Rdb_IoGuard_Perf_Child_001",
                  "/data/test/ioguard_perf_child.log");
+}
+
+// Perf helper: pre-load PRE_LOAD rows, then measure N operations of each CRUD type.
+struct PerfResult {
+    double insertAvg;
+    double queryAvg;
+    double updateAvg;
+    double deleteAvg;
+};
+
+static PerfResult MeasureCrud(const std::shared_ptr<RdbStore> &store, int preLoad, int n)
+{
+    PerfResult r = {0, 0, 0, 0};
+    // Pre-load data
+    for (int i = 0; i < preLoad; i++) {
+        ValuesBucket v;
+        v.PutInt("id", i);
+        v.PutString("name", std::to_string(i));
+        int64_t rowId = 0;
+        store->Insert(rowId, "test_t", v);
+    }
+
+    // Insert
+    auto t0 = std::chrono::steady_clock::now();
+    for (int i = preLoad; i < preLoad + n; i++) {
+        ValuesBucket v;
+        v.PutInt("id", i);
+        v.PutString("name", std::to_string(i));
+        int64_t rowId = 0;
+        store->Insert(rowId, "test_t", v);
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    r.insertAvg = (double)std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / n;
+
+    // Query
+    auto t2 = std::chrono::steady_clock::now();
+    for (int i = 0; i < n; i++) {
+        int target = i % (preLoad + n);
+        auto rs = store->QuerySql("SELECT id, name FROM test_t WHERE id = " + std::to_string(target));
+        if (rs) {
+            rs->GoToFirstRow();
+        }
+    }
+    auto t3 = std::chrono::steady_clock::now();
+    r.queryAvg = (double)std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count() / n;
+
+    // Update
+    auto t4 = std::chrono::steady_clock::now();
+    for (int i = 0; i < n; i++) {
+        int target = i % (preLoad + n);
+        store->ExecuteSql("UPDATE test_t SET name='upd_" + std::to_string(i) +
+                          "' WHERE id=" + std::to_string(target));
+    }
+    auto t5 = std::chrono::steady_clock::now();
+    r.updateAvg = (double)std::chrono::duration_cast<std::chrono::microseconds>(t5 - t4).count() / n;
+
+    // Delete
+    auto t6 = std::chrono::steady_clock::now();
+    for (int i = 0; i < n; i++) {
+        int target = preLoad + i;
+        store->ExecuteSql("DELETE FROM test_t WHERE id = " + std::to_string(target));
+    }
+    auto t7 = std::chrono::steady_clock::now();
+    r.deleteAvg = (double)std::chrono::duration_cast<std::chrono::microseconds>(t7 - t6).count() / n;
+
+    return r;
 }
 
 HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Child_001, TestSize.Level2)
@@ -452,42 +519,35 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Child_001, TestSize.Level2)
     RdbHelper::DeleteRdbStore(DB_NAME);
     RdbHelper::ClearCache();
 
+    const int PRE_LOAD = 20000;
     const int N = 2000;
 
+    // Baseline: no io_guard
     auto store1 = OpenStore(DB_NAME, "com.ohos.ioguard.perf");
     ASSERT_NE(store1, nullptr);
-    auto t0 = std::chrono::steady_clock::now();
-    for (int i = 0; i < N; i++) {
-        ValuesBucket v;
-        v.PutInt("id", i);
-        v.PutString("name", std::to_string(i));
-        int64_t rowId = 0;
-        store1->Insert(rowId, "test_t", v);
-    }
-    auto t1 = std::chrono::steady_clock::now();
-    auto baselineTotalUs = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
-    double baselineAvgUs = (double)baselineTotalUs / N;
+    auto base = MeasureCrud(store1, PRE_LOAD, N);
     store1 = nullptr;
     RdbHelper::ClearCache();
     RdbHelper::DeleteRdbStore(DB_NAME);
 
+    // With io_guard
     ASSERT_EQ(RdbHelper::EnableIOGuard(), E_OK);
     auto store2 = OpenStore(DB_NAME, "com.ohos.ioguard.perf");
     ASSERT_NE(store2, nullptr);
-    auto t2 = std::chrono::steady_clock::now();
-    for (int i = 0; i < N; i++) {
-        ValuesBucket v;
-        v.PutInt("id", i);
-        v.PutString("name", std::to_string(i));
-        int64_t rowId = 0;
-        store2->Insert(rowId, "test_t", v);
-    }
-    auto t3 = std::chrono::steady_clock::now();
-    auto guardedTotalUs = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
-    double guardedAvgUs = (double)guardedTotalUs / N;
+    auto guarded = MeasureCrud(store2, PRE_LOAD, N);
 
-    double ratio = baselineAvgUs > 0 ? guardedAvgUs / baselineAvgUs : 0;
-    printf("perf: N=%d, baseline_avg=%.2fus, guarded_avg=%.2fus, ratio=%.2f\n",
-           N, baselineAvgUs, guardedAvgUs, ratio);
-    EXPECT_LE(ratio, 1.1) << "degradation exceeds 1.1x: ratio=" << ratio;
+    printf("perf: N=%d, pre_load=%d\n", N, PRE_LOAD);
+    printf("  insert: baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n",
+           base.insertAvg, guarded.insertAvg, guarded.insertAvg / base.insertAvg);
+    printf("  query:  baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n",
+           base.queryAvg, guarded.queryAvg, guarded.queryAvg / base.queryAvg);
+    printf("  update: baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n",
+           base.updateAvg, guarded.updateAvg, guarded.updateAvg / base.updateAvg);
+    printf("  delete: baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n",
+           base.deleteAvg, guarded.deleteAvg, guarded.deleteAvg / base.deleteAvg);
+
+    EXPECT_LE(guarded.insertAvg / base.insertAvg, 1.1) << "insert degradation exceeds 1.1x";
+    EXPECT_LE(guarded.queryAvg / base.queryAvg, 1.1) << "query degradation exceeds 1.1x";
+    EXPECT_LE(guarded.updateAvg / base.updateAvg, 1.1) << "update degradation exceeds 1.1x";
+    EXPECT_LE(guarded.deleteAvg / base.deleteAvg, 1.1) << "delete degradation exceeds 1.1x";
 }
