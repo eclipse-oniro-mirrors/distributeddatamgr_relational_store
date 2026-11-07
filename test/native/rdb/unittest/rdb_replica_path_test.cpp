@@ -996,7 +996,7 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_017, TestSize.Level0)
 HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_018, TestSize.Level1)
 {
     LOG_INFO("---- step1 open master and slave in MANUAL_TRIGGER mode, backup to build the baseline");
-    InitDb(HAMode::MANUAL_TRIGGER, true);
+    InitDb(HAMode::MANUAL_TRIGGER, false, false);
     EXPECT_EQ(store->Backup(std::string(""), {}), E_OK);
 
     LOG_INFO("---- step2 mark slave invalid so binlog replay is blocked");
