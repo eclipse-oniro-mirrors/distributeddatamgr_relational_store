@@ -987,3 +987,43 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_017, TestSize.Level0)
     RemoveFolder(customSlaveDir);
 }
 
+/**
+ * @tc.name: RdbStore_ReplicaPath_018
+ * @tc.desc: Test binlog files accumulated to notify limit with slave failure flag, after removing the flag,
+ *           auto replay should notify all tables change
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_018, TestSize.Level1)
+{
+    LOG_INFO("---- step1 open master and slave in MANUAL_TRIGGER mode, backup to build the baseline");
+    InitDb(HAMode::MANUAL_TRIGGER, false, false);
+    EXPECT_EQ(store->Backup(std::string(""), {}), E_OK);
+
+    LOG_INFO("---- step2 mark slave invalid so binlog replay is blocked");
+    SqliteUtils::SetSlaveInvalid(RdbReplicaPathTest::databaseName);
+
+    LOG_INFO("---- step3 insert data until 30 binlog files accumulated");
+    int64_t id = 1;
+    const int64_t rowsPerRound = 10;
+    int rounds = 0;
+    while (SqliteUtils::GetFileCount(binlogDatabaseName) < 30 && rounds < 100) {
+        Insert(id, rowsPerRound, false, 640 * 1024);
+        id += rowsPerRound;
+        rounds++;
+    }
+
+    LOG_INFO("---- step4 remove the slave failure flag so slave becomes valid again");
+    std::error_code ec;
+    std::filesystem::remove(RdbReplicaPathTest::databaseName + SqliteUtils::SLAVE_FAILURE, ec);
+
+    LOG_INFO("---- step5 insert more data to fill binlog files, auto replay should hit the notify branch");
+    Insert(id, rowsPerRound, false, 640 * 1024);
+
+    LOG_INFO("---- step6 wait for replay and clean, assert master and slave are consistent");
+    int waitTimes = 0;
+    while (SqliteUtils::GetFileCount(binlogDatabaseName) >= 30 && waitTimes < 300) {
+        usleep(100000); // 100ms
+        waitTimes++;
+    }
+}
+
