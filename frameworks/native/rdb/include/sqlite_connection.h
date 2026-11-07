@@ -129,7 +129,6 @@ private:
     int SetWalSyncMode(const std::string &syncMode);
     int SetTokenizer(const RdbStoreConfig &config);
     int SetBinlog();
-    int NotifyDataChange();
     void LimitPermission(const RdbStoreConfig &config, const std::string &dbPath) const;
 
     int SetPersistWal(const RdbStoreConfig &config);

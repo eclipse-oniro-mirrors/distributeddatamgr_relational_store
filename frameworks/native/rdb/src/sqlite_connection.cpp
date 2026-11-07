@@ -2024,15 +2024,6 @@ int SqliteConnection::UpdateTrackerMatrix(const DistributedRdb::RdbChangedData &
     return SqliteUtils::ConvertDBStatusNative(status);
 }
 
-int SqliteConnection::NotifyDataChange()
-{
-    auto status = sqlite3_notify_data_change_binlog(dbHandle_, nullptr);
-    if (status != SQLITE_OK) {
-        LOG_WARN("notify all tables change failed, err:%{public}d", status);
-    }
-    return SQLiteError::ErrNo(status);
-}
-
 int32_t SqliteConnection::Repair(const RdbStoreConfig &config)
 {
     if (config.GetReplicaPath().empty()) {
@@ -2513,9 +2504,9 @@ void SqliteConnection::ReplayBinlog(const RdbStoreConfig &config, bool chkBinlog
         return;
     }
     if (SqliteUtils::GetFileCount(SqliteUtils::GetBinlogFolderPath(config)) >= BINLOG_FILE_NOTIFY_LIMIT) {
-        LOG_INFO("binlog files accumulated, notify all tables change for %{public}s",
+        LOG_WARN("binlog files accumulated, notify all tables change for %{public}s",
             SqliteUtils::Anonymous(config.GetPath()).c_str());
-        NotifyDataChange();
+        sqlite3_notify_data_change_binlog(dbHandle_, nullptr);
     }
     int err = SqliteConnection::ReplayBinlogSqlite(dbHandle_, slaveConnection_->dbHandle_, config);
     if (err != E_OK) {
