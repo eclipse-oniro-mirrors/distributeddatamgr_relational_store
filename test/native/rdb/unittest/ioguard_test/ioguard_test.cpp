@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+#define LOG_TAG "IoGuardTest"
 #include <gtest/gtest.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -24,6 +24,7 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <chrono>
+#include <fstream>
 
 #include "sqlite3sym.h"
 #include "common.h"
@@ -33,13 +34,16 @@
 #include "rdb_store.h"
 #include "rdb_store_config.h"
 #include "values_bucket.h"
+#include "abs_rdb_predicates.h"
 
 #include "rdb_store_impl.h"
 #include "connection_pool.h"
 #include "sqlite_connection.h"
+#include "logger.h"
 
 using namespace testing::ext;
 using namespace OHOS::NativeRdb;
+using namespace OHOS::Rdb;
 
 namespace {
 constexpr const char *DB_NAME = "/data/test/ioguard_test.db";
@@ -480,8 +484,12 @@ static PerfResult MeasureCrud(const std::shared_ptr<RdbStore> &store, int preLoa
     auto t4 = std::chrono::steady_clock::now();
     for (int i = 0; i < n; i++) {
         int target = i % (preLoad + n);
-        store->ExecuteSql("UPDATE test_t SET name='upd_" + std::to_string(i) +
-                          "' WHERE id=" + std::to_string(target));
+        ValuesBucket v;
+        v.PutString("name", "upd_" + std::to_string(i));
+        AbsRdbPredicates predicates("test_t");
+        predicates.EqualTo("id", std::to_string(target));
+        int changedRows = 0;
+        store->Update(changedRows, v, predicates);
     }
     auto t5 = std::chrono::steady_clock::now();
     r.updateAvg = (double)std::chrono::duration_cast<std::chrono::microseconds>(t5 - t4).count() / n;
@@ -489,7 +497,10 @@ static PerfResult MeasureCrud(const std::shared_ptr<RdbStore> &store, int preLoa
     auto t6 = std::chrono::steady_clock::now();
     for (int i = 0; i < n; i++) {
         int target = preLoad + i;
-        store->ExecuteSql("DELETE FROM test_t WHERE id = " + std::to_string(target));
+        AbsRdbPredicates predicates("test_t");
+        predicates.EqualTo("id", std::to_string(target));
+        int deletedRows = 0;
+        store->Delete(deletedRows, predicates);
     }
     auto t7 = std::chrono::steady_clock::now();
     r.deleteAvg = (double)std::chrono::duration_cast<std::chrono::microseconds>(t7 - t6).count() / n;
@@ -524,18 +535,22 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Degrade_001, TestSize.Level2)
                  "/data/test/ioguard_perf_child.log");
 
     // 3. Read guarded results from file
-    FILE *f = fopen(PERF_RESULT_FILE, "r");
-    ASSERT_NE(f, nullptr) << "cannot open guarded result file: " << PERF_RESULT_FILE;
+    std::ifstream ifs(PERF_RESULT_FILE);
+    ASSERT_TRUE(ifs.is_open()) << "cannot open guarded result file: " << PERF_RESULT_FILE;
     double gInsert, gQuery, gUpdate, gDelete;
-    fscanf(f, "%lf %lf %lf %lf", &gInsert, &gQuery, &gUpdate, &gDelete);
-    fclose(f);
+    ifs >> gInsert >> gQuery >> gUpdate >> gDelete;
+    ifs.close();
 
     // 4. Print comparison + assert
-    printf("perf: N=%d, pre_load=%d\n", PERF_N, PERF_PRE_LOAD);
-    printf("  insert: baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n", base.insertAvg, gInsert, gInsert / base.insertAvg);
-    printf("  query:  baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n", base.queryAvg, gQuery, gQuery / base.queryAvg);
-    printf("  update: baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n", base.updateAvg, gUpdate, gUpdate / base.updateAvg);
-    printf("  delete: baseline=%.2fus, guarded=%.2fus, ratio=%.2f\n", base.deleteAvg, gDelete, gDelete / base.deleteAvg);
+    LOG_INFO("perf: N=%{public}d, pre_load=%{public}d", PERF_N, PERF_PRE_LOAD);
+    LOG_INFO("insert: baseline=%{public}.2fus, guarded=%{public}.2fus, ratio=%{public}.2f",
+             base.insertAvg, gInsert, gInsert / base.insertAvg);
+    LOG_INFO("query: baseline=%{public}.2fus, guarded=%{public}.2fus, ratio=%{public}.2f",
+             base.queryAvg, gQuery, gQuery / base.queryAvg);
+    LOG_INFO("update: baseline=%{public}.2fus, guarded=%{public}.2fus, ratio=%{public}.2f",
+             base.updateAvg, gUpdate, gUpdate / base.updateAvg);
+    LOG_INFO("delete: baseline=%{public}.2fus, guarded=%{public}.2fus, ratio=%{public}.2f",
+             base.deleteAvg, gDelete, gDelete / base.deleteAvg);
 
     EXPECT_LE(gInsert / base.insertAvg, 1.1) << "insert degradation exceeds 1.1x";
     EXPECT_LE(gQuery / base.queryAvg, 1.1) << "query degradation exceeds 1.1x";
@@ -560,9 +575,9 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Child_001, TestSize.Level2)
     auto guarded = MeasureCrud(store, PERF_PRE_LOAD, PERF_N);
 
     // Write results to file for parent to read
-    FILE *f = fopen(PERF_RESULT_FILE, "w");
-    ASSERT_NE(f, nullptr);
-    fprintf(f, "%.2f %.2f %.2f %.2f",
-            guarded.insertAvg, guarded.queryAvg, guarded.updateAvg, guarded.deleteAvg);
-    fclose(f);
+    std::ofstream ofs(PERF_RESULT_FILE);
+    ASSERT_TRUE(ofs.is_open()) << "cannot open result file for writing: " << PERF_RESULT_FILE;
+    ofs << guarded.insertAvg << " " << guarded.queryAvg << " "
+        << guarded.updateAvg << " " << guarded.deleteAvg;
+    ofs.close();
 }
