@@ -20,9 +20,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
-#include <errno.h>
 #include <sys/wait.h>
-#include <sys/types.h>
 #include <chrono>
 #include <fstream>
 
@@ -51,6 +49,21 @@ constexpr const char *DB_A = "/data/test/ioguard_multi_a.db";
 constexpr const char *DB_B = "/data/test/ioguard_multi_b.db";
 
 constexpr int UNIXFILE_FD_OFFSET = sizeof(void *) * 3;
+constexpr int EXIT_CHILD_OPEN_FAIL = 100;
+constexpr int EXIT_CHILD_FD_FAIL = 101;
+constexpr int EXIT_CHILD_WRITE_FAIL = 102;
+constexpr int EXIT_EXEC_FAIL = 127;
+constexpr mode_t LOG_FILE_MODE = 0644;
+constexpr double PERF_DEGRADE_LIMIT = 1.1;
+
+int ExtractFdFromFile(sqlite3_file *pFile)
+{
+    if (pFile == nullptr) {
+        return -1;
+    }
+    const char *base = reinterpret_cast<const char *>(pFile);
+    return *reinterpret_cast<const int *>(base + UNIXFILE_FD_OFFSET);
+}
 
 int GetRdbDbFd(const std::shared_ptr<RdbStore> &store)
 {
@@ -71,12 +84,11 @@ int GetRdbDbFd(const std::shared_ptr<RdbStore> &store)
         return -1;
     }
     sqlite3_file *pFile = nullptr;
-    if (sqlite3_file_control(sqliteConn->dbHandle_, "main", SQLITE_FCNTL_FILE_POINTER, &pFile) != SQLITE_OK || !pFile) {
+    int rc = sqlite3_file_control(sqliteConn->dbHandle_, "main", SQLITE_FCNTL_FILE_POINTER, &pFile);
+    if (rc != SQLITE_OK || pFile == nullptr) {
         return -1;
     }
-    int fd = -1;
-    std::memcpy(&fd, reinterpret_cast<const char *>(pFile) + UNIXFILE_FD_OFFSET, sizeof(int));
-    return fd;
+    return ExtractFdFromFile(pFile);
 }
 
 int GetRdbSlaveFd(const std::shared_ptr<RdbStore> &store)
@@ -102,19 +114,19 @@ int GetRdbSlaveFd(const std::shared_ptr<RdbStore> &store)
         return -1;
     }
     sqlite3_file *pFile = nullptr;
-    if (sqlite3_file_control(slaveDb, "main", SQLITE_FCNTL_FILE_POINTER, &pFile) != SQLITE_OK || !pFile) {
+    int rc = sqlite3_file_control(slaveDb, "main", SQLITE_FCNTL_FILE_POINTER, &pFile);
+    if (rc != SQLITE_OK || pFile == nullptr) {
         return -1;
     }
-    int fd = -1;
-    std::memcpy(&fd, reinterpret_cast<const char *>(pFile) + UNIXFILE_FD_OFFSET, sizeof(int));
-    return fd;
+    return ExtractFdFromFile(pFile);
 }
 
 class TestOpenCallback : public RdbOpenCallback {
 public:
     int OnCreate(RdbStore &s) override
     {
-        return s.ExecuteSql("CREATE TABLE IF NOT EXISTS test_t(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)");
+        std::string sql = "CREATE TABLE IF NOT EXISTS test_t(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)";
+        return s.ExecuteSql(sql);
     }
     int OnUpgrade(RdbStore &s, int, int) override { return E_OK; }
 };
@@ -174,7 +186,7 @@ void RunChildTest(const char *envKey, const char *filter, const char *logPath)
     ASSERT_GE(pid, 0) << "fork failed, errno=" << errno;
     if (pid == 0) {
         setenv(envKey, "1", 1);
-        int logFd = open(logPath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        int logFd = open(logPath, O_WRONLY | O_CREAT | O_TRUNC, LOG_FILE_MODE);
         if (logFd >= 0) {
             dup2(logFd, STDOUT_FILENO);
             dup2(logFd, STDERR_FILENO);
@@ -182,14 +194,125 @@ void RunChildTest(const char *envKey, const char *filter, const char *logPath)
         }
         std::string filterArg = std::string("--gtest_filter=") + filter;
         execl("/data/test/IoguardTest", "IoguardTest", filterArg.c_str(), nullptr);
-        _exit(127);
+        _exit(EXIT_EXEC_FAIL);
     }
     int status = 0;
     waitpid(pid, &status, 0);
     ASSERT_TRUE(WIFEXITED(status)) << "child did not exit normally";
     EXPECT_EQ(WEXITSTATUS(status), 0) << "child test failed, check log: " << logPath;
 }
+
+// ===== Performance helpers =====
+
+struct PerfResult {
+    double insertAvg;
+    double queryAvg;
+    double updateAvg;
+    double deleteAvg;
+};
+
+static double SafeDivide(double numerator, double denominator)
+{
+    if (denominator == 0.0) {
+        return 0.0;
+    }
+    return numerator / denominator;
+}
+
+static double ElapsedUs(std::chrono::steady_clock::time_point begin,
+                        std::chrono::steady_clock::time_point end, int count)
+{
+    auto total = std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
+    return SafeDivide(static_cast<double>(total), static_cast<double>(count));
+}
+
+static void PreLoadData(const std::shared_ptr<RdbStore> &store, int preLoad)
+{
+    for (int i = 0; i < preLoad; i++) {
+        ValuesBucket v;
+        v.PutInt("id", i);
+        v.PutString("name", std::to_string(i));
+        int64_t rowId = 0;
+        store->Insert(rowId, "test_t", v);
+    }
+}
+
+static double MeasureInsert(const std::shared_ptr<RdbStore> &store, int preLoad, int n)
+{
+    auto begin = std::chrono::steady_clock::now();
+    for (int i = preLoad; i < preLoad + n; i++) {
+        ValuesBucket v;
+        v.PutInt("id", i);
+        v.PutString("name", std::to_string(i));
+        int64_t rowId = 0;
+        store->Insert(rowId, "test_t", v);
+    }
+    auto end = std::chrono::steady_clock::now();
+    return ElapsedUs(begin, end, n);
+}
+
+static double MeasureQuery(const std::shared_ptr<RdbStore> &store, int preLoad, int n)
+{
+    int total = preLoad + n;
+    auto begin = std::chrono::steady_clock::now();
+    for (int i = 0; i < n; i++) {
+        int target = i % total;
+        std::string sql = "SELECT id, name FROM test_t WHERE id = " + std::to_string(target);
+        auto rs = store->QuerySql(sql);
+        if (rs) {
+            rs->GoToFirstRow();
+        }
+    }
+    auto end = std::chrono::steady_clock::now();
+    return ElapsedUs(begin, end, n);
+}
+
+static double MeasureUpdate(const std::shared_ptr<RdbStore> &store, int preLoad, int n)
+{
+    int total = preLoad + n;
+    auto begin = std::chrono::steady_clock::now();
+    for (int i = 0; i < n; i++) {
+        int target = i % total;
+        ValuesBucket v;
+        v.PutString("name", "upd_" + std::to_string(i));
+        AbsRdbPredicates predicates("test_t");
+        predicates.EqualTo("id", std::to_string(target));
+        int changedRows = 0;
+        store->Update(changedRows, v, predicates);
+    }
+    auto end = std::chrono::steady_clock::now();
+    return ElapsedUs(begin, end, n);
+}
+
+static double MeasureDelete(const std::shared_ptr<RdbStore> &store, int preLoad, int n)
+{
+    auto begin = std::chrono::steady_clock::now();
+    for (int i = 0; i < n; i++) {
+        int target = preLoad + i;
+        AbsRdbPredicates predicates("test_t");
+        predicates.EqualTo("id", std::to_string(target));
+        int deletedRows = 0;
+        store->Delete(deletedRows, predicates);
+    }
+    auto end = std::chrono::steady_clock::now();
+    return ElapsedUs(begin, end, n);
+}
+
+static PerfResult MeasureCrud(const std::shared_ptr<RdbStore> &store, int preLoad, int n)
+{
+    PreLoadData(store, preLoad);
+    PerfResult r;
+    r.insertAvg = MeasureInsert(store, preLoad, n);
+    r.queryAvg = MeasureQuery(store, preLoad, n);
+    r.updateAvg = MeasureUpdate(store, preLoad, n);
+    r.deleteAvg = MeasureDelete(store, preLoad, n);
+    return r;
+}
 } // namespace
+
+constexpr int PERF_PRE_LOAD = 20000;
+constexpr int PERF_N = 2000;
+constexpr const char *PERF_RESULT_FILE = "/data/test/ioguard_perf_guarded.txt";
 
 class IoguardTest : public testing::Test {
 public:
@@ -419,15 +542,15 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_MultiProcess_Child_001, TestSize.Level0)
         RdbHelper::ClearCache();
         auto storeChild = OpenStore(DB_NAME, "com.ohos.ioguard.mp");
         if (!storeChild) {
-            _exit(100);
+            _exit(EXIT_CHILD_OPEN_FAIL);
         }
         int fd = GetRdbDbFd(storeChild);
         if (fd < 0) {
-            _exit(101);
+            _exit(EXIT_CHILD_FD_FAIL);
         }
-        const char *data = "child";
-        if (write(fd, data, std::strlen(data)) == -1) {
-            _exit(102);
+        const char *childData = "child";
+        if (write(fd, childData, std::strlen(childData)) == -1) {
+            _exit(EXIT_CHILD_WRITE_FAIL);
         }
         _exit(0);
     }
@@ -435,82 +558,11 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_MultiProcess_Child_001, TestSize.Level0)
     int status = 0;
     waitpid(pid, &status, 0);
     ASSERT_TRUE(WIFEXITED(status));
-    EXPECT_EQ(WEXITSTATUS(status), 0) << "child write should succeed after fork, exit=" << WEXITSTATUS(status);
+    int exitCode = WEXITSTATUS(status);
+    EXPECT_EQ(exitCode, 0) << "child write should succeed after fork, exit=" << exitCode;
 }
 
 // ===== Performance =====
-
-// Perf helper: pre-load PRE_LOAD rows, then measure N operations of each CRUD type.
-struct PerfResult {
-    double insertAvg;
-    double queryAvg;
-    double updateAvg;
-    double deleteAvg;
-};
-
-static PerfResult MeasureCrud(const std::shared_ptr<RdbStore> &store, int preLoad, int n)
-{
-    PerfResult r = {0, 0, 0, 0};
-    for (int i = 0; i < preLoad; i++) {
-        ValuesBucket v;
-        v.PutInt("id", i);
-        v.PutString("name", std::to_string(i));
-        int64_t rowId = 0;
-        store->Insert(rowId, "test_t", v);
-    }
-
-    auto t0 = std::chrono::steady_clock::now();
-    for (int i = preLoad; i < preLoad + n; i++) {
-        ValuesBucket v;
-        v.PutInt("id", i);
-        v.PutString("name", std::to_string(i));
-        int64_t rowId = 0;
-        store->Insert(rowId, "test_t", v);
-    }
-    auto t1 = std::chrono::steady_clock::now();
-    r.insertAvg = (double)std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / n;
-
-    auto t2 = std::chrono::steady_clock::now();
-    for (int i = 0; i < n; i++) {
-        int target = i % (preLoad + n);
-        auto rs = store->QuerySql("SELECT id, name FROM test_t WHERE id = " + std::to_string(target));
-        if (rs) {
-            rs->GoToFirstRow();
-        }
-    }
-    auto t3 = std::chrono::steady_clock::now();
-    r.queryAvg = (double)std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count() / n;
-
-    auto t4 = std::chrono::steady_clock::now();
-    for (int i = 0; i < n; i++) {
-        int target = i % (preLoad + n);
-        ValuesBucket v;
-        v.PutString("name", "upd_" + std::to_string(i));
-        AbsRdbPredicates predicates("test_t");
-        predicates.EqualTo("id", std::to_string(target));
-        int changedRows = 0;
-        store->Update(changedRows, v, predicates);
-    }
-    auto t5 = std::chrono::steady_clock::now();
-    r.updateAvg = (double)std::chrono::duration_cast<std::chrono::microseconds>(t5 - t4).count() / n;
-
-    auto t6 = std::chrono::steady_clock::now();
-    for (int i = 0; i < n; i++) {
-        int target = preLoad + i;
-        AbsRdbPredicates predicates("test_t");
-        predicates.EqualTo("id", std::to_string(target));
-        int deletedRows = 0;
-        store->Delete(deletedRows, predicates);
-    }
-    auto t7 = std::chrono::steady_clock::now();
-    r.deleteAvg = (double)std::chrono::duration_cast<std::chrono::microseconds>(t7 - t6).count() / n;
-
-    return r;
-}
-
-constexpr int PERF_PRE_LOAD = 20000;
-constexpr int PERF_N = 2000;
-constexpr const char *PERF_RESULT_FILE = "/data/test/ioguard_perf_guarded.txt";
 
 /**
  * @brief Baseline (parent) + guarded (fork+exec child), compare CRUD degradation.
@@ -522,7 +574,6 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Degrade_001, TestSize.Level2)
     RdbHelper::DeleteRdbStore(DB_NAME);
     RdbHelper::ClearCache();
 
-    // 1. Baseline: no io_guard (in parent — open triggers latch but parent doesn't need enable)
     auto store = OpenStore(DB_NAME, "com.ohos.ioguard.perf");
     ASSERT_NE(store, nullptr);
     auto base = MeasureCrud(store, PERF_PRE_LOAD, PERF_N);
@@ -530,32 +581,29 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Degrade_001, TestSize.Level2)
     RdbHelper::ClearCache();
     RdbHelper::DeleteRdbStore(DB_NAME);
 
-    // 2. Guarded: fork+exec child (fresh process, latch=0, can enable)
     RunChildTest("IOGUARD_PERF_CHILD", "IoguardTest.Rdb_IoGuard_Perf_Child_001",
                  "/data/test/ioguard_perf_child.log");
 
-    // 3. Read guarded results from file
     std::ifstream ifs(PERF_RESULT_FILE);
     ASSERT_TRUE(ifs.is_open()) << "cannot open guarded result file: " << PERF_RESULT_FILE;
     double gInsert, gQuery, gUpdate, gDelete;
     ifs >> gInsert >> gQuery >> gUpdate >> gDelete;
     ifs.close();
 
-    // 4. Print comparison + assert
     LOG_INFO("perf: N=%{public}d, pre_load=%{public}d", PERF_N, PERF_PRE_LOAD);
     LOG_INFO("insert: baseline=%{public}.2fus, guarded=%{public}.2fus, ratio=%{public}.2f",
-             base.insertAvg, gInsert, gInsert / base.insertAvg);
+             base.insertAvg, gInsert, SafeDivide(gInsert, base.insertAvg));
     LOG_INFO("query: baseline=%{public}.2fus, guarded=%{public}.2fus, ratio=%{public}.2f",
-             base.queryAvg, gQuery, gQuery / base.queryAvg);
+             base.queryAvg, gQuery, SafeDivide(gQuery, base.queryAvg));
     LOG_INFO("update: baseline=%{public}.2fus, guarded=%{public}.2fus, ratio=%{public}.2f",
-             base.updateAvg, gUpdate, gUpdate / base.updateAvg);
+             base.updateAvg, gUpdate, SafeDivide(gUpdate, base.updateAvg));
     LOG_INFO("delete: baseline=%{public}.2fus, guarded=%{public}.2fus, ratio=%{public}.2f",
-             base.deleteAvg, gDelete, gDelete / base.deleteAvg);
+             base.deleteAvg, gDelete, SafeDivide(gDelete, base.deleteAvg));
 
-    EXPECT_LE(gInsert / base.insertAvg, 1.1) << "insert degradation exceeds 1.1x";
-    EXPECT_LE(gQuery / base.queryAvg, 1.1) << "query degradation exceeds 1.1x";
-    EXPECT_LE(gUpdate / base.updateAvg, 1.1) << "update degradation exceeds 1.1x";
-    EXPECT_LE(gDelete / base.deleteAvg, 1.1) << "delete degradation exceeds 1.1x";
+    EXPECT_LE(SafeDivide(gInsert, base.insertAvg), PERF_DEGRADE_LIMIT) << "insert degradation exceeds limit";
+    EXPECT_LE(SafeDivide(gQuery, base.queryAvg), PERF_DEGRADE_LIMIT) << "query degradation exceeds limit";
+    EXPECT_LE(SafeDivide(gUpdate, base.updateAvg), PERF_DEGRADE_LIMIT) << "update degradation exceeds limit";
+    EXPECT_LE(SafeDivide(gDelete, base.deleteAvg), PERF_DEGRADE_LIMIT) << "delete degradation exceeds limit";
 }
 
 /**
@@ -574,7 +622,6 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Child_001, TestSize.Level2)
     ASSERT_NE(store, nullptr);
     auto guarded = MeasureCrud(store, PERF_PRE_LOAD, PERF_N);
 
-    // Write results to file for parent to read
     std::ofstream ofs(PERF_RESULT_FILE);
     ASSERT_TRUE(ofs.is_open()) << "cannot open result file for writing: " << PERF_RESULT_FILE;
     ofs << guarded.insertAvg << " " << guarded.queryAvg << " "

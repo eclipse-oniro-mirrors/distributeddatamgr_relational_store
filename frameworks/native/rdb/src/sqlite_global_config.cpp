@@ -29,6 +29,7 @@
 
 #include "logger.h"
 #include "rdb_errno.h"
+#include "sqlite3.h"
 #include "sqlite3sym.h"
 #include "sqlite_utils.h"
 #include "rdb_fault_hiview_reporter.h"
