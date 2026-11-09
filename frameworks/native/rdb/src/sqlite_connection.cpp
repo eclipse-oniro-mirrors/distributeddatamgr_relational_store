@@ -2271,11 +2271,16 @@ void SqliteConnection::BinlogOnErrFunc(void *pCtx, int errNo, char *errMsg, cons
         return;
     }
     std::string dbPathStr(dbPath);
-    LOG_WARN("binlog failed, mark invalid %{public}s", SqliteUtils::Anonymous(dbPathStr).c_str());
+    std::string errMsgStr = (errMsg == nullptr) ? "" : errMsg;
+    LOG_WARN("binlog failed, mark invalid errNo:%{public}d, errMsg:%{public}s, path:%{public}s", errNo,
+        errMsgStr.c_str(), SqliteUtils::Anonymous(dbPathStr).c_str());
     RdbStoreConfig cfg(dbPathStr);
-    auto event = Reportor::Create(cfg, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL,
-        "slave binlog replay failed", false, true);
+    std::string dbName = SqliteUtils::Anonymous(cfg.GetName());
+    std::string appendix = "slave binlog replay failed, dbName:" + dbName +
+        ", errNo:" + std::to_string(errNo) + ", errMsg:" + errMsgStr;
+    auto event = Reportor::Create(cfg, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL, appendix, false, true);
     event.subCaseDesc = RdbSubCase::NON_FIRST_PAGE;
+    event.systemErrorNo = errNo;
     auto pool = TaskExecutor::GetInstance().GetExecutor();
     if (pool != nullptr) {
         pool->Execute([event]() { Reportor::ReportCorruptedOnce(event); });
