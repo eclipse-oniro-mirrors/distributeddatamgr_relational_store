@@ -32,13 +32,14 @@ UvQueue::UvQueue(napi_env env) : env_(env)
         std::lock_guard<std::mutex> guard(UvQueue::validEnvsMutex);
         auto it = UvQueue::validEnvs.find(env);
         if (it == UvQueue::validEnvs.end()) {
-            isValid_ = std::make_shared<bool>(true);
-            UvQueue::validEnvs.insert({ env, isValid_ });
             // All UvQueue instances for the same env share the validity flag and
             // cleanup hook; register only on first creation to avoid duplicate
             // registration requests and runtime warnings.
             napi_status status = napi_add_env_cleanup_hook(env, CleanupHook, env);
-            if (status != napi_ok) {
+            if (status == napi_ok) {
+                isValid_ = std::make_shared<bool>(true);
+                UvQueue::validEnvs.insert({ env, isValid_ });
+            } else {
                 LOG_ERROR("Failed to add cleanup hook, status:%{public}d", status);
             }
         } else {
