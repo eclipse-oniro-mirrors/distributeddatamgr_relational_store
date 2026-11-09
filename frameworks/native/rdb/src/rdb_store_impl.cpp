@@ -2794,7 +2794,7 @@ std::pair<int32_t, int32_t> RdbStoreImpl::Detach(const std::string &attachName, 
         return { E_OK, attachedInfo_.Size() };
     }
     statement = nullptr;
-    if (!isMemoryRdb_ && connection->GetJournalMode() == static_cast<int32_t>(JournalMode::MODE_WAL)) {
+    if (!isMemoryRdb_) {
         // close first to prevent the connection from being put back.
         pool->CloseAllConnections();
         connection = nullptr;

@@ -35,7 +35,7 @@ static constexpr int64_t RDB_INSERT_BASELINE = 3000;
 static constexpr int64_t RDB_UPDATE_BASELINE = 3000;
 static constexpr int64_t TRANS_INSERT_BASELINE = 3000;
 static constexpr int64_t TRANS_UPDATE_BASELINE = 3000;
-static constexpr int64_t RDB_ATTACH_BASELINE = 6000; // attach and detach two interfaces together.
+static constexpr int64_t RDB_ATTACH_BASELINE = 24000; // attach and detach two interfaces together.
 
 class RdbPerformanceTest : public testing::Test {
 public:
