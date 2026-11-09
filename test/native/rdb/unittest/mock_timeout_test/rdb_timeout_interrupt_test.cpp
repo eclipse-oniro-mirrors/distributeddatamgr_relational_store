@@ -503,7 +503,7 @@ HWTEST_F(RdbTimeoutInterruptTest, Transaction_Update_Timeout_001, TestSize.Level
     predicates.EqualTo("name", "nonexistent"); // Force full table scan
 
     UpdateConfig config;
-    config.timeoutMs = 30;
+    config.timeoutMs = 20;
     auto start = std::chrono::steady_clock::now();
     auto [errCode, updateResult] =
         trans->Update(updateRow, predicates, config);

@@ -208,5 +208,15 @@ std::string SqliteGlobalConfig::GetLastCorruptionMsg()
     g_lastCorruptionMsg = "";
     return msg;
 }
+
+int SqliteGlobalConfig::EnableIOGuard()
+{
+    int rc = sqlite3_config(SQLITE_CONFIG_IO_GUARD, 1);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR("EnableIOGuard failed to configure sqlite, rc=%{public}d", rc);
+        return E_ERROR;
+    }
+    return E_OK;
+}
 } // namespace NativeRdb
 } // namespace OHOS
