@@ -218,8 +218,8 @@ HWTEST_F(CheckpointSizeTest, Checkpoint_Clamped_001, TestSize.Level1)
     config.SetStartCheckpointSize(checkpointSize + 10 * 1024 * 1024);
 
     // Assert: clamped to checkpointSize
-    EXPECT_EQ(config.GetStartCheckpointSize(), checkpointSize)
-        << "startCheckpointSize should be clamped to checkpointSize (" << checkpointSize << ")";
+    EXPECT_EQ(config.GetStartCheckpointSize(), checkpointSize) <<
+        "startCheckpointSize should be clamped to checkpointSize (" << checkpointSize << ")";
 
     // Act: open DB, insert enough data to exceed the clamped threshold
     auto store = GetStore(config);
@@ -228,8 +228,8 @@ HWTEST_F(CheckpointSizeTest, Checkpoint_Clamped_001, TestSize.Level1)
 
     // Assert: checkpoint triggered when WAL exceeded clamped threshold, WAL should be below threshold
     int64_t walSize = GetFileSize(dbPath + "-wal");
-    EXPECT_LT(walSize, SIZE_100MB) << "WAL should be below clamped threshold (" << checkpointSize
-                                       << ") after checkpoint, got " << walSize;
+    EXPECT_LT(walSize, SIZE_100MB) << "WAL should be below clamped threshold (" << checkpointSize <<
+                                       ") after checkpoint, got " << walSize;
 
     // Assert: data intact
     EXPECT_EQ(QueryCount(store), 2700) << "Row count should be 2700 with clamped threshold";
@@ -258,14 +258,14 @@ HWTEST_F(CheckpointSizeTest, Checkpoint_ClampedNoAutoCkpt_001, TestSize.Level1)
     config.SetStartCheckpointSize(checkpointSize + 10 * 1024 * 1024);
 
     // Assert: clamped to checkpointSize
-    EXPECT_EQ(config.GetStartCheckpointSize(), checkpointSize)
-        << "startCheckpointSize should be clamped to checkpointSize (" << checkpointSize << ")";
+    EXPECT_EQ(config.GetStartCheckpointSize(), checkpointSize) <<
+        "startCheckpointSize should be clamped to checkpointSize (" << checkpointSize << ")";
 
     // Act: open DB, disable auto-checkpoint so only RDB TryCheckPoint controls checkpointing
     auto store = GetStore(config);
     ASSERT_NE(store, nullptr) << "Store should open with clamped startCheckpointSize";
-    EXPECT_EQ(store->ExecuteSql("PRAGMA wal_autocheckpoint=0"), E_OK)
-        << "Failed to disable auto-checkpoint";
+    EXPECT_EQ(store->ExecuteSql("PRAGMA wal_autocheckpoint=0"), E_OK) <<
+        "Failed to disable auto-checkpoint";
 
     // Act: insert enough data to exceed the clamped threshold
     InsertRows(store, 2700, 100 * 1024); // 2700 rows × 100KB ≈ 270MB > 256MB checkpointSize
@@ -298,15 +298,15 @@ HWTEST_F(CheckpointSizeTest, Checkpoint_ClampedWithWalLimit_001, TestSize.Level1
     config.SetWalLimitSize(512 * 1024 * 1024);
 
     // Assert: checkpointSize_ is exactly 384MB
-    EXPECT_EQ(config.GetCheckpointSize(), SIZE_384MB)
-        << "checkpointSize should be 384MB after SetWalLimitSize(512MB)";
+    EXPECT_EQ(config.GetCheckpointSize(), SIZE_384MB) <<
+        "checkpointSize should be 384MB after SetWalLimitSize(512MB)";
 
     // Act: set startCheckpointSize exceeding 384MB → clamped to 384MB
     config.SetStartCheckpointSize(SIZE_384MB + 10 * 1024 * 1024);
 
     // Assert: clamped to 384MB
-    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_384MB)
-        << "startCheckpointSize should be clamped to 384MB";
+    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_384MB) <<
+        "startCheckpointSize should be clamped to 384MB";
 
     // Act: open DB, insert 200 rows × 1KB, verify read/write works
     auto store = GetStore(config);
@@ -334,8 +334,8 @@ HWTEST_F(CheckpointSizeTest, Checkpoint_NegativeFallback_001, TestSize.Level1)
     RdbHelper::DeleteRdbStore(dbPath);
     RdbStoreConfig config(dbPath);
     config.SetStartCheckpointSize(-1);
-    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_20MB)
-        << "Negative startCheckpointSize should fall back to default 20M";
+    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_20MB) <<
+        "Negative startCheckpointSize should fall back to default 20M";
 
     // Act: open DB, insert 250 rows × 100KB = 25MB WAL (exceeds 20M threshold)
     auto store = GetStore(config);
@@ -367,8 +367,8 @@ HWTEST_F(CheckpointSizeTest, Checkpoint_ZeroFallback_001, TestSize.Level1)
     RdbHelper::DeleteRdbStore(dbPath);
     RdbStoreConfig config(dbPath);
     config.SetStartCheckpointSize(0);
-    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_20MB)
-        << "Zero startCheckpointSize should fall back to default 20M";
+    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_20MB) <<
+        "Zero startCheckpointSize should fall back to default 20M";
 
     // Act: open DB, insert 200 rows × 1KB, verify read/write works
     auto store = GetStore(config);
@@ -401,8 +401,8 @@ HWTEST_F(CheckpointSizeTest, Checkpoint_MemoryDb_001, TestSize.Level1)
     // Act: open DB, create table, insert data
     auto store = GetStore(config);
     ASSERT_NE(store, nullptr) << "Memory DB should open with custom startCheckpointSize";
-    EXPECT_EQ(store->ExecuteSql("INSERT INTO test_table (data) VALUES ('mem_data')"), E_OK)
-        << "Insert should succeed";
+    EXPECT_EQ(store->ExecuteSql("INSERT INTO test_table (data) VALUES ('mem_data')"), E_OK) <<
+        "Insert should succeed";
 
     // Assert: data readable
     EXPECT_EQ(QueryCount(store), 1) << "Row count should be 1";
@@ -435,8 +435,8 @@ HWTEST_F(CheckpointSizeTest, Checkpoint_NonWalMode_001, TestSize.Level1)
     // Act: open DB, create table, insert data
     auto store = GetStore(config);
     ASSERT_NE(store, nullptr) << "Non-WAL DB should open with custom startCheckpointSize";
-    EXPECT_EQ(store->ExecuteSql("INSERT INTO test_table (data) VALUES ('truncate_data')"), E_OK)
-        << "Insert should succeed in TRUNCATE mode";
+    EXPECT_EQ(store->ExecuteSql("INSERT INTO test_table (data) VALUES ('truncate_data')"), E_OK) <<
+        "Insert should succeed in TRUNCATE mode";
 
     // Assert: data readable
     EXPECT_EQ(QueryCount(store), 1) << "Row count should be 1 in TRUNCATE mode";
