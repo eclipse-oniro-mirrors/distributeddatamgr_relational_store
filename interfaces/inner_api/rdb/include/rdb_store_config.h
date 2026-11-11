@@ -870,6 +870,15 @@ public:
 
     ssize_t GetStartCheckpointSize() const;
 
+    /**
+     * @brief Sets the start checkpoint size for the object. When the WAL file size
+     *        exceeds this value, sqlite3_wal_checkpoint_v2 will be considered.
+     *        The value is clamped to [0, checkpointSize] to ensure it does not
+     *        exceed the force-checkpoint threshold.
+     * @param size The start checkpoint size in bytes.
+     */
+    void SetStartCheckpointSize(ssize_t size);
+
     ssize_t GetWalLimitSize() const;
 
     void SetWalLimitSize(ssize_t size);

@@ -917,4 +917,17 @@ bool RdbStoreConfig::IsEqualRegisterInfo(const RdbStoreConfig& config) const
 {
     return registerInfo_ == config.registerInfo_;
 }
+
+void RdbStoreConfig::SetStartCheckpointSize(ssize_t size)
+{
+    if (size <= 0) {
+        LOG_WARN("startCheckpointSize is invalid, size:%{public}zd", size);
+        size = GlobalExpr::DB_WAL_SIZE_LIMIT_MIN;
+    }
+    if (size > checkpointSize_) {
+        LOG_WARN("startCheckpointSize exceeds checkpointSize, clamped: %{public}zd", size);
+        size = checkpointSize_;
+    }
+    startCheckpointSize_ = size;
+}
 } // namespace OHOS::NativeRdb
