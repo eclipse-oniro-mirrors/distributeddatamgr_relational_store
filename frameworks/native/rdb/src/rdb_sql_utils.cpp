@@ -37,6 +37,11 @@ using namespace Rdb;
 namespace NativeRdb {
 using namespace OHOS::DATABASE_UTILS;
 const int32_t FIELDS_LIMIT = 4;
+bool RdbSqlUtils::RenameFile(const std::string &srcFile, const std::string &destFile)
+{
+    return SqliteUtils::RenameFile(srcFile, destFile);
+}
+
 int RdbSqlUtils::CreateDirectory(const std::string &databaseDir)
 {
     std::string tempDirectory = databaseDir;
