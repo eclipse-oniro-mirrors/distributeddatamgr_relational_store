@@ -1055,3 +1055,111 @@ HWTEST_F(RdbMockInjectTest, RdbFaultInject_NeverLoadedPath_043, TestSize.Level1)
     EXPECT_FALSE(neverInjected.ConsumeOpen());
     EXPECT_FALSE(neverInjected.HasEntry());
 }
+
+// ===== RdbStoreManager branch coverage =====
+
+/**
+ * @tc.name: RdbFaultInject_ManagerCacheExpiredDecorator_044
+ * @tc.desc: Verify the weak-ref-expired cache path creates a decorator:
+ *           after the store is released (cache entry expires), a reopen
+ *           yields a store whose CRUD can be injected.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectTest, RdbFaultInject_ManagerCacheExpiredDecorator_044, TestSize.Level1)
+{
+    // Open a store normally, then release it so the cache weak-ref expires.
+    RemoveConfig();
+    int errCode = E_ERROR;
+    auto store = OpenMockStore(errCode);
+    ASSERT_NE(store, nullptr);
+    EXPECT_EQ(errCode, E_OK);
+    store = nullptr; // release the shared_ptr so the weak-ref expires
+
+    // Reopen: the cache entry is stale (lock fails) → a new decorator is
+    // created on the expired path. Configure injection and verify the
+    // reopened store is a decorator (CRUD returns the corruption error).
+    WriteConfig(R"({"databases": {"mock_inject_store.db": {"operations": {"insert": {"count": 1}}}}})");
+    errCode = E_ERROR;
+    store = OpenMockStore(errCode);
+    ASSERT_NE(store, nullptr);
+    EXPECT_EQ(errCode, E_OK);
+    ValuesBucket bucket;
+    bucket.PutString("name", "alice");
+    int64_t outRowId = 0;
+    EXPECT_EQ(store->Insert(outRowId, "mock_test", bucket), E_SQLITE_CORRUPT)
+        << "reopened store is a decorator (expired cache path)";
+    EXPECT_EQ(store->Insert(outRowId, "mock_test", bucket), E_OK) << "budget exhausted";
+}
+
+/**
+ * @tc.name: RdbFaultInject_ManagerConfigChangedDecorator_045
+ * @tc.desc: Verify the config-changed cache path creates a decorator:
+ *           when the same path is opened with a different config, the
+ *           recreated store can be injected.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectTest, RdbFaultInject_ManagerConfigChangedDecorator_045, TestSize.Level2)
+{
+    RemoveConfig();
+    RdbHelper::ClearCache();
+    RdbHelper::DeleteRdbStore(RDB_TEST_PATH + MOCK_STORE_DB);
+
+    // Open with the base config.
+    RdbStoreConfig baseConfig(RDB_TEST_PATH + MOCK_STORE_DB);
+    MockInjectOpenCallback callback;
+    int errCode = E_ERROR;
+    auto store = RdbHelper::GetRdbStore(baseConfig, 1, callback, errCode);
+    ASSERT_NE(store, nullptr);
+    EXPECT_EQ(errCode, E_OK);
+    store = nullptr; // release so the reopen goes through the cache
+
+    // Write the injection config BEFORE the reopen: the decorator reads
+    // the config file once at construction.
+    WriteConfig(R"({"databases": {"mock_inject_store.db": {"operations": {"insert": {"count": 1}}}}})");
+
+    // Reopen with a changed config that still allows the recreation path
+    // (version < INVALID_CONFIG_CHANGE_NOT_ALLOWED).
+    RdbStoreConfig changedConfig(RDB_TEST_PATH + MOCK_STORE_DB);
+    changedConfig.SetJournalMode(JournalMode::MODE_WAL); // differs from the base default
+    errCode = E_ERROR;
+    store = RdbHelper::GetRdbStore(changedConfig, 1, callback, errCode);
+    ASSERT_NE(store, nullptr);
+    EXPECT_EQ(errCode, E_OK);
+
+    // The config-changed path recreated a decorator with the injection
+    // entry already loaded: CRUD returns the corruption error.
+    ValuesBucket bucket;
+    bucket.PutString("name", "alice");
+    int64_t outRowId = 0;
+    EXPECT_EQ(store->Insert(outRowId, "mock_test", bucket), E_SQLITE_CORRUPT)
+        << "recreated store is a decorator (config-changed path)";
+    EXPECT_EQ(store->Insert(outRowId, "mock_test", bucket), E_OK) << "budget exhausted";
+}
+
+/**
+ * @tc.name: RdbFaultInject_ManagerGetRdbOpenError_046
+ * @tc.desc: Verify the GetRdb open-error branch: when the open entry is
+ *           configured, GetRdb returns nullptr without creating a store.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectTest, RdbFaultInject_ManagerGetRdbOpenError_046, TestSize.Level1)
+{
+    RemoveConfig();
+    RdbHelper::ClearCache();
+    RdbHelper::DeleteRdbStore(RDB_TEST_PATH + MOCK_STORE_DB);
+
+    // Normal open through GetRdb succeeds.
+    RdbStoreConfig config(RDB_TEST_PATH + MOCK_STORE_DB);
+    MockInjectOpenCallback callback;
+    int errCode = E_ERROR;
+    auto store = RdbHelper::GetRdbStore(config, 1, callback, errCode);
+    ASSERT_NE(store, nullptr);
+    EXPECT_EQ(errCode, E_OK);
+    RdbHelper::DeleteRdbStore(config);
+
+    // Configure an open entry and verify GetRdb returns nullptr.
+    WriteConfig(R"({"databases": {"mock_inject_store.db": {"open": {"count": 1}}}})");
+    EXPECT_EQ(RdbHelper::GetRdb(config), nullptr) << "GetRdb open entry consumed";
+    RemoveConfig();
+}
+

@@ -474,3 +474,134 @@ HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_ResultSetReadTransactionOverlo
     EXPECT_EQ(transRs->Close(), E_OK) << "Close excluded from the read family";
     EXPECT_EQ(transaction->Rollback(), E_OK);
 }
+
+/**
+ * @tc.name: RdbFaultInject_StoreQueryByStepSqlInjection_011
+ * @tc.desc: Verify that the store QueryByStep(sql) sink injects
+ *           E_SQLITE_CORRUPT when the query family is configured.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_StoreQueryByStepSqlInjection_011, TestSize.Level1)
+{
+    WriteCatalogConfig(R"({"databases": {"mock_inject_catalog.db": {"operations": {"query": {"count": 99}}}}})");
+    auto store = OpenCatalogStore();
+    ASSERT_NE(store, nullptr);
+
+    auto resultSet = store->QueryByStep("SELECT id FROM mock_test");
+    EXPECT_EQ(resultSet, nullptr) << "QueryByStep(sql) returns nullptr on injection";
+}
+
+/**
+ * @tc.name: RdbFaultInject_StoreQueryByStepPredicatesInjection_012
+ * @tc.desc: Verify that the store QueryByStep(predicates) sink injects
+ *           E_SQLITE_CORRUPT when the query family is configured.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_StoreQueryByStepPredicatesInjection_012, TestSize.Level1)
+{
+    WriteCatalogConfig(R"({"databases": {"mock_inject_catalog.db": {"operations": {"query": {"count": 99}}}}})");
+    auto store = OpenCatalogStore();
+    ASSERT_NE(store, nullptr);
+
+    RdbPredicates predicates("mock_test");
+    auto resultSet = store->QueryByStep(predicates);
+    EXPECT_EQ(resultSet, nullptr) << "QueryByStep(predicates) returns nullptr on injection";
+}
+
+/**
+ * @tc.name: RdbFaultInject_StoreExecuteForLastInsertedRowIdInjection_013
+ * @tc.desc: Verify that the ExecuteForLastInsertedRowId sink injects
+ *           E_SQLITE_CORRUPT when the executeSql family is configured.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_StoreExecuteForLastInsertedRowIdInjection_013, TestSize.Level1)
+{
+    WriteCatalogConfig(R"({"databases": {"mock_inject_catalog.db": {"operations": {"executeSql": {"count": 99}}}}})");
+    auto store = OpenCatalogStore();
+    ASSERT_NE(store, nullptr);
+
+    int64_t outRowId = 0;
+    EXPECT_EQ(store->ExecuteForLastInsertedRowId(
+                  outRowId, "INSERT INTO mock_test (name) VALUES ('inject')", {}),
+        E_SQLITE_CORRUPT) << "ExecuteForLastInsertedRowId injected";
+}
+
+/**
+ * @tc.name: RdbFaultInject_TransactionQueryByStepSqlInjection_014
+ * @tc.desc: Verify that the transaction QueryByStep(sql) sink injects
+ *           E_SQLITE_CORRUPT when the query family is configured.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_TransactionQueryByStepSqlInjection_014, TestSize.Level2)
+{
+    WriteCatalogConfig(R"({"databases": {"mock_inject_catalog.db": {"operations": {"query": {"count": 99}}}}})");
+    auto store = OpenCatalogStore();
+    ASSERT_NE(store, nullptr);
+
+    auto [createRet, transaction] = store->CreateTransaction(Transaction::IMMEDIATE);
+    EXPECT_EQ(createRet, E_OK);
+    ASSERT_NE(transaction, nullptr);
+    auto resultSet = transaction->QueryByStep("SELECT id FROM mock_test");
+    EXPECT_EQ(resultSet, nullptr) << "transaction QueryByStep(sql) returns nullptr on injection";
+}
+
+/**
+ * @tc.name: RdbFaultInject_TransactionQueryByStepPredicatesInjection_015
+ * @tc.desc: Verify that the transaction QueryByStep(predicates) sink injects
+ *           E_SQLITE_CORRUPT when the query family is configured.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_TransactionQueryByStepPredicatesInjection_015, TestSize.Level2)
+{
+    WriteCatalogConfig(R"({"databases": {"mock_inject_catalog.db": {"operations": {"query": {"count": 99}}}}})");
+    auto store = OpenCatalogStore();
+    ASSERT_NE(store, nullptr);
+
+    auto [createRet, transaction] = store->CreateTransaction(Transaction::IMMEDIATE);
+    EXPECT_EQ(createRet, E_OK);
+    ASSERT_NE(transaction, nullptr);
+    RdbPredicates predicates("mock_test");
+    auto resultSet = transaction->QueryByStep(predicates);
+    EXPECT_EQ(resultSet, nullptr) << "transaction QueryByStep(predicates) returns nullptr on injection";
+}
+
+/**
+ * @tc.name: RdbFaultInject_TransactionRollbackInjection_016
+ * @tc.desc: Verify that the transaction Rollback sink injects
+ *           E_SQLITE_CORRUPT when the transaction family is configured.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_TransactionRollbackInjection_016, TestSize.Level1)
+{
+    // Target Rollback by method name so CreateTransaction still succeeds.
+    WriteCatalogConfig(
+        R"({"databases": {"mock_inject_catalog.db": {"methods": {"Rollback": {"count": 99}}}}})");
+    auto store = OpenCatalogStore();
+    ASSERT_NE(store, nullptr);
+
+    auto [createRet, transaction] = store->CreateTransaction(Transaction::IMMEDIATE);
+    EXPECT_EQ(createRet, E_OK);
+    ASSERT_NE(transaction, nullptr);
+    EXPECT_EQ(transaction->Rollback(), E_SQLITE_CORRUPT) << "Rollback injected";
+}
+
+/**
+ * @tc.name: RdbFaultInject_TransactionCloseInjection_017
+ * @tc.desc: Verify that the transaction Close sink injects
+ *           E_SQLITE_CORRUPT when the transaction family is configured.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_TransactionCloseInjection_017, TestSize.Level1)
+{
+    // Target Close by method name so CreateTransaction still succeeds.
+    WriteCatalogConfig(
+        R"({"databases": {"mock_inject_catalog.db": {"methods": {"Close": {"count": 99}}}}})");
+    auto store = OpenCatalogStore();
+    ASSERT_NE(store, nullptr);
+
+    auto [createRet, transaction] = store->CreateTransaction(Transaction::IMMEDIATE);
+    EXPECT_EQ(createRet, E_OK);
+    ASSERT_NE(transaction, nullptr);
+    EXPECT_EQ(transaction->Close(), E_SQLITE_CORRUPT) << "Close injected";
+}
+
