@@ -39,7 +39,6 @@ TransDB::TransDB(std::shared_ptr<Connection> conn, const std::string &path) : co
 std::pair<int, int64_t> TransDB::Insert(
     const std::string &table, const Row &row, const InsertConfig &config)
 {
-    DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     auto conflictClause = SqliteUtils::GetConflictClause(static_cast<int>(config.resolution));
     if (table.empty() || row.IsEmpty() || conflictClause == nullptr) {
         return { E_INVALID_ARGS, -1 };
@@ -81,7 +80,6 @@ std::pair<int, int64_t> TransDB::Insert(
 
 std::pair<int, int64_t> TransDB::BatchInsert(const std::string &table, const RefRows &rows)
 {
-    DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     if (rows.RowSize() == 0) {
         return { E_OK, 0 };
     }
@@ -115,7 +113,6 @@ std::pair<int32_t, Results> TransDB::BatchInsert(const std::string &table, const
     const BatchInsertConfig &cfg)
 {
     const ReturningConfig &config = cfg.returning;
-    DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     if (rows.RowSize() == 0) {
         return { E_OK, 0 };
     }
@@ -149,7 +146,6 @@ std::pair<int32_t, Results> TransDB::Update(const Row &row, const AbsRdbPredicat
     const UpdateConfig &cfg)
 {
     const ReturningConfig &config = cfg.returning;
-    DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     auto clause = SqliteUtils::GetConflictClause(static_cast<int>(cfg.resolution));
     auto table = predicates.GetTableName();
     if (table.empty() || row.IsEmpty() || clause == nullptr) {
@@ -198,7 +194,6 @@ std::pair<int32_t, Results> TransDB::Delete(
     const AbsRdbPredicates &predicates, const DeleteConfig &cfg)
 {
     const ReturningConfig &config = cfg.returning;
-    DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     auto table = predicates.GetTableName();
     if (table.empty()) {
         return { E_INVALID_ARGS, -1 };
@@ -228,7 +223,6 @@ std::shared_ptr<AbsSharedResultSet> TransDB::QuerySql(
     const std::string &sql, const Values &args, const QueryConfig &config)
 {
 #if !defined(WINDOWS_PLATFORM) && !defined(MAC_PLATFORM) && !defined(ANDROID_PLATFORM) && !defined(IOS_PLATFORM)
-    DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     auto start = std::chrono::steady_clock::now();
     return std::make_shared<SqliteSharedResultSet>(start, conn_.lock(), sql, args, path_);
 #else
@@ -241,7 +235,6 @@ std::shared_ptr<AbsSharedResultSet> TransDB::QuerySql(
 std::shared_ptr<ResultSet> TransDB::QueryByStep(
     const std::string &sql, const Values &args, const QueryOptions &options, const QueryConfig &config)
 {
-    DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     auto conn = conn_.lock();
     auto start = std::chrono::steady_clock::now();
     auto resultSet = std::make_shared<StepResultSet>(start, conn, sql, args, options, true);
@@ -252,7 +245,6 @@ std::pair<int32_t, ValueObject> TransDB::Execute(
     const std::string &sql, const Values &args, int64_t trxId, const ExecuteConfig &config)
 {
     (void)trxId;
-    DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     ValueObject object;
     int sqlType = SqliteUtils::GetSqlStatementType(sql);
     if (!SqliteUtils::IsSupportSqlForExecute(sqlType) && !SqliteUtils::IsSpecial(sqlType)) {
@@ -297,7 +289,6 @@ std::pair<int32_t, ValueObject> TransDB::Execute(
 
 std::pair<int32_t, Results> TransDB::ExecuteExt(const std::string &sql, const Values &args)
 {
-    DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     ValueObject object;
     int sqlType = SqliteUtils::GetSqlStatementType(sql);
     if (!SqliteUtils::IsSupportSqlForExecute(sqlType) && !SqliteUtils::IsSpecial(sqlType)) {

@@ -125,6 +125,10 @@ ohos_unittest("IoguardTest") {
     "${relational_store_native_path}/rdb/src/rdb_audit_utils.cpp",
   ]
 
+  # rdb_store_manager.cpp / transaction_impl.cpp / sqlite_connection.cpp
+  # reference the decorator and injector symbols; compile the mock sources in.
+  sources += rdb_fault_mock_sources
+
   configs = [ ":module_private_config" ]
 
   external_deps = [

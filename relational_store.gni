@@ -36,6 +36,12 @@ declare_args() {
   }
 
   relational_store_support_jsapi_test = (target_os == "ohos")
+
+  # RDB interface fault-injection mock layer: root/debug version builds turn
+  # it on to compile the real injector; user (release) builds keep it off and
+  # compile the no-op implementation instead, so the shipped artifact carries no mock
+  # behavior at all.
+  rdb_fault_injection_enable = false
 }
 
 common_tool_path = "//foundation/distributeddatamgr/kv_store/frameworks/common"
@@ -173,3 +179,27 @@ base_sources = [
   "${relational_store_native_path}/rdb/src/marshal_utils.cpp",
   relational_store_hmac_source,
 ]
+
+# RDB fault-injection mock layer. The store and transaction decorators
+# derive from classes every platform compiles, so they build on all
+# platforms (the cross-platform SDK variants keep the same decorator
+# behavior; the no-op injector contributes nothing there). The result-set
+# decorator is a header-only template instantiated at its guarded use
+# sites. Each decorator delegates to the parent when the injector is
+# inactive, so user builds keep the exact same behavior. Only the injector
+# itself switches: the real implementation in root/debug builds, the no-op
+# implementation in user builds.
+rdb_fault_mock_sources = [
+  "${relational_store_native_path}/rdb/src/rdb_store_decorator.cpp",
+  "${relational_store_native_path}/rdb/src/transaction_impl_decorator.cpp",
+]
+if (rdb_fault_injection_enable) {
+  rdb_fault_mock_sources += [ "${relational_store_native_path}/rdb/src/rdb_fault_injector.cpp" ]
+} else {
+  rdb_fault_mock_sources += [ "${relational_store_native_path}/rdb/src/rdb_fault_injector_noop.cpp" ]
+}
+
+# rdb_store_manager.cpp references these symbols, so every target
+# compiling the rdb sources directly (standalone unittest source lists
+# that do not reuse base_sources) appends this list too.
+base_sources += rdb_fault_mock_sources

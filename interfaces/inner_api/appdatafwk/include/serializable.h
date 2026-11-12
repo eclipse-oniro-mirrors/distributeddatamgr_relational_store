@@ -15,6 +15,7 @@
 
 #ifndef DISTRIBUTED_RDB_SERIALIZABLE_H
 #define DISTRIBUTED_RDB_SERIALIZABLE_H
+#include <map>
 #include <string>
 #include <vector>
 
@@ -115,6 +116,31 @@ protected:
         for (const auto &value : values) {
             result = SetValue(node[i], value) && result;
             i++;
+        }
+        return result;
+    }
+
+    template<typename T>
+    static bool GetValue(const json &node, const std::string &name, std::map<std::string, T> &values)
+    {
+        auto &subNode = GetSubNode(node, name);
+        if (subNode.is_null() || !subNode.is_object()) {
+            return false;
+        }
+        bool result = true;
+        for (auto object = subNode.begin(); object != subNode.end(); ++object) {
+            result = GetValue(object.value(), "", values[object.key()]) && result;
+        }
+        return result;
+    }
+
+    template<typename T>
+    static bool SetValue(json &node, const std::map<std::string, T> &values)
+    {
+        bool result = true;
+        node = json::value_t::object;
+        for (auto it = values.begin(); it != values.end(); ++it) {
+            result = SetValue(node[it->first], it->second) && result;
         }
         return result;
     }

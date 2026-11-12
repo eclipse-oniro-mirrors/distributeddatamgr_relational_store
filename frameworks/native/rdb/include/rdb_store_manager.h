@@ -51,6 +51,8 @@ private:
     using DebugInfos = std::map<std::string, RdbStoreManager::Info>;
     using DfxInfo = DistributedRdb::RdbDfxInfo;
     bool IsConfigInvalidChanged(const std::string &path, RdbStoreConfig &config);
+    // Fault-injection mock, open path in default error mode (see the cpp).
+    static bool ShouldInjectOpenError(const std::string &path);
     int32_t GetParamFromService(DistributedRdb::RdbSyncerParam &param);
     bool IsPermitted(const DistributedRdb::RdbSyncerParam &param, const std::string &path);
     int32_t CheckConfig(const RdbStoreConfig &config, const std::string &path);

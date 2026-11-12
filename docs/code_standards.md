@@ -3,7 +3,7 @@
 本文档是 relational_store 的**强制编码规范**，由 [`AGENTS.md`](../AGENTS.md) 的"知识路由"在涉及代码开发/修改任务时按需加载。
 
 包含：
-- R1～R10 强制规则（正反示例 + 计数方法 + 豁免流程）
+- R1～R12 强制规则（正反示例 + 计数方法 + 豁免流程）
 - 反馈闭环（规则演进机制）
 - 演进记录
 
@@ -15,7 +15,7 @@
 
 ### 规则
 
-单个函数（含成员函数 / 静态函数 / lambda）有效代码行数 **MUST ≤ 50** 行。超过 **MUST** 拆分为多个私有方法或匿名命名空间内的辅助函数。
+单个函数（含成员函数 / 静态函数 / lambda、测试用例体）有效代码行数 **MUST ≤ 50** 行。超过 **MUST** 拆分为多个私有方法或匿名命名空间内的辅助函数；测试用例按场景拆分为多个用例。
 
 ### 计数方法
 
@@ -184,6 +184,77 @@ Inner APIs 不建议修改；如需修改 **MUST** 在 commit 中说明影响面
 
 ---
 
+## R11 禁止 try/catch
+
+### 规则
+
+**NEVER** 使用 `try` / `catch`。构建全局已定义 `JSON_NOEXCEPTION`，JSON 解析层
+为无异常模式；所有错误经返回值（`bool` / 标准错误码）传播。
+
+### 反例（违反 R11）
+
+```cpp
+// 反例：用异常兜底解析错误
+bool Load(const std::string &content)
+{
+    try {
+        auto root = Serializable::ToJson(content);
+    } catch (...) {
+        return false;
+    }
+    return true;
+}
+```
+
+### 正例（遵守 R11）
+
+```cpp
+// 正例：解析失败经返回值传播
+bool Load(const std::string &content)
+{
+    Config config;
+    return config.Unmarshall(content);
+}
+```
+
+---
+
+## R12 JSON 序列化必须经 Serializable
+
+### 规则
+
+JSON 的序列化 / 反序列化 **MUST** 通过 `Serializable` 的 `Marshal` / `Unmarshal`
+（配合 `GetValue` / `SetValue` 与 `GET_NAME`）完成；业务代码 **NEVER** 直接操作
+json 对象。动态键 map 在 `Unmarshal` 实现内迭代解析。
+
+### 反例（违反 R12）
+
+```cpp
+// 反例：业务代码直接 find / 遍历 json 节点
+auto root = Serializable::ToJson(content);
+auto dbs = root.find("databases");
+if (dbs != root.end() && dbs->is_object()) {
+    // ...
+}
+```
+
+### 正例（遵守 R12）
+
+```cpp
+// 正例：schema 定义为 Serializable 结构，业务只调用 Unmarshall
+struct Entry final : public Serializable {
+    int32_t count = 0;
+    bool Unmarshal(const Serializable::json &node) override
+    {
+        return GetValue(node, GET_NAME(count), count);
+    }
+};
+Entry entry;
+entry.Unmarshall(content);
+```
+
+---
+
 ## 反馈闭环（规则演进）
 
 本规范的规则集合不是固定的。两种触发场景 **MUST** 走"询问用户"流程：
@@ -224,3 +295,4 @@ docs/code_standards.md 作为正式规则（R11+）？
 | ---------- | ---------------------------------------------------------------------------------------------- |
 | 2026-08-08 | 去重：从 AGENTS.md 移除内联 R1～R10 表与反馈闭环章节，本文件成为规则唯一权威来源；R3 改为引用 `AGENTS.md > 核心原则 #5`；修正 R2 计数内重复条目 |
 | 2026-08-08 | 初始版本，建立 R1～R10；新增"用户同一会话提及 2 次以上"反馈触发条件                             |
+| 2026-11-08 | R1 明确测试用例体同样受 50 行限制；新增 R11（禁止 try/catch）与 R12（JSON 序列化必须经 Serializable Marshal/Unmarshal） |

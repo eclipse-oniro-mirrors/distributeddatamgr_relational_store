@@ -1,0 +1,22 @@
+{
+    "databases": {
+        "app.db": {
+            "open": { "count": 1 },
+            "operations": {
+                "insert": { "count": 3 },
+                "update": { "count": 2, "probability": 50 },
+                "delete": { "probability": 30 },
+                "query": { "count": 1 },
+                "executeSql": { "count": 2, "probability": 100 },
+                "transaction": { "count": 1 },
+                "resultSetRead": { "count": 2, "probability": 50 }
+            },
+            "methods": {
+                "Backup": { "count": 1 }
+            }
+        },
+        "cache.db": {
+            "open": { "mode": "error" }
+        }
+    }
+}
