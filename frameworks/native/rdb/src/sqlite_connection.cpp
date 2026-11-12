@@ -457,7 +457,7 @@ int32_t SqliteConnection::OpenDatabase(const std::string &dbPath, int openFileFl
                     SqliteUtils::GetFileStatInfo(blockedInfo.second) +
                     "blockedPath=" + blockedPath + ", " + diagMsg +
                     ", parent dir modes:" + SqliteUtils::GetParentModes(dbPath) +
-                    ", procUid:" + std::to_string(GetUid()) +
+                    ", procUid:" + std::to_string(GetAppUid()) +
                     ", procGid:" + std::to_string(GetGid()) +
                     ", procUmask:" + std::to_string(SqliteUtils::GetProcUmask()), true);
             faultEvent.SetSubCaseDesc(RdbSubCase::FILE_PERMISSION);
