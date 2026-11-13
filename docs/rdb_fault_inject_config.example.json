@@ -16,7 +16,7 @@
             }
         },
         "cache.db": {
-            "open": { "mode": "error" }
+            "open": { "count": -1 }
         }
     }
 }

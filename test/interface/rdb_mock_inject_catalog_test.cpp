@@ -400,6 +400,29 @@ HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_ResultSetReadSharedOverloads_0
     EXPECT_EQ(sharedRs->IsAtLastRow(flag), E_SQLITE_CORRUPT) << "IsAtLastRow";
     ValueObject valueObject;
     EXPECT_EQ(sharedRs->Get(0, valueObject), E_SQLITE_CORRUPT) << "Get(ValueObject)";
+
+    // The remaining overrides that had no assertions before.
+    auto wholeNames = sharedRs->GetWholeColumnNames();
+    EXPECT_EQ(wholeNames.first, E_SQLITE_CORRUPT) << "GetWholeColumnNames";
+    int columnIndex = 0;
+    EXPECT_EQ(sharedRs->GetColumnIndex("name", columnIndex), E_SQLITE_CORRUPT) << "GetColumnIndex";
+    std::string columnName;
+    EXPECT_EQ(sharedRs->GetColumnName(0, columnName), E_SQLITE_CORRUPT) << "GetColumnName";
+    EXPECT_TRUE(sharedRs->IsClosed()) << "IsClosed returns true on injection";
+    ValueObject::Asset asset;
+    EXPECT_EQ(sharedRs->GetAsset(0, asset), E_SQLITE_CORRUPT) << "GetAsset";
+    ValueObject::Assets assets;
+    EXPECT_EQ(sharedRs->GetAssets(0, assets), E_SQLITE_CORRUPT) << "GetAssets";
+    ValueObject::FloatVector floatVec;
+    EXPECT_EQ(sharedRs->GetFloat32Array(0, floatVec), E_SQLITE_CORRUPT) << "GetFloat32Array";
+    RowEntity rowEntity;
+    EXPECT_EQ(sharedRs->GetRow(rowEntity), E_SQLITE_CORRUPT) << "GetRow";
+    auto rowData = sharedRs->GetRowData();
+    EXPECT_EQ(rowData.first, E_SQLITE_CORRUPT) << "GetRowData";
+    auto rowsData = sharedRs->GetRowsData(10, 0);
+    EXPECT_EQ(rowsData.first, E_SQLITE_CORRUPT) << "GetRowsData";
+    size_t columnSize = 0;
+    EXPECT_EQ(sharedRs->GetSize(0, columnSize), E_SQLITE_CORRUPT) << "GetSize";
     EXPECT_EQ(sharedRs->Close(), E_OK) << "Close excluded from the read family";
 }
 

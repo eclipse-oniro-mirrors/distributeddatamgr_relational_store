@@ -18,12 +18,14 @@
 rdb_fault_injection_enable = false   # 缺省
 ```
 
-| 取值 | 编入产物 | 行为 |
-| --- | --- | --- |
-| `true`（root/调试版本） | `rdb_fault_injector.cpp` + 装饰器家族 | 注入能力可用 |
-| `false`（user 版本） | `rdb_fault_injector_noop.cpp` + 装饰器家族 | 零行为：无配置读取、无日志、所有判定恒为未命中 |
+开关跟 `build_variant` 联动（dsoftbus 同模式）：`rdb_fault_injection_enable = (build_variant == "root")`。
 
-注意：**代码中没有任何特性宏**。开关在 `relational_store.gni` 里做源级选择，仅切换注入器的真实现与 no-op 实现；装饰器两个版本都编入（继承自被装饰类，注入器未生效时等价于裸实现）。
+| build_variant | 编入产物 | 行为 |
+| --- | --- | --- |
+| `root` | `rdb_fault_injector.cpp` + 装饰器家族 | 注入能力可用 |
+| `user` | `rdb_fault_injector_noop.cpp` + 装饰器家族 | 零行为：无配置读取、无日志、所有判定恒为未命中 |
+
+注意：**代码中没有任何特性宏**。开关在 `relational_store.gni` 里做源级选择，仅切换注入器的真实现与 no-op 实现；装饰器两个版本都编入（继承自被装饰类，注入器未生效时等价于裸实现）。root 版构建自动可用，无需手动传 `--gn-args`。
 
 ## 3. 配置文件
 

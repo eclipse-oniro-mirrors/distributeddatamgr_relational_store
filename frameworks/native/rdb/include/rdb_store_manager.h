@@ -56,6 +56,10 @@ private:
     int32_t GetParamFromService(DistributedRdb::RdbSyncerParam &param);
     bool IsPermitted(const DistributedRdb::RdbSyncerParam &param, const std::string &path);
     int32_t CheckConfig(const RdbStoreConfig &config, const std::string &path);
+    // Silent-accessible verdict for the ACL decision: a local-only database
+    // is never silent accessible; SUPPORT follows the configuration and
+    // UNKNOWN falls back to the proxy manager's query (potential service IPC).
+    bool IsSilentAccessibleDb(const RdbStoreConfig &config);
     static Param GetSyncParam(const RdbStoreConfig &config);
     static int32_t Collector(const RdbStoreConfig &config, DebugInfos &debugInfos, DfxInfo &dfxInfo);
     std::shared_ptr<RdbStoreImpl> GetStoreFromCache(

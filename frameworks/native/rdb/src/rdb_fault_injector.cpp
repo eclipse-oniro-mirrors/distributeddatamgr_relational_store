@@ -186,10 +186,18 @@ void WarnCleanupLike(const std::string &name)
 // configured" (missing file or invalid content).
 bool ReadConfigFile(const std::string &path, FaultConfig &config)
 {
-    std::ifstream fin(path, std::ios::in);
+    std::ifstream fin(path, std::ios::in | std::ios::ate);
     if (!fin.is_open()) {
         return false; // no config file: empty snapshot
     }
+    // Hard cap on the config file size: the file is root-controlled debug
+    // input, but a runaway test artifact should not stall the open path.
+    constexpr std::streamsize MAX_CONFIG_SIZE = 1024 * 1024; // 1 MB
+    if (fin.tellg() > MAX_CONFIG_SIZE) {
+        LOG_WARN("rdb_fault_inject_config.json too large, treated as no config");
+        return false;
+    }
+    fin.seekg(0, std::ios::beg);
     std::string line;
     std::string content;
     while (std::getline(fin, line)) {

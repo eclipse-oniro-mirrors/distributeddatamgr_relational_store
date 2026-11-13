@@ -11,6 +11,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import("//build/common.gni")
+
 declare_args() {
   relational_store_rdb_support_icu = true
   if (!defined(global_parts_info) ||
@@ -37,11 +39,6 @@ declare_args() {
 
   relational_store_support_jsapi_test = (target_os == "ohos")
 
-  # RDB interface fault-injection mock layer: root/debug version builds turn
-  # it on to compile the real injector; user (release) builds keep it off and
-  # compile the no-op implementation instead, so the shipped artifact carries no mock
-  # behavior at all.
-  rdb_fault_injection_enable = false
 }
 
 common_tool_path = "//foundation/distributeddatamgr/kv_store/frameworks/common"
@@ -189,10 +186,17 @@ base_sources = [
 # inactive, so user builds keep the exact same behavior. Only the injector
 # itself switches: the real implementation in root/debug builds, the no-op
 # implementation in user builds.
+# The fault-injection mock layer follows the build variant (dsoftbus pattern):
+# root version builds compile the real injector, user (release) builds compile
+# the no-op implementation instead, so the shipped artifact carries no mock
+# behavior at all. build/common.gni (imported above) provides build_variant.
+rdb_fault_injection_enable = (build_variant == "root")
+
 rdb_fault_mock_sources = [
   "${relational_store_native_path}/rdb/src/rdb_store_decorator.cpp",
   "${relational_store_native_path}/rdb/src/transaction_impl_decorator.cpp",
 ]
+
 if (rdb_fault_injection_enable) {
   rdb_fault_mock_sources += [ "${relational_store_native_path}/rdb/src/rdb_fault_injector.cpp" ]
 } else {

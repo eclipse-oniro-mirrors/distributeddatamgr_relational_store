@@ -43,6 +43,14 @@ namespace NativeRdb {
 // decorated with the same injector. When the injector is inactive (user
 // builds link the no-op implementation) the decorator behaves exactly like
 // the plain implementation.
+// Inject-and-return guard for decorated sinks: if the injector hits, return
+// the given value (E_SQLITE_CORRUPT, { E_SQLITE_CORRUPT, -1 }, nullptr, ...)
+// without executing the parent implementation.
+#define RDB_INJECT_GUARD(op, name, ...) \
+    if (ShouldInject(RdbFaultOp::op, name)) { \
+        return __VA_ARGS__; \
+    }
+
 class RdbStoreDecorator final : public RdbStoreImpl {
 public:
     explicit RdbStoreDecorator(const RdbStoreConfig &config);
@@ -75,6 +83,9 @@ public:
     int Commit() override;
     int Commit(int64_t trxId) override;
 
+    int32_t Init(int version, RdbOpenCallback &openCallback, bool isNeedSetAcl = false,
+        bool isSilentAccessible = false) override;
+
 private:
     // Injection verdict for a hooked sink: applies only after the open
     // (Init) completed, so OnCreate/OnUpgrade callbacks and internal
@@ -85,14 +96,14 @@ private:
         int32_t type, std::shared_ptr<Connection> conn) override;
 
     std::string dbPath_;
-    // Per-store injector constructed with the store path (reads
-    // rdb_fault_inject_config.json once at construction) and passed to the
-    // transaction and result-set decorators this store creates, so the
-    // budget state is shared by everything serving the database.
-    // Holder plus reference, following the configHolder_/config_ convention
-    // in rdb_store_impl.h; the class only uses the reference.
+    // Per-store injector: created in Init (after the base Init succeeds,
+    // outside the manager lock) so the config file read never happens inside a
+    // critical section. Passed to the transaction and result-set decorators
+    // this store creates, so the budget state is shared by everything
+    // serving the database. Holder plus reference, following the
+    // configHolder_/config_ convention in rdb_store_impl.h.
     std::shared_ptr<RdbFaultInjector> injectorHolder_;
-    RdbFaultInjector &injector_;
+    RdbFaultInjector *injector_ = nullptr;
 };
 
 } // namespace NativeRdb

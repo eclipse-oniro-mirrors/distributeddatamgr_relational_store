@@ -107,7 +107,7 @@ class RdbStoreImpl : public RdbStore {
 public:
     RdbStoreImpl(const RdbStoreConfig &config);
     ~RdbStoreImpl() override;
-    int32_t Init(int version, RdbOpenCallback &openCallback, bool isNeedSetAcl = false,
+    virtual int32_t Init(int version, RdbOpenCallback &openCallback, bool isNeedSetAcl = false,
         bool isSilentAccessible = false);
     std::pair<int, int64_t> Insert(
         const std::string &table, const Row &row, const InsertConfig &config = {}) override;
