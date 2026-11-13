@@ -400,8 +400,26 @@ HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_ResultSetReadSharedOverloads_0
     EXPECT_EQ(sharedRs->IsAtLastRow(flag), E_SQLITE_CORRUPT) << "IsAtLastRow";
     ValueObject valueObject;
     EXPECT_EQ(sharedRs->Get(0, valueObject), E_SQLITE_CORRUPT) << "Get(ValueObject)";
+    EXPECT_EQ(sharedRs->Close(), E_OK) << "Close excluded from the read family";
+}
 
-    // The remaining overrides that had no assertions before.
+/**
+ * @tc.name: RdbFaultInject_ResultSetReadSharedExtraOverloads_018
+ * @tc.desc: Verify the remaining result-set overrides (GetWholeColumnNames,
+ *           GetColumnIndex, GetColumnName, IsClosed, GetAsset, GetAssets,
+ *           GetFloat32Array, GetRow, GetRowData, GetRowsData, GetSize) report
+ *           E_SQLITE_CORRUPT while Close stays available.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_ResultSetReadSharedExtraOverloads_018, TestSize.Level2)
+{
+    WriteCatalogConfig(
+        R"({"databases": {"mock_inject_catalog.db": {"operations": {"resultSetRead": {"count": 99}}}}})");
+    auto store = OpenCatalogStore();
+    ASSERT_NE(store, nullptr);
+
+    auto sharedRs = store->QuerySql("SELECT id FROM mock_test");
+    ASSERT_NE(sharedRs, nullptr);
     auto wholeNames = sharedRs->GetWholeColumnNames();
     EXPECT_EQ(wholeNames.first, E_SQLITE_CORRUPT) << "GetWholeColumnNames";
     int columnIndex = 0;

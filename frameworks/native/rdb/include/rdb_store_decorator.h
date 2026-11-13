@@ -44,8 +44,7 @@ namespace NativeRdb {
 // builds link the no-op implementation) the decorator behaves exactly like
 // the plain implementation.
 // Inject-and-return guard for decorated sinks: if the injector hits, return
-// the given value (E_SQLITE_CORRUPT, { E_SQLITE_CORRUPT, -1 }, nullptr, ...)
-// without executing the parent implementation.
+// the caller-supplied corruption value without executing the parent.
 #define RDB_INJECT_GUARD(op, name, ...) \
     if (ShouldInject(RdbFaultOp::op, name)) { \
         return __VA_ARGS__; \
