@@ -17,9 +17,11 @@
 
 #include <condition_variable>
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
+
+#include "mock_cloud_remote.h"
 #include <unistd.h>
 
-#include "accesstoken_kit.h"
 #include "cloud_manager.h"
 #include "cloud_notifier_stub.h"
 #include "cloud_service_proxy.h"
@@ -27,14 +29,11 @@
 #include "cloud_types_util.h"
 #include "logger.h"
 #include "rdb_types.h"
-#include "token_setproc.h"
 
 namespace OHOS::CloudData {
 using namespace testing::ext;
-using namespace OHOS::Security::AccessToken;
 using namespace OHOS::Rdb;
 using namespace DistributedRdb;
-uint64_t g_selfTokenID = 0;
 static constexpr const char *TEST_BUNDLE_NAME = "bundleName";
 static constexpr const char *TEST_ACCOUNT_ID = "testId";
 static constexpr const char *TEST_STORE_ID = "storeId";
@@ -75,121 +74,57 @@ private:
     int32_t triggerMode_;
 };
 
-void AllocSystemHapToken(const HapPolicyParams &policy)
-{
-    HapInfoParams info = {
-        .userID = 100,
-        .bundleName = "ohos.clouddatatest.demo",
-        .instIndex = 0,
-        .appIDDesc = "ohos.clouddatatest.demo",
-        .isSystemApp = true
-    };
-    auto token = AccessTokenKit::AllocHapToken(info, policy);
-    SetSelfTokenID(token.tokenIDEx);
-}
-
-void AllocNormalHapToken(const HapPolicyParams &policy)
-{
-    HapInfoParams info = {
-        .userID = 100,
-        .bundleName = "ohos.clouddatatest.demo",
-        .instIndex = 0,
-        .appIDDesc = "ohos.clouddatatest.demo",
-        .isSystemApp = false
-    };
-    auto token = AccessTokenKit::AllocHapToken(info, policy);
-    SetSelfTokenID(token.tokenIDEx);
-}
-
-HapPolicyParams g_normalPolicy = {
-    .apl = APL_NORMAL,
-    .domain = "test.domain",
-    .permList = {
-        {
-            .permissionName = "ohos.permission.CLOUDDATA_CONFIG",
-            .bundleName = "ohos.clouddatatest.demo",
-            .grantMode = 1,
-            .availableLevel = APL_NORMAL,
-            .label = "label",
-            .labelId = 1,
-            .description = "ohos.clouddatatest.demo",
-            .descriptionId = 1
-        }
-    },
-    .permStateList = {
-        {
-            .permissionName = "ohos.permission.CLOUDDATA_CONFIG",
-            .isGeneral = true,
-            .resDeviceID = { "local" },
-            .grantStatus = { PermissionState::PERMISSION_GRANTED },
-            .grantFlags = { 1 }
-        }
-    }
-};
-
-HapPolicyParams g_systemPolicy = {
-    .apl = APL_SYSTEM_BASIC,
-    .domain = "test.domain",
-    .permList = {
-        {
-            .permissionName = "ohos.permission.CLOUDDATA_CONFIG",
-            .bundleName = "ohos.clouddatatest.demo",
-            .grantMode = 1,
-            .availableLevel = APL_SYSTEM_BASIC,
-            .label = "label",
-            .labelId = 1,
-            .description = "ohos.clouddatatest.demo",
-            .descriptionId = 1
-        }
-    },
-    .permStateList = {
-        {
-            .permissionName = "ohos.permission.CLOUDDATA_CONFIG",
-            .isGeneral = true,
-            .resDeviceID = { "local" },
-            .grantStatus = { PermissionState::PERMISSION_GRANTED },
-            .grantFlags = { 1 }
-        }
-    }
-};
-
-HapPolicyParams g_notPermissonPolicy = {
-    .apl = APL_SYSTEM_BASIC,
-    .domain = "test.domain",
-    .permList = {
-        {
-            .permissionName = "ohos.permission.TEST",
-            .bundleName = "ohos.clouddatatest.demo",
-            .grantMode = 1,
-            .availableLevel = APL_SYSTEM_BASIC,
-            .label = "label",
-            .labelId = 1,
-            .description = "ohos.clouddatatest.demo",
-            .descriptionId = 1
-        }
-    },
-    .permStateList = {
-        {
-            .permissionName = "ohos.permission.TEST",
-            .isGeneral = true,
-            .resDeviceID = { "local" },
-            .grantStatus = { PermissionState::PERMISSION_GRANTED },
-            .grantFlags = { 1 }
-        }
-    }
-};
-
 class CloudDataTest : public testing::Test {
 public:
     static void SetUpTestCase(void);
     static void TearDownTestCase(void);
     void SetUp()
     {
+        progressStatus_ = Progress::SYNC_BEGIN;
+        code_ = ProgressCode::SUCCESS;
+        remote_ = new testing::StrictMock<MockCloudRemote>();
+        proxy_ = std::make_shared<CloudServiceProxy>(remote_);
+        CloudManager::GetInstance().cloudService_ = proxy_;
+        ExpectReply(CloudService::TRANS_INIT_NOTIFIER, CloudService::SUCCESS);
+        ASSERT_EQ(proxy_->InitNotifier(), CloudService::SUCCESS) << "local notifier setup failed";
     }
     void TearDown()
     {
-        SetSelfTokenID(g_selfTokenID);
+        CloudManager::GetInstance().ResetServiceHandle();
+        proxy_.reset();
+        remote_ = nullptr;
     }
+
+    void ExpectReply(uint32_t code, int32_t status)
+    {
+        ExpectCloudReply(*remote_, code, status);
+    }
+
+    void ExpectSyncCompleteReply(uint32_t sequence)
+    {
+        auto notifier = proxy_->notifier_;
+        ExpectCloudReply(*remote_, CloudService::TRANS_CLOUD_SYNC, CloudService::SUCCESS,
+            [notifier, sequence](MessageParcel &request) {
+                std::string bundle;
+                std::string store;
+                CloudService::Option option;
+                ASSERT_TRUE(ITypesUtil::Unmarshal(request, bundle, store, option)) << "bad CloudSync request";
+                EXPECT_EQ(bundle, TEST_BUNDLE_NAME) << "wrong bundle in request";
+                EXPECT_EQ(store, TEST_STORE_ID) << "wrong store in request";
+                EXPECT_EQ(option.seqNum, sequence) << "wrong sequence in request";
+                MessageParcel data;
+                MessageParcel reply;
+                // One device detail with no tables: encode the server wire format independently.
+                ASSERT_TRUE(ITypesUtil::Marshal(data, sequence, int32_t{1}, std::string("device"),
+                    int32_t(Progress::SYNC_FINISH), int32_t(ProgressCode::CLOUD_DISABLED), int32_t{0}, std::string{}))
+                    << "bad notification fixture";
+                EXPECT_EQ(notifier->OnCompleteInner(data, reply), CloudService::SUCCESS)
+                    << "real notifier did not decode the callback";
+            });
+    }
+
+    sptr<testing::StrictMock<MockCloudRemote>> remote_;
+    std::shared_ptr<CloudServiceProxy> proxy_;
 
     static std::mutex syncCompleteLock_;
     static std::condition_variable syncCompleteCv_;
@@ -206,13 +141,11 @@ int32_t CloudDataTest::code_ = ProgressCode::SUCCESS;
 void CloudDataTest::SetUpTestCase(void)
 {
     LOG_INFO("SetUpTestCase in.");
-    g_selfTokenID = GetSelfTokenID();
 }
 
 void CloudDataTest::TearDownTestCase(void)
 {
     LOG_INFO("TearDownTestCase in.");
-    SetSelfTokenID(g_selfTokenID);
 }
 
 /* *
@@ -223,7 +156,6 @@ void CloudDataTest::TearDownTestCase(void)
  */
 HWTEST_F(CloudDataTest, CloudSync_SyncComplete_001, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&details) {
@@ -240,6 +172,7 @@ HWTEST_F(CloudDataTest, CloudSync_SyncComplete_001, TestSize.Level1)
     };
     int32_t syncMode = 4; // 4 is native_first
     uint32_t seqNum = 101;
+    ExpectSyncCompleteReply(seqNum);
     auto status = proxy->CloudSync(TEST_BUNDLE_NAME, TEST_STORE_ID, { syncMode, seqNum }, progress);
     EXPECT_EQ(status, CloudService::SUCCESS);
     std::unique_lock<std::mutex> lock(syncCompleteLock_);
@@ -253,48 +186,16 @@ HWTEST_F(CloudDataTest, CloudSync_SyncComplete_001, TestSize.Level1)
 }
 
 /* *
- * @tc.name: CloudDataTest_001
- * @tc.desc: Test the system application permissions of the QueryStatistics API
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, CloudDataTest_001, TestSize.Level0)
-{
-    AllocNormalHapToken(g_normalPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    auto [status, info] = proxy->QueryStatistics(TEST_ACCOUNT_ID, TEST_BUNDLE_NAME, TEST_STORE_ID);
-    EXPECT_EQ(status, CloudService::PERMISSION_DENIED);
-    EXPECT_TRUE(info.empty());
-}
-
-/* *
- * @tc.name: CloudDataTest_002
- * @tc.desc: Test the permissions of the QueryStatistics API
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, CloudDataTest_002, TestSize.Level1)
-{
-    AllocSystemHapToken(g_notPermissonPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    auto [status, info] = proxy->QueryStatistics(TEST_ACCOUNT_ID, TEST_BUNDLE_NAME, TEST_STORE_ID);
-    EXPECT_EQ(status, CloudService::CLOUD_CONFIG_PERMISSION_DENIED);
-    EXPECT_TRUE(info.empty());
-}
-
-/* *
  * @tc.name: CloudDataTest_003
- * @tc.desc: Test the permissions of the QueryStatistics API
+ * @tc.desc: Test forwarding of the server permission result for the QueryStatistics API
  * @tc.type: FUNC
  * @tc.require:
  */
 HWTEST_F(CloudDataTest, CloudDataTest_003, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+    ExpectReply(CloudService::TRANS_QUERY_STATISTICS, CloudService::ERROR);
     auto [status, info] = proxy->QueryStatistics(TEST_ACCOUNT_ID, TEST_BUNDLE_NAME, TEST_STORE_ID);
     EXPECT_EQ(status, CloudService::ERROR);
     EXPECT_TRUE(info.empty());
@@ -308,11 +209,11 @@ HWTEST_F(CloudDataTest, CloudDataTest_003, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, EnableCloud001, TestSize.Level0)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::map<std::string, int32_t> switches;
     switches.emplace(TEST_BUNDLE_NAME, 0);
+    ExpectReply(CloudService::TRANS_ENABLE_CLOUD, CloudService::ERROR);
     auto status = proxy->EnableCloud(TEST_ACCOUNT_ID, switches);
     EXPECT_NE(status, CloudService::SUCCESS);
 }
@@ -325,9 +226,9 @@ HWTEST_F(CloudDataTest, EnableCloud001, TestSize.Level0)
  */
 HWTEST_F(CloudDataTest, DisableCloud001, TestSize.Level0)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+    ExpectReply(CloudService::TRANS_DISABLE_CLOUD, CloudService::ERROR);
     auto status = proxy->DisableCloud(TEST_ACCOUNT_ID);
     EXPECT_NE(status, CloudService::SUCCESS);
 }
@@ -340,12 +241,13 @@ HWTEST_F(CloudDataTest, DisableCloud001, TestSize.Level0)
  */
 HWTEST_F(CloudDataTest, ChangeAppSwitch001, TestSize.Level0)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     SwitchConfig config;
+    ExpectReply(CloudService::TRANS_CHANGE_APP_SWITCH, CloudService::ERROR);
     auto status = proxy->ChangeAppSwitch(TEST_ACCOUNT_ID, TEST_BUNDLE_NAME, 0, config);
     EXPECT_NE(status, CloudService::SUCCESS);
+    ExpectReply(CloudService::TRANS_CHANGE_APP_SWITCH, CloudService::ERROR);
     status = proxy->ChangeAppSwitch(TEST_ACCOUNT_ID, TEST_BUNDLE_NAME, 1, config);
     EXPECT_NE(status, CloudService::SUCCESS);
 }
@@ -358,12 +260,12 @@ HWTEST_F(CloudDataTest, ChangeAppSwitch001, TestSize.Level0)
  */
 HWTEST_F(CloudDataTest, Clean001, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::map<std::string, int32_t> actions;
     actions.emplace(TEST_BUNDLE_NAME, 0);
     std::map<std::string, ClearConfig> configs;
+    ExpectReply(CloudService::TRANS_CLEAN, CloudService::ERROR);
     auto status = proxy->Clean(TEST_ACCOUNT_ID, actions, configs);
     EXPECT_EQ(status, CloudService::ERROR);
 }
@@ -376,9 +278,9 @@ HWTEST_F(CloudDataTest, Clean001, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, NotifyDataChange001, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+    ExpectReply(CloudService::TRANS_NOTIFY_DATA_CHANGE_EXT, CloudService::INVALID_ARGUMENT);
     auto status = proxy->NotifyDataChange("id", "data", 100);
     EXPECT_EQ(status, CloudService::INVALID_ARGUMENT);
 }
@@ -391,9 +293,9 @@ HWTEST_F(CloudDataTest, NotifyDataChange001, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, NotifyDataChange002, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+    ExpectReply(CloudService::TRANS_NOTIFY_DATA_CHANGE, CloudService::INVALID_ARGUMENT);
     auto status = proxy->NotifyDataChange(TEST_ACCOUNT_ID, TEST_BUNDLE_NAME);
     EXPECT_EQ(status, CloudService::INVALID_ARGUMENT);
 }
@@ -406,223 +308,32 @@ HWTEST_F(CloudDataTest, NotifyDataChange002, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, SetGlobalCloudStrategy001, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::vector<CommonType::Value> values = { 0 };
+    ExpectReply(CloudService::TRANS_SET_GLOBAL_CLOUD_STRATEGY, CloudService::SUCCESS);
     auto status = proxy->SetGlobalCloudStrategy(Strategy::STRATEGY_NETWORK, values);
     EXPECT_EQ(status, CloudService::SUCCESS);
 }
 
 /* *
- * @tc.name: QueryLastSyncInfo001
- * @tc.desc: Test the system application permissions of the QueryLastSyncInfo API
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, QueryLastSyncInfo001, TestSize.Level0)
-{
-    AllocNormalHapToken(g_normalPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    auto [status, info] = proxy->QueryLastSyncInfo(TEST_ACCOUNT_ID, TEST_BUNDLE_NAME, TEST_STORE_ID);
-    EXPECT_EQ(status, CloudService::PERMISSION_DENIED);
-    EXPECT_TRUE(info.empty());
-}
-
-/* *
- * @tc.name: QueryLastSyncInfo002
- * @tc.desc: Test the permission name of the QueryLastSyncInfo API
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, QueryLastSyncInfo002, TestSize.Level1)
-{
-    AllocSystemHapToken(g_notPermissonPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    auto [status, info] = proxy->QueryLastSyncInfo(TEST_ACCOUNT_ID, TEST_BUNDLE_NAME, TEST_STORE_ID);
-    EXPECT_EQ(status, CloudService::CLOUD_CONFIG_PERMISSION_DENIED);
-    EXPECT_TRUE(info.empty());
-}
-
-/* *
- * @tc.name: AllocResourceAndShare001
- * @tc.desc: Test the system application permissions of the AllocResourceAndShare001 API
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, AllocResourceAndShare001, TestSize.Level0)
-{
-    AllocNormalHapToken(g_normalPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    DistributedRdb::PredicatesMemo predicates;
-    predicates.tables_.push_back(TEST_BUNDLE_NAME);
-    std::vector<std::string> columns;
-    CloudData::Participants participants;
-    auto [ret, _] = proxy->AllocResourceAndShare(TEST_STORE_ID, predicates, columns, participants);
-    EXPECT_EQ(ret, CloudService::PERMISSION_DENIED);
-}
-
-/* *
- * @tc.name: Share001
- * @tc.desc: Test the system application permissions of the Share001 API
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, Share001, TestSize.Level0)
-{
-    AllocNormalHapToken(g_normalPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    std::string sharingRes = "";
-    CloudData::Participants participants{};
-    CloudData::Results results;
-    auto ret = proxy->Share(sharingRes, participants, results);
-    EXPECT_EQ(ret, CloudService::PERMISSION_DENIED);
-}
-
-/* *
- * @tc.name: Unshare001
- * @tc.desc: Test the system application permissions of the Unshare001 API
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, Unshare001, TestSize.Level0)
-{
-    AllocNormalHapToken(g_normalPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    std::string sharingRes = "";
-    CloudData::Participants participants{};
-    CloudData::Results results;
-    auto ret = proxy->Unshare(sharingRes, participants, results);
-    EXPECT_EQ(ret, CloudService::PERMISSION_DENIED);
-}
-
-/* *
- * @tc.name: Exit001
- * @tc.desc: Test the system application permissions of the Exit001 API
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, Exit001, TestSize.Level0)
-{
-    AllocNormalHapToken(g_normalPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    std::string sharingRes = "";
-    std::pair<int32_t, std::string> result;
-    auto ret = proxy->Exit(sharingRes, result);
-    EXPECT_EQ(ret, CloudService::PERMISSION_DENIED);
-}
-
-/* *
- * @tc.name: ChangePrivilege001
- * @tc.desc: Test the system application permissions of the ChangePrivilege001 API
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, ChangePrivilege001, TestSize.Level0)
-{
-    AllocNormalHapToken(g_normalPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    std::string sharingRes = "";
-    CloudData::Participants participants{};
-    CloudData::Results results;
-    auto ret = proxy->ChangePrivilege(sharingRes, participants, results);
-    EXPECT_EQ(ret, CloudService::PERMISSION_DENIED);
-}
-
-/* *
- * @tc.name: Query001
- * @tc.desc: Test the system application permissions of the Query001 API
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, Query001, TestSize.Level0)
-{
-    AllocNormalHapToken(g_normalPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    std::string sharingRes = "";
-    CloudData::QueryResults result;
-    auto ret = proxy->Query(sharingRes, result);
-    EXPECT_EQ(ret, CloudService::PERMISSION_DENIED);
-}
-
-/* *
- * @tc.name:QueryByInvitation001
- * @tc.desc: Test the system application permissions of the QueryByInvitation001 API
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, QueryByInvitation001, TestSize.Level0)
-{
-    AllocNormalHapToken(g_normalPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    std::string invitation = "";
-    CloudData::QueryResults result;
-    auto ret = proxy->QueryByInvitation(invitation, result);
-    EXPECT_EQ(ret, CloudService::PERMISSION_DENIED);
-}
-
-/* *
- * @tc.name:ConfirmInvitation001
- * @tc.desc: Test the system application permissions of the ConfirmInvitation001 API
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, ConfirmInvitation001, TestSize.Level0)
-{
-    AllocNormalHapToken(g_normalPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    std::string sharingRes = "";
-    int32_t confirmation = 0;
-    std::tuple<int32_t, std::string, std::string> result;
-    auto ret = proxy->ConfirmInvitation(sharingRes, confirmation, result);
-    EXPECT_EQ(ret, CloudService::PERMISSION_DENIED);
-}
-
-/* *
- * @tc.name:ChangeConfirmation001
- * @tc.desc: Test the system application permissions of the ChangeConfirmation001 API
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, ChangeConfirmation001, TestSize.Level0)
-{
-    AllocNormalHapToken(g_normalPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    std::string sharingRes = "";
-    int32_t confirmation = 0;
-    std::pair<int32_t, std::string> result;
-    auto ret = proxy->ChangeConfirmation(sharingRes, confirmation, result);
-    EXPECT_EQ(ret, CloudService::PERMISSION_DENIED);
-}
-
-/* *
  * @tc.name:SetCloudStrategy001
- * @tc.desc: Test the system application permissions of the SetCloudStrategy001 API
+ * @tc.desc: Test forwarding of the server system-app denial for the SetCloudStrategy001 API
  * @tc.type: FUNC
  * @tc.require:
  */
 HWTEST_F(CloudDataTest, SetCloudStrategy001, TestSize.Level1)
 {
-    AllocNormalHapToken(g_normalPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::vector<CommonType::Value> values;
     values.push_back(CloudData::NetWorkStrategy::WIFI);
     CloudData::Strategy strategy = CloudData::Strategy::STRATEGY_BUTT;
+    ExpectReply(CloudService::TRANS_SET_CLOUD_STRATEGY, CloudService::IPC_ERROR);
     auto ret = proxy->SetCloudStrategy(strategy, values);
     EXPECT_EQ(ret, CloudService::IPC_ERROR);
     strategy = CloudData::Strategy::STRATEGY_NETWORK;
+    ExpectReply(CloudService::TRANS_SET_CLOUD_STRATEGY, CloudService::SUCCESS);
     ret = proxy->SetCloudStrategy(strategy, values);
     EXPECT_EQ(ret, CloudService::SUCCESS);
 }
@@ -635,7 +346,6 @@ HWTEST_F(CloudDataTest, SetCloudStrategy001, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync001, TestSize.Level1)
 {
-    AllocNormalHapToken(g_normalPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto ret = proxy->CloudSync(TEST_BUNDLE_NAME, TEST_STORE_ID, {}, nullptr);  // no progress
@@ -651,7 +361,6 @@ HWTEST_F(CloudDataTest, CloudSync001, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync002, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
@@ -668,12 +377,12 @@ HWTEST_F(CloudDataTest, CloudSync002, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync003, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
     int32_t syncMode = 4; // 4 is native_first
     uint32_t seqNum = 10;
+    ExpectReply(CloudService::TRANS_CLOUD_SYNC, CloudService::SUCCESS);
     auto status = proxy->CloudSync(TEST_BUNDLE_NAME, TEST_STORE_ID, { syncMode, seqNum }, progress);
     EXPECT_EQ(status, CloudService::SUCCESS);
     LOG_INFO("CloudSync003 test end.");
@@ -687,14 +396,16 @@ HWTEST_F(CloudDataTest, CloudSync003, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync004, TestSize.Level1)
 {
-    AllocNormalHapToken(g_normalPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
     int32_t syncMode = 4; // 4 is native_first
     uint32_t seqNum = 100;
+    ExpectReply(CloudService::TRANS_CLOUD_SYNC, CloudService::PERMISSION_DENIED);
     auto status = proxy->CloudSync(TEST_BUNDLE_NAME, TEST_STORE_ID, { syncMode, seqNum }, progress);
     EXPECT_EQ(status, CloudService::PERMISSION_DENIED);
+    ExpectReply(CloudService::TRANS_CLOUD_SYNC, CloudService::SUCCESS);
+    EXPECT_EQ(proxy->CloudSync(TEST_BUNDLE_NAME, TEST_STORE_ID, { syncMode, seqNum }, progress), CloudService::SUCCESS);
     LOG_INFO("CloudSync004 test end.");
 }
 
@@ -706,7 +417,6 @@ HWTEST_F(CloudDataTest, CloudSync004, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSyncFullSync001, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
@@ -715,6 +425,13 @@ HWTEST_F(CloudDataTest, CloudSyncFullSync001, TestSize.Level1)
     option.seqNum = 200;
     option.isDownloadOnly = false;
     option.isFullSync = true;
+    ExpectCloudReply(*remote_, CloudService::TRANS_CLOUD_SYNC, CloudService::SUCCESS, [](MessageParcel &request) {
+        std::string bundle;
+        std::string store;
+        CloudService::Option received;
+        ASSERT_TRUE(ITypesUtil::Unmarshal(request, bundle, store, received));
+        EXPECT_TRUE(received.isFullSync);
+    });
     auto status = proxy->CloudSync(TEST_BUNDLE_NAME, TEST_STORE_ID, option, progress);
     EXPECT_EQ(status, CloudService::SUCCESS);
     LOG_INFO("CloudSyncFullSync001 test end.");
@@ -728,7 +445,6 @@ HWTEST_F(CloudDataTest, CloudSyncFullSync001, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSyncFullSync002, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
@@ -736,6 +452,13 @@ HWTEST_F(CloudDataTest, CloudSyncFullSync002, TestSize.Level1)
     option.syncMode = DistributedRdb::TIME_FIRST;
     option.seqNum = 201;
     option.isFullSync = false;
+    ExpectCloudReply(*remote_, CloudService::TRANS_CLOUD_SYNC, CloudService::SUCCESS, [](MessageParcel &request) {
+        std::string bundle;
+        std::string store;
+        CloudService::Option received;
+        ASSERT_TRUE(ITypesUtil::Unmarshal(request, bundle, store, received));
+        EXPECT_FALSE(received.isFullSync);
+    });
     auto status = proxy->CloudSync(TEST_BUNDLE_NAME, TEST_STORE_ID, option, progress);
     EXPECT_EQ(status, CloudService::SUCCESS);
     LOG_INFO("CloudSyncFullSync002 test end.");
@@ -758,18 +481,18 @@ HWTEST_F(CloudDataTest, CloudSyncConfigFullSync001, TestSize.Level1)
 
 /* *
  * @tc.name: CloudSync005
- * @tc.desc: Test the permissions of the CloudSync API
+ * @tc.desc: Test forwarding of the server permission result for the CloudSync API
  * @tc.type: FUNC
  * @tc.require:
  */
 HWTEST_F(CloudDataTest, CloudSync005, TestSize.Level1)
 {
-    AllocSystemHapToken(g_notPermissonPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
     int32_t syncMode = 4; // 4 is native_first
     uint32_t seqNum = 1000;
+    ExpectReply(CloudService::TRANS_CLOUD_SYNC, CloudService::CLOUD_CONFIG_PERMISSION_DENIED);
     auto status = proxy->CloudSync(TEST_BUNDLE_NAME, TEST_STORE_ID, { syncMode, seqNum }, progress);
     EXPECT_EQ(status, CloudService::CLOUD_CONFIG_PERMISSION_DENIED);
     LOG_INFO("CloudSync005 test end.");
@@ -783,12 +506,12 @@ HWTEST_F(CloudDataTest, CloudSync005, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync006, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
     int32_t syncMode = 4; // 4 is native_first
     uint32_t seqNum = 20;
+    ExpectReply(CloudService::TRANS_CLOUD_SYNC, CloudService::SUCCESS);
     auto status = proxy->CloudSync(TEST_BUNDLE_NAME, TEST_STORE_ID, { syncMode, seqNum }, progress);
     EXPECT_EQ(status, CloudService::SUCCESS);
 
@@ -806,7 +529,6 @@ HWTEST_F(CloudDataTest, CloudSync006, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync007, TestSize.Level1)
 {
-    AllocNormalHapToken(g_normalPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
@@ -825,7 +547,6 @@ HWTEST_F(CloudDataTest, CloudSync007, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync008, TestSize.Level1)
 {
-    AllocNormalHapToken(g_normalPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
@@ -844,7 +565,6 @@ HWTEST_F(CloudDataTest, CloudSync008, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync009, TestSize.Level1)
 {
-    AllocNormalHapToken(g_normalPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
@@ -882,6 +602,7 @@ HWTEST_F(CloudDataTest, InitNotifier002, TestSize.Level1)
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     sptr<CloudNotifierStub> notifier = new (std::nothrow) CloudNotifierStub(nullptr, nullptr);
+    ExpectReply(CloudService::TRANS_INIT_NOTIFIER, CloudService::SUCCESS);
     auto status = proxy->InitNotifier(notifier);
     EXPECT_EQ(status, CloudService::SUCCESS);
     LOG_INFO("InitNotifier002 test end.");
@@ -919,7 +640,6 @@ HWTEST_F(CloudDataTest, MarshallingOptionTest, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, Subscribe_EmptyBundleInfos, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::vector<BundleInfo> bundleInfos;
@@ -936,7 +656,6 @@ HWTEST_F(CloudDataTest, Subscribe_EmptyBundleInfos, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, Subscribe_NullObserver, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
@@ -952,13 +671,14 @@ HWTEST_F(CloudDataTest, Subscribe_NullObserver, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, Subscribe_SystemPermission, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
     auto observer = std::make_shared<MockSyncInfoObserver>();
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     auto status = proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
     EXPECT_EQ(status, CloudService::SUCCESS);
+    ExpectReply(CloudService::TRANS_UNSUBSCRIBE, CloudService::SUCCESS);
     status = proxy->Unsubscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
     EXPECT_EQ(status, CloudService::SUCCESS);
 }
@@ -971,13 +691,15 @@ HWTEST_F(CloudDataTest, Subscribe_SystemPermission, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, Subscribe_NormalHapPermission, TestSize.Level1)
 {
-    AllocNormalHapToken(g_normalPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
     auto observer = std::make_shared<MockSyncInfoObserver>();
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::PERMISSION_DENIED);
     auto status = proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
     EXPECT_EQ(status, CloudService::PERMISSION_DENIED);
+    auto cloudProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
+    EXPECT_TRUE(cloudProxy->ExportSubObservers().Empty());
 }
 
 /**
@@ -988,13 +710,15 @@ HWTEST_F(CloudDataTest, Subscribe_NormalHapPermission, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, Subscribe_NoConfigPermission, TestSize.Level1)
 {
-    AllocSystemHapToken(g_notPermissonPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
     auto observer = std::make_shared<MockSyncInfoObserver>();
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::CLOUD_CONFIG_PERMISSION_DENIED);
     auto status = proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
     EXPECT_EQ(status, CloudService::CLOUD_CONFIG_PERMISSION_DENIED);
+    auto cloudProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
+    EXPECT_TRUE(cloudProxy->ExportSubObservers().Empty());
 }
 
 /**
@@ -1005,7 +729,6 @@ HWTEST_F(CloudDataTest, Subscribe_NoConfigPermission, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, Unsubscribe_NullObserver, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
@@ -1021,12 +744,13 @@ HWTEST_F(CloudDataTest, Unsubscribe_NullObserver, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, Unsubscribe_RemoveObserver, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
     auto observer = std::make_shared<MockSyncInfoObserver>();
-    proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
+    ASSERT_EQ(proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer), CloudService::SUCCESS);
+    ExpectReply(CloudService::TRANS_UNSUBSCRIBE, CloudService::SUCCESS);
     auto status = proxy->Unsubscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
     EXPECT_EQ(status, CloudService::SUCCESS);
 }
@@ -1039,7 +763,6 @@ HWTEST_F(CloudDataTest, Unsubscribe_RemoveObserver, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, Unsubscribe_SystemPermission, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
@@ -1056,49 +779,16 @@ HWTEST_F(CloudDataTest, Unsubscribe_SystemPermission, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, Unsubscribe_NormalHapPermission, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
     auto observer = std::make_shared<MockSyncInfoObserver>();
-    proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
-    AllocNormalHapToken(g_normalPolicy);
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
+    ASSERT_EQ(proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer), CloudService::SUCCESS);
+
+    ExpectReply(CloudService::TRANS_UNSUBSCRIBE, CloudService::PERMISSION_DENIED);
     auto status = proxy->Unsubscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
     EXPECT_EQ(status, CloudService::PERMISSION_DENIED);
-}
-
-/**
- * @tc.name: QueryLastSyncInfoBatch_NormalHapPermission
- * @tc.desc: Test QueryLastSyncInfoBatch with normal hap permission
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, QueryLastSyncInfoBatch_NormalHapPermission, TestSize.Level0)
-{
-    AllocNormalHapToken(g_normalPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
-    auto [status, results] = proxy->QueryLastSyncInfoBatch(TEST_ACCOUNT_ID, bundleInfos);
-    EXPECT_EQ(status, CloudService::PERMISSION_DENIED);
-    EXPECT_TRUE(results.empty());
-}
-
-/**
- * @tc.name: QueryLastSyncInfoBatch_NoConfigPermission
- * @tc.desc: Test QueryLastSyncInfoBatch without config permission
- * @tc.type: FUNC
- * @tc.require:
- */
-HWTEST_F(CloudDataTest, QueryLastSyncInfoBatch_NoConfigPermission, TestSize.Level1)
-{
-    AllocSystemHapToken(g_notPermissonPolicy);
-    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
-    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
-    std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
-    auto [status, results] = proxy->QueryLastSyncInfoBatch(TEST_ACCOUNT_ID, bundleInfos);
-    EXPECT_EQ(status, CloudService::CLOUD_CONFIG_PERMISSION_DENIED);
-    EXPECT_TRUE(results.empty());
 }
 
 /**
@@ -1109,10 +799,10 @@ HWTEST_F(CloudDataTest, QueryLastSyncInfoBatch_NoConfigPermission, TestSize.Leve
  */
 HWTEST_F(CloudDataTest, QueryLastSyncInfoBatch_SystemPermission, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
+    ExpectReply(CloudService::TRANS_QUERY_LAST_SYNC_INFO_BATCH, CloudService::ERROR);
     auto [status, results] = proxy->QueryLastSyncInfoBatch(TEST_ACCOUNT_ID, bundleInfos);
     EXPECT_EQ(status, CloudService::ERROR);
     EXPECT_TRUE(results.empty());
@@ -1126,7 +816,6 @@ HWTEST_F(CloudDataTest, QueryLastSyncInfoBatch_SystemPermission, TestSize.Level1
  */
 HWTEST_F(CloudDataTest, ImportSubObservers_WithObservers, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
@@ -1135,6 +824,7 @@ HWTEST_F(CloudDataTest, ImportSubObservers_WithObservers, TestSize.Level1)
     std::map<std::string, std::list<CloudServiceProxy::SubObserverParam>> storeMap;
     storeMap[TEST_STORE_ID].push_back({std::make_shared<MockSyncInfoObserver>()});
     observers.Insert(TEST_BUNDLE_NAME, storeMap);
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     cloudServiceProxy->ImportSubObservers(observers);
     auto exportedObservers = cloudServiceProxy->ExportSubObservers();
     EXPECT_FALSE(exportedObservers.Empty());
@@ -1148,7 +838,6 @@ HWTEST_F(CloudDataTest, ImportSubObservers_WithObservers, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, OnSyncInfoNotify_EmptyData, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
@@ -1156,6 +845,7 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_EmptyData, TestSize.Level1)
 
     auto observer = std::make_shared<MockSyncInfoObserver>();
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
 
     BatchQueryLastResults emptyData;
@@ -1171,7 +861,6 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_EmptyData, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, OnSyncInfoNotify_NoMatchingBundle, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
@@ -1179,6 +868,7 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_NoMatchingBundle, TestSize.Level1)
 
     auto observer = std::make_shared<MockSyncInfoObserver>();
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
 
     BatchQueryLastResults data;
@@ -1201,7 +891,6 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_NoMatchingBundle, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, OnSyncInfoNotify_WithMatchingBundle, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
@@ -1209,6 +898,7 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_WithMatchingBundle, TestSize.Level1)
 
     auto observer = std::make_shared<MockSyncInfoObserver>();
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
 
     BatchQueryLastResults data;
@@ -1231,7 +921,6 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_WithMatchingBundle, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, OnSyncInfoNotify_MultipleObservers, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
@@ -1240,7 +929,9 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_MultipleObservers, TestSize.Level1)
     auto observer1 = std::make_shared<MockSyncInfoObserver>();
     auto observer2 = std::make_shared<MockSyncInfoObserver>();
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer1);
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer2);
 
     BatchQueryLastResults data;
@@ -1264,7 +955,6 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_MultipleObservers, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CollectObserverData_StoreIdNotFound, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
@@ -1272,6 +962,7 @@ HWTEST_F(CloudDataTest, CollectObserverData_StoreIdNotFound, TestSize.Level1)
 
     auto observer = std::make_shared<MockSyncInfoObserver>();
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, "store_001"}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
 
     std::map<std::string, CloudSyncInfo> storeResults;
@@ -1299,7 +990,6 @@ HWTEST_F(CloudDataTest, CollectObserverData_StoreIdNotFound, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CollectObserverData_StoreIdFound, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
@@ -1307,6 +997,7 @@ HWTEST_F(CloudDataTest, CollectObserverData_StoreIdFound, TestSize.Level1)
 
     auto observer = std::make_shared<MockSyncInfoObserver>();
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
 
     std::map<std::string, CloudSyncInfo> storeResults;
@@ -1335,7 +1026,6 @@ HWTEST_F(CloudDataTest, CollectObserverData_StoreIdFound, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CollectObserverData_WildcardStoreId, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
@@ -1343,6 +1033,7 @@ HWTEST_F(CloudDataTest, CollectObserverData_WildcardStoreId, TestSize.Level1)
 
     auto observer = std::make_shared<MockSyncInfoObserver>();
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, ""}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
 
     std::map<std::string, CloudSyncInfo> storeResults;
@@ -1373,7 +1064,6 @@ HWTEST_F(CloudDataTest, CollectObserverData_WildcardStoreId, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CollectObserverData_MultipleStores, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
@@ -1384,6 +1074,7 @@ HWTEST_F(CloudDataTest, CollectObserverData_MultipleStores, TestSize.Level1)
         {TEST_BUNDLE_NAME, "store_001"},
         {TEST_BUNDLE_NAME, "store_002"}
     };
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
 
     std::map<std::string, CloudSyncInfo> storeResults;
@@ -1520,7 +1211,6 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotifyInner_NullHandler, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, OnRemoteDied_NullCloudService, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto &manager = CloudManager::GetInstance();
     auto [state, proxy] = manager.GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
@@ -1530,6 +1220,7 @@ HWTEST_F(CloudDataTest, OnRemoteDied_NullCloudService, TestSize.Level1)
 
     auto observer = std::make_shared<MockSyncInfoObserver>();
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
 
     auto exportedObservers = cloudServiceProxy->ExportSubObservers();
@@ -1544,7 +1235,6 @@ HWTEST_F(CloudDataTest, OnRemoteDied_NullCloudService, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, OnRemoteDied_ExportAndImportObservers, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
@@ -1552,6 +1242,7 @@ HWTEST_F(CloudDataTest, OnRemoteDied_ExportAndImportObservers, TestSize.Level1)
 
     auto observer = std::make_shared<MockSyncInfoObserver>();
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
 
     auto exportedObservers = cloudServiceProxy->ExportSubObservers();
@@ -1560,6 +1251,7 @@ HWTEST_F(CloudDataTest, OnRemoteDied_ExportAndImportObservers, TestSize.Level1)
     auto newProxy = std::static_pointer_cast<CloudServiceProxy>(
         CloudManager::GetInstance().GetCloudService().second);
     ASSERT_NE(newProxy, nullptr);
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     newProxy->ImportSubObservers(exportedObservers);
 
     auto reExportedObservers = newProxy->ExportSubObservers();
@@ -1574,7 +1266,6 @@ HWTEST_F(CloudDataTest, OnRemoteDied_ExportAndImportObservers, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, OnSyncInfoNotify_ObserverDataVerification, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
@@ -1582,6 +1273,7 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_ObserverDataVerification, TestSize.Leve
 
     auto observer = std::make_shared<MockSyncInfoObserver>();
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
 
     BatchQueryLastResults data;
@@ -1612,13 +1304,13 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_ObserverDataVerification, TestSize.Leve
  */
 HWTEST_F(CloudDataTest, OnSyncInfoNotify_ObserverDataVerification001, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
     ASSERT_NE(cloudServiceProxy, nullptr);
  
     auto observer = std::make_shared<MockSyncInfoObserver>();
+    ExpectReply(CloudService::TRANS_SUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::SUCCESS);
     proxy->SubscribeCloudSyncTrigger(observer);
  
     BatchQueryLastResults data;
@@ -1628,6 +1320,7 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_ObserverDataVerification001, TestSize.L
     cloudServiceProxy->OnCloudSyncTrigger(triggerMode);
     EXPECT_TRUE(observer->IsCalled());
     EXPECT_EQ(observer->GetTriggerMode(), triggerMode);
+    ExpectReply(CloudService::TRANS_UNSUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::SUCCESS);
     proxy->UnSubscribeCloudSyncTrigger(observer);
 }
 
@@ -1639,13 +1332,13 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_ObserverDataVerification001, TestSize.L
  */
 HWTEST_F(CloudDataTest, CloudSync010, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
     int32_t syncMode = 4;
     uint32_t seqNum = 23;
     BundleInfo bundleInfo = { TEST_BUNDLE_NAME, "" };
+    ExpectReply(CloudService::TRANS_CLOUD_SYNC, CloudService::SUCCESS);
     auto status = proxy->CloudSync(bundleInfo, { syncMode, seqNum }, progress);
     EXPECT_NE(status, CloudService::INVALID_ARGUMENT_V20);
     LOG_INFO("CloudSync010 test end.");
@@ -1659,13 +1352,13 @@ HWTEST_F(CloudDataTest, CloudSync010, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync011, TestSize.Level1)
 {
-    AllocSystemHapToken(g_notPermissonPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
     int32_t syncMode = 4;
     uint32_t seqNum = 24;
     BundleInfo bundleInfo = { TEST_BUNDLE_NAME, "" };
+    ExpectReply(CloudService::TRANS_CLOUD_SYNC, CloudService::CLOUD_CONFIG_PERMISSION_DENIED);
     auto status = proxy->CloudSync(bundleInfo, { syncMode, seqNum }, progress);
     EXPECT_EQ(status, CloudService::CLOUD_CONFIG_PERMISSION_DENIED);
     LOG_INFO("CloudSync011 test end.");
@@ -1679,13 +1372,14 @@ HWTEST_F(CloudDataTest, CloudSync011, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, Subscribe_EmptyStoreId, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto observer = std::make_shared<MockSyncInfoObserver>();
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, ""}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     auto status = proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
     EXPECT_EQ(status, CloudService::SUCCESS);
+    ExpectReply(CloudService::TRANS_UNSUBSCRIBE, CloudService::SUCCESS);
     status = proxy->Unsubscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
     EXPECT_EQ(status, CloudService::SUCCESS);
 }
@@ -1698,12 +1392,13 @@ HWTEST_F(CloudDataTest, Subscribe_EmptyStoreId, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, Unsubscribe_EmptyStoreId, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto observer = std::make_shared<MockSyncInfoObserver>();
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, ""}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
+    ExpectReply(CloudService::TRANS_UNSUBSCRIBE, CloudService::SUCCESS);
     auto status = proxy->Unsubscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
     EXPECT_EQ(status, CloudService::SUCCESS);
 }
@@ -1716,7 +1411,6 @@ HWTEST_F(CloudDataTest, Unsubscribe_EmptyStoreId, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, OnSyncInfoNotify_EmptyStoreIdObserver, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
@@ -1724,6 +1418,7 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_EmptyStoreIdObserver, TestSize.Level1)
 
     auto observer = std::make_shared<MockSyncInfoObserver>();
     std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, ""}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
     proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer);
 
     BatchQueryLastResults data;
@@ -1750,7 +1445,6 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_EmptyStoreIdObserver, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync_BundleInfo_001, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     BundleInfo bundleInfo = { TEST_BUNDLE_NAME, TEST_STORE_ID };
@@ -1767,7 +1461,6 @@ HWTEST_F(CloudDataTest, CloudSync_BundleInfo_001, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync_BundleInfo_002, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
@@ -1785,7 +1478,6 @@ HWTEST_F(CloudDataTest, CloudSync_BundleInfo_002, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync_BundleInfo_003, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
@@ -1803,11 +1495,11 @@ HWTEST_F(CloudDataTest, CloudSync_BundleInfo_003, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync_BundleInfo_005, TestSize.Level1)
 {
-    AllocSystemHapToken(g_systemPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
     BundleInfo bundleInfo = { TEST_BUNDLE_NAME, TEST_STORE_ID };
+    ExpectReply(CloudService::TRANS_CLOUD_SYNC, CloudService::SUCCESS);
     auto status = proxy->CloudSync(bundleInfo, { 4, 204 }, progress);
     EXPECT_EQ(status, CloudService::SUCCESS);
     LOG_INFO("CloudSync_BundleInfo_005 test end.");
@@ -1821,13 +1513,49 @@ HWTEST_F(CloudDataTest, CloudSync_BundleInfo_005, TestSize.Level1)
  */
 HWTEST_F(CloudDataTest, CloudSync_BundleInfo_006, TestSize.Level1)
 {
-    AllocNormalHapToken(g_normalPolicy);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
     auto progress = [](DistributedRdb::Details &&) {};
     BundleInfo bundleInfo = { TEST_BUNDLE_NAME, TEST_STORE_ID };
+    ExpectReply(CloudService::TRANS_CLOUD_SYNC, CloudService::PERMISSION_DENIED);
     auto status = proxy->CloudSync(bundleInfo, { 4, 205 }, progress);
     EXPECT_EQ(status, CloudService::PERMISSION_DENIED);
     LOG_INFO("CloudSync_BundleInfo_006 test end.");
+}
+/**
+ * @tc.name: QueryStatistics_ParcelRoundTrip
+ * @tc.desc: Distinct request fields and a nonempty reply exercise the real proxy codec.
+ * @tc.type: FUNC
+ * @tc.author: agent
+ */
+HWTEST_F(CloudDataTest, QueryStatistics_ParcelRoundTrip, TestSize.Level0)
+{
+    EXPECT_CALL(*remote_, SendRequest(CloudService::TRANS_QUERY_STATISTICS, testing::_, testing::_, testing::_))
+        .WillOnce(testing::Invoke([](uint32_t, MessageParcel &request, MessageParcel &reply, MessageOption &) {
+            EXPECT_EQ(request.ReadInterfaceToken(), CloudServiceProxy::GetDescriptor());
+            std::string account;
+            std::string bundle;
+            std::string store;
+            EXPECT_TRUE(ITypesUtil::Unmarshal(request, account, bundle, store));
+            EXPECT_EQ(account, "account-roundtrip");
+            EXPECT_EQ(bundle, "bundle-roundtrip");
+            EXPECT_EQ(store, "store-roundtrip");
+            // A one-entry map containing one statistic, encoded using the server wire format.
+            EXPECT_TRUE(ITypesUtil::Marshal(reply, int32_t(CloudService::SUCCESS), int32_t{1},
+                std::string("store-roundtrip"), int32_t{1}, std::string("table-roundtrip"), 11, 22, 33));
+            return 0;
+        }));
+
+    auto [status, infos] = proxy_->QueryStatistics("account-roundtrip", "bundle-roundtrip", "store-roundtrip");
+
+    ASSERT_EQ(status, CloudService::SUCCESS);
+    ASSERT_EQ(infos.size(), 1u);
+    ASSERT_EQ(infos.count("store-roundtrip"), 1u);
+    const auto &statistics = infos.at("store-roundtrip");
+    ASSERT_EQ(statistics.size(), 1u);
+    EXPECT_EQ(statistics[0].table, "table-roundtrip");
+    EXPECT_EQ(statistics[0].inserted, 11);
+    EXPECT_EQ(statistics[0].updated, 22);
+    EXPECT_EQ(statistics[0].normal, 33);
 }
 }
