@@ -149,14 +149,24 @@ static constexpr int E_DFX_DELETE_RDB_STORE = (E_DFX_BASE + 0x18);
 static constexpr int E_DFX_WAIT_AFTER_OPEN_TIMEOUT = (E_DFX_BASE + 0x19);
 
 /**
- * @brief Only use for dfx, master and slave both corrupt (open/restore distinguished by appendix).
+ * @brief Only use for dfx, slave corrupt (open/restore distinguished by appendix).
  */
-static constexpr int E_DFX_MASTER_SLAVE_BOTH_ABNORMAL = (E_DFX_BASE + 0x1A);
+static constexpr int E_DFX_SLAVE_CORRUPT = (E_DFX_BASE + 0x1A);
 
 /**
  * @brief Only use for dfx, master and slave table or index count inconsistent.
  */
 static constexpr int E_DFX_MASTER_SLAVE_INCONSISTENT = (E_DFX_BASE + 0x1B);
+
+/**
+ * @brief Only use for dfx, master and slave both corrupt confirmed by corruptedflg marker.
+ */
+static constexpr int E_DFX_MASTER_SLAVE_BOTH_CORRUPT = (E_DFX_BASE + 0x1C);
+
+/**
+ * @brief Only use for dfx, restore failed.
+ */
+static constexpr int E_DFX_RESTORE_FAILED = (E_DFX_BASE + 0x1D);
 } // namespace NativeRdb
 } // namespace OHOS
 

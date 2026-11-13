@@ -233,6 +233,15 @@ bool RdbFaultHiViewReporter::IsReportCorruptedFault(const std::string &dbPath)
     return true;
 }
 
+bool RdbFaultHiViewReporter::IsCorruptedFlagExist(const std::string &dbPath)
+{
+    if (dbPath.empty()) {
+        return false;
+    }
+    std::string flagFilename = dbPath + DB_CORRUPTED_POSTFIX;
+    return access(flagFilename.c_str(), F_OK) == 0;
+}
+
 void RdbFaultHiViewReporter::CreateCorruptedFlag(const std::string &dbPath)
 {
     memCorruptReportedFlg_ = true;

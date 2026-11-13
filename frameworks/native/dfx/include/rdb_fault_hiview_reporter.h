@@ -135,6 +135,7 @@ public:
     API_EXPORT static void ReportFault(const RdbFaultEvent &faultEvent);
     static void ReportRestore(const RdbCorruptedEvent &eventInfo, bool repair = true);
     static bool IsReportCorruptedFault(const std::string &dbPath);
+    static bool IsCorruptedFlagExist(const std::string &dbPath);
     static std::string GetBundleName(const std::string &bundleName);
     static void ReportRAGFault(const std::string &errMsg, const std::string &functionName,
         const std::string &bundleName, const int faultType, const int errCode);
