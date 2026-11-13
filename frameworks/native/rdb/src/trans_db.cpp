@@ -42,6 +42,7 @@ std::pair<int, int64_t> TransDB::Insert(
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     auto conflictClause = SqliteUtils::GetConflictClause(static_cast<int>(config.resolution));
     if (table.empty() || row.IsEmpty() || conflictClause == nullptr) {
+        SetErrorMsg("Invalid args: table is empty or row is empty");
         return { E_INVALID_ARGS, -1 };
     }
 
@@ -53,6 +54,7 @@ std::pair<int, int64_t> TransDB::Insert(
     for (const auto &[key, val] : row.values_) {
         sql.append(split).append(key);
         if (val.GetType() == ValueObject::TYPE_ASSETS && config.resolution == ConflictResolution::ON_CONFLICT_REPLACE) {
+            SetErrorMsg("Invalid args: Assets values cannot use ON_CONFLICT_REPLACE");
             return { E_INVALID_ARGS, -1 };
         }
         SqliteSqlBuilder::UpdateAssetStatus(val, AssetValue::STATUS_INSERT);
@@ -90,6 +92,7 @@ std::pair<int, int64_t> TransDB::BatchInsert(const std::string &table, const Ref
     if (table.empty() || batchInfo.empty()) {
         LOG_ERROR("empty,table=%{public}s,rows:%{public}zu,max:%{public}d.", SqliteUtils::Anonymous(table).c_str(),
             rows.RowSize(), maxArgs_);
+        SetErrorMsg("Invalid args: table is empty or batch sqls are empty");
         return { E_INVALID_ARGS, -1 };
     }
 
@@ -125,6 +128,7 @@ std::pair<int32_t, Results> TransDB::BatchInsert(const std::string &table, const
         auto [fields, values] = rows.GetFieldsAndValues();
         LOG_ERROR("invalid args, table=%{public}s, rows:%{public}zu, fields:%{public}zu, max:%{public}d.",
             SqliteUtils::Anonymous(table).c_str(), rows.RowSize(), fields != nullptr ? fields->size() : 0, maxArgs_);
+        SetErrorMsg("Invalid args: table is empty or batch args are invalid");
         return { E_INVALID_ARGS, -1 };
     }
     auto &[sql, bindArgs] = sqlArgs.front();
@@ -153,6 +157,7 @@ std::pair<int32_t, Results> TransDB::Update(const Row &row, const AbsRdbPredicat
     auto clause = SqliteUtils::GetConflictClause(static_cast<int>(cfg.resolution));
     auto table = predicates.GetTableName();
     if (table.empty() || row.IsEmpty() || clause == nullptr) {
+        SetErrorMsg("Invalid args: table is empty or row is empty for update");
         return { E_INVALID_ARGS, 0 };
     }
 
@@ -201,6 +206,7 @@ std::pair<int32_t, Results> TransDB::Delete(
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     auto table = predicates.GetTableName();
     if (table.empty()) {
+        SetErrorMsg("Invalid args: table is empty for delete");
         return { E_INVALID_ARGS, -1 };
     }
 
@@ -258,6 +264,7 @@ std::pair<int32_t, ValueObject> TransDB::Execute(
     if (!SqliteUtils::IsSupportSqlForExecute(sqlType) && !SqliteUtils::IsSpecial(sqlType)) {
         LOG_ERROR("Not support the sql:app self can check the SQL, sqlType:%{public}d, sql:%{public}s",
             sqlType, SqliteUtils::SqlAnonymous(sql).c_str());
+        SetErrorMsg("Invalid args: this SQL type is not supported in transaction execute");
         return { E_INVALID_ARGS, object };
     }
 
@@ -302,6 +309,7 @@ std::pair<int32_t, Results> TransDB::ExecuteExt(const std::string &sql, const Va
     int sqlType = SqliteUtils::GetSqlStatementType(sql);
     if (!SqliteUtils::IsSupportSqlForExecute(sqlType) && !SqliteUtils::IsSpecial(sqlType)) {
         LOG_ERROR("Not support the sql:app self can check the SQL");
+        SetErrorMsg("Invalid args: this SQL type is not supported in transaction executeExt");
         return { E_INVALID_ARGS, -1 };
     }
     auto [errCode, statement] = GetStatement(sql);
@@ -352,6 +360,7 @@ int TransDB::SetVersion(int version)
 int TransDB::Sync(const SyncOption &option, const std::vector<std::string> &tables, const AsyncDetail &async)
 {
     if (option.mode != TIME_FIRST || tables.empty()) {
+        SetErrorMsg("Invalid args: sync mode is not TIME_FIRST or tables are empty");
         return E_INVALID_ARGS;
     }
     return RdbStore::Sync(option, tables, async);
@@ -392,6 +401,9 @@ std::pair<int32_t, Results> TransDB::GenerateResult(int32_t code, std::shared_pt
 
 std::string TransDB::GetLastErrorMsg() const
 {
+    if (!lastErrMsg_.empty()) {
+        return lastErrMsg_;
+    }
     auto connection = conn_.lock();
     if (connection != nullptr) {
         return connection->GetLastErrorMsg();

@@ -174,6 +174,7 @@ int CacheResultSet::GetRow(RowEntity &rowEntity)
     for (auto &columnName : colNames_) {
         ValueObject object;
         if (!valueBuckets_[row_].GetObject(columnName, object)) {
+            SetLastErrorMsg("Failed to get row: column value not found in cache");
             return E_ERROR;
         }
         rowEntity.Put(columnName, index, std::move(object));
@@ -316,6 +317,7 @@ int CacheResultSet::GetColumnIndex(const std::string &columnName, int &columnInd
             return E_OK;
         }
     }
+    SetLastErrorMsg("Failed to get column index: column name not found in cache");
     return E_ERROR;
 }
 

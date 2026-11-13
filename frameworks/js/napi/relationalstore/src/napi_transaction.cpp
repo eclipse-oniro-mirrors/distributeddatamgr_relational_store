@@ -244,7 +244,12 @@ napi_value TransactionProxy::Commit(napi_env env, napi_callback_info info)
     };
     auto exec = [context]() -> int {
         CHECK_RETURN_ERR(context->transaction_ != nullptr);
-        return context->StealTransaction()->Commit();
+        auto trans = context->StealTransaction();
+        auto code = trans->Commit();
+        if (code != E_OK) {
+            context->errorMsg_ = trans->GetLastErrorMsg();
+        }
+        return code;
     };
     auto output = [context](napi_env env, napi_value &result) {
         napi_status status = napi_get_undefined(env, &result);
@@ -280,7 +285,12 @@ napi_value TransactionProxy::Rollback(napi_env env, napi_callback_info info)
     };
     auto exec = [context]() -> int {
         CHECK_RETURN_ERR(context->transaction_ != nullptr);
-        return context->StealTransaction()->Rollback();
+        auto trans = context->StealTransaction();
+        auto code = trans->Rollback();
+        if (code != E_OK) {
+            context->errorMsg_ = trans->GetLastErrorMsg();
+        }
+        return code;
     };
     auto output = [context](napi_env env, napi_value &result) {
         napi_status status = napi_get_undefined(env, &result);

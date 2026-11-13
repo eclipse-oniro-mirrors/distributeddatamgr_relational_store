@@ -64,9 +64,16 @@ public:
     int ModifyLockStatus(
         const std::string &table, const std::vector<std::vector<uint8_t>> &hashKeys, bool isLock) override;
     std::string GetLastErrorMsg() const override;
+    // Set a semantic error message that GetLastErrorMsg reports with priority
+    // over sqlite3_errmsg; callers copy it into the store's last error message.
+    void SetErrorMsg(const std::string &msg) const
+    {
+        lastErrMsg_ = msg;
+    }
 
 private:
     friend class SqliteConnection;
+    mutable std::string lastErrMsg_;
     using Asset = ValueObject::Asset;
     using Assets = ValueObject::Assets;
     using BigInt = ValueObject::BigInt;

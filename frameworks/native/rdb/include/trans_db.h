@@ -44,6 +44,7 @@ public:
     int SetVersion(int version) override;
     int Sync(const SyncOption &option, const std::vector<std::string> &tables, const AsyncDetail &async) override;
     std::string GetLastErrorMsg() const override;
+    void SetErrorMsg(const std::string &msg) { lastErrMsg_ = msg; }
 
 private:
     std::pair<int32_t, std::shared_ptr<Statement>> GetStatement(
@@ -55,6 +56,7 @@ private:
     int64_t vSchema_ = 0;
     std::weak_ptr<Connection> conn_;
     std::string path_;
+    std::string lastErrMsg_;
 };
 } // namespace OHOS::NativeRdb
 #endif // NATIVE_RDB_TRANS_DB_H

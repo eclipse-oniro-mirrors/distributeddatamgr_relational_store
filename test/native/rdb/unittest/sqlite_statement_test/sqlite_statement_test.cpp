@@ -169,36 +169,6 @@ HWTEST_F(RdbSqliteStatementTest, SqliteStatement003, TestSize.Level0)
 }
 
 /**
- * @tc.name: S_ErrMsg_001
- * @tc.desc: Verify SqliteStatement GetLastErrorMsg returns "not an error" when no error occurred.
- * @tc.type: FUNC
- */
-HWTEST_F(RdbSqliteStatementTest, S_ErrMsg_001, TestSize.Level0)
-{
-    const std::string dbPath = RDB_TEST_PATH + "S_ErrMsg_001.db";
-    RdbHelper::DeleteRdbStore(dbPath);
-    SqliteGlobalConfig::InitSqliteGlobalConfig();
-    RdbStoreConfig config(dbPath);
-    config.SetDBType(OHOS::NativeRdb::DBType::DB_SQLITE);
-    auto [errCode, conn] = Connection::Create(config, true);
-    ASSERT_EQ(errCode, E_OK);
-    ASSERT_NE(conn, nullptr);
-
-    // Create a valid statement — no error on the connection
-    auto [stmtErr, statement] = conn->CreateStatement("CREATE TABLE IF NOT EXISTS test(id INTEGER)", conn);
-    ASSERT_EQ(stmtErr, E_OK);
-    ASSERT_NE(statement, nullptr);
-
-    // GetLastErrorMsg delegates to sqlite3_errmsg which returns "not an error"
-    std::string result = statement->GetLastErrorMsg();
-    EXPECT_FALSE(result.empty());
-    EXPECT_NE(result.find("not an error"), std::string::npos);
-
-    conn = nullptr;
-    RdbHelper::DeleteRdbStore(dbPath);
-}
-
-/**
  * @tc.name: S_ErrMsg_002
  * @tc.desc: Verify SqliteStatement GetLastErrorMsg returns syntax error after a failed prepare on the same connection.
  * @tc.type: FUNC

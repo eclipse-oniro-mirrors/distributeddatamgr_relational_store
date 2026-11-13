@@ -130,7 +130,7 @@ public:
             msg_ = napiError.message + opMsg;
         } else {
             code_ = E_INNER_ERROR;
-            msg_ = "Inner error.";
+            msg_ = msg.empty() ? "Inner error." : msg;
         }
     }
 
@@ -175,7 +175,7 @@ public:
             msg_ = napiError.message + opMsg;
         } else {
             code_ = E_INNER_ERROR;
-            msg_ = "Inner error.";
+            msg_ = msg.empty() ? "Inner error." : msg;
         }
     }
 

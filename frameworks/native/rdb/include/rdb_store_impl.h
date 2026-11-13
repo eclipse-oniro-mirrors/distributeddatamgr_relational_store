@@ -316,6 +316,10 @@ private:
     std::pair<int32_t, std::shared_ptr<Connection>> GetConn(bool isRead);
     void InterruptHolders(const std::shared_ptr<ConnectionPool> &pool);
     void SetLastErrorMsg(const std::string &msg) const;
+    // After any write-path error, appends the fault-object context (database name
+    // and table name) to the stored lastErrMsg_; napi and Taihe both receive it
+    // via GetLastErrorMsg without any error-code specific branching.
+    void SetLastErrorContext(const std::string &table) const;
     std::pair<int32_t, Results> ExecuteForRow(const std::string &sql, const Values &args,
         const ReturningConfig &config = {}, const std::string &returningSql = "", int64_t timeoutMs = 0);
     int ExecuteForLastInsertedRowId(int64_t &outValue, const std::string &sql, const Values &args,

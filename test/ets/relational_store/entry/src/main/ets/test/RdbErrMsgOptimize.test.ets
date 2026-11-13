@@ -488,7 +488,7 @@ export default function rdbErrMsgOptimizeTest() {
         await transaction?.rollback();
         console.log(`${TAG} 020 code:${e.code}, message:${e.message}`);
         expect(e.code == 14800000).assertTrue();
-        expect(e.message.includes("Inner error")).assertTrue();
+        expect(e.message).assertContain("Invalid args: this SQL type is not supported in transaction execute");
       }
       done();
     })
@@ -513,7 +513,7 @@ export default function rdbErrMsgOptimizeTest() {
         await transaction?.rollback();
         console.log(`${TAG} 021 code:${e.code}, message:${e.message}`);
         expect(e.code == 14800000).assertTrue();
-        expect(e.message.includes("Inner error")).assertTrue();
+        expect(e.message).assertContain("Invalid args: this SQL type is not supported in transaction execute");
       }
       done();
     })

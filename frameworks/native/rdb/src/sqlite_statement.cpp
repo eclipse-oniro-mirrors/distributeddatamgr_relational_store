@@ -297,6 +297,7 @@ int SqliteStatement::CheckValueObjectValid(const ValueObject &obj, int paramPos,
         LOG_ERROR("%{public}s", custLog.c_str());
         Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, E_DFX_VALUELESS_BY_EXCEPTION,
             bundleName, custLog));
+        SetErrorMsg("Invalid args: the bind arg value is valueless by exception");
         return E_INVALID_ARGS;
     }
     size_t typeIndex = obj.value.index();
@@ -309,6 +310,7 @@ int SqliteStatement::CheckValueObjectValid(const ValueObject &obj, int paramPos,
         LOG_ERROR("%{public}s", custLog.c_str());
         Reportor::ReportFault(RdbFaultEvent(RdbFaultType::FT_CURD, E_DFX_TYPE_INDEX_OUT_OF_RANGE,
             bundleName, custLog));
+        SetErrorMsg("Invalid args: the bind arg type index is out of range");
         return E_INVALID_ARGS;
     }
     return E_OK;
@@ -331,6 +333,7 @@ int SqliteStatement::IsValid(int index) const
 int SqliteStatement::Prepare(const std::string &sql)
 {
     if (stmt_ == nullptr) {
+        SetErrorMsg("Failed to prepare statement: statement is null");
         return E_ERROR;
     }
     auto db = sqlite3_db_handle(stmt_);
@@ -351,6 +354,9 @@ int SqliteStatement::Prepare(const std::string &sql)
 
 int SqliteStatement::Bind(const std::vector<ValueObject> &args)
 {
+    // A new binding round starts: drop any message from a previous round so a
+    // stale semantic message can never shadow the sqlite error of this round.
+    lastErrMsg_.clear();
     int count = static_cast<int>(args.size());
     std::vector<ValueObject> abindArgs;
 
@@ -372,6 +378,7 @@ int SqliteStatement::Bind(const std::vector<ValueObject> &args)
     if (count > numParameters_) {
         LOG_ERROR("bind args count(%{public}d) > numParameters(%{public}d), sql: %{public}s", count, numParameters_,
             SqliteUtils::SqlAnonymous(sql_).c_str());
+        SetErrorMsg("The number of bind args is incorrect.");
         return E_INVALID_BIND_ARGS_COUNT;
     }
 
@@ -496,6 +503,9 @@ int SqliteStatement::Execute(const std::vector<ValueObject> &args)
 
 int32_t SqliteStatement::Execute(const std::vector<std::reference_wrapper<ValueObject>> &args)
 {
+    // A new execute round starts: drop any message from a previous round so a
+    // stale semantic message can never shadow the sqlite error of this round.
+    lastErrMsg_.clear();
     auto errCode = CheckEnvironment(static_cast<int>(args.size()));
     if (errCode != E_OK) {
         return errCode;
@@ -841,6 +851,7 @@ int32_t SqliteStatement::FillBlockInfo(SharedBlockInfo *info, int retryTime) con
     }
     if (!ResetStatement(info, stmt_)) {
         LOG_ERROR("ResetStatement Failed.");
+        SetErrorMsg("Failed to fill block info: reset failed");
         return E_ERROR;
     }
     return E_OK;
@@ -943,9 +954,12 @@ int32_t SqliteStatement::BindBigInt(sqlite3_stmt *stat, int index, const ValueOb
 int SqliteStatement::ModifyLockStatus(
     const std::string &table, const std::vector<std::vector<uint8_t>> &hashKeys, bool isLock)
 {
+    // A new lock round starts: drop any message from a previous round.
+    lastErrMsg_.clear();
     ::DistributedDB::DBStatus ret;
     auto db = sqlite3_db_handle(stmt_);
     if (db == nullptr) {
+        SetErrorMsg("Failed to modify lock status: db handle is null");
         return E_ERROR;
     }
     if (isLock) {
@@ -957,20 +971,32 @@ int SqliteStatement::ModifyLockStatus(
         return E_OK;
     }
     if (ret == ::DistributedDB::DBStatus::WAIT_COMPENSATED_SYNC) {
+        SetErrorMsg("Wait for compensated sync before modifying lock status");
         return E_WAIT_COMPENSATED_SYNC;
     }
     if (ret == ::DistributedDB::DBStatus::NOT_FOUND) {
         return E_NO_ROW_IN_QUERY;
     }
     LOG_ERROR("Lock/Unlock failed, err is %{public}d.", ret);
+    SetErrorMsg("Failed to modify lock status");
     return E_ERROR;
 }
 
 std::string SqliteStatement::GetLastErrorMsg() const
 {
+    if (!lastErrMsg_.empty()) {
+        // Read-once semantics aligned with RdbStoreImpl/AbsResultSet: the
+        // message is consumed by the first reader after a failure.
+        return std::move(lastErrMsg_);
+    }
     auto dbHandle = sqlite3_db_handle(stmt_);
-    std::string errMsg(sqlite3_errmsg(dbHandle));
-    return errMsg;
+    // sqlite3_errmsg returns "not an error" (SQLITE_OK's message) when no actual
+    // sqlite error occurred (e.g. the failure was in BindArgs before step()).
+    // Use sqlite3_errcode to detect this case and return empty instead.
+    if (sqlite3_errcode(dbHandle) == SQLITE_OK) {
+        return std::string();
+    }
+    return std::string(sqlite3_errmsg(dbHandle));
 }
 
 int SqliteStatement::InnerFinalize()
@@ -1000,6 +1026,7 @@ int SqliteStatement::CheckEnvironment(int paramCount) const
     if (paramCount != numParameters_) {
         LOG_ERROR("bind args count(%{public}d) > numParameters(%{public}d), sql is %{public}s", paramCount,
             numParameters_, SqliteUtils::SqlAnonymous(sql_).c_str());
+        SetErrorMsg("The number of bind args is incorrect.");
         return E_INVALID_BIND_ARGS_COUNT;
     }
 

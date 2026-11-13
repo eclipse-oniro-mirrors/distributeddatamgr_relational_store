@@ -47,6 +47,7 @@ import RdbStoreSyncEx from './RdbStoreSyncEx.test'
 import RdbQueryByStep from './RdbQueryByStep.test';
 import RdbErrMsgOptimize from './RdbErrMsgOptimize.test.ets';
 import RdbErrMsgRange from './RdbErrMsgRange.test.ets';
+import RdbErrMsg14800000 from './RdbErrMsg14800000.test.ets';
 import RequestFullDataDonationNonSystem from './RequestFullDataDonationNonSystem.test.ets';
 export default function testsuite() {
   RdbPredicatesEtsTest();
@@ -84,5 +85,6 @@ export default function testsuite() {
   RdbQueryByStep();
   RdbErrMsgOptimize();
   RdbErrMsgRange();
+  RdbErrMsg14800000();
   RequestFullDataDonationNonSystem();
 }

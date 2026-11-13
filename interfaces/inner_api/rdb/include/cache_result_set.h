@@ -319,8 +319,17 @@ public:
     */
     API_EXPORT int Close() override;
     int GetSize(int columnIndex, size_t &size) override;
+    std::string GetLastErrorMsg() const override
+    {
+        return lastErrMsg_;
+    }
+    void SetLastErrorMsg(const std::string &msg) override
+    {
+        lastErrMsg_ = msg;
+    }
 
 private:
+    std::string lastErrMsg_;
 RDB_UTILS_PUSH_WARNING
 RDB_UTILS_DISABLE_WARNING("-Wc99-designator")
     static constexpr ColumnType COLUMNTYPES[ValueObject::TYPE_MAX] = {
