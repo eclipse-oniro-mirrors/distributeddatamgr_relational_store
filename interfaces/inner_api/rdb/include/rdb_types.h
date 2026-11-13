@@ -31,6 +31,7 @@
 #include "rdb_common.h"
 #include "rdb_errno.h"
 #include "values_buckets.h"
+#include "rdb_predicates_memo.h"
 
 namespace OHOS {
 namespace NativeRdb {
@@ -147,6 +148,7 @@ struct RdbSyncerParam {
     int32_t distributedTableMode_ = DEVICE_COLLABORATION;
     bool customSwitch_ = false;
     bool autoSyncSwitch_ = true;
+    bool autoSync_ = false;
     int32_t assetConflictPolicy_ = CONFLICT_POLICY_DEFAULT;
     std::string assetTempPath_ = {};
     bool assetDownloadOnDemand_ = false;
@@ -324,77 +326,6 @@ using AsyncBriefEx = std::function<void(const BriefsEx &)>;
 using SyncResultEx = BriefsEx;
 using SyncCallbackEx = AsyncBriefEx;
 
-enum RdbPredicateOperator {
-    EQUAL_TO,
-    NOT_EQUAL_TO,
-    AND,
-    OR,
-    ORDER_BY,
-    LIMIT,
-    BEGIN_GROUP,
-    END_GROUP,
-    IN,
-    NOT_IN,
-    CONTAIN,
-    BEGIN_WITH,
-    END_WITH,
-    IS_NULL,
-    IS_NOT_NULL,
-    LIKE,
-    GLOB,
-    BETWEEN,
-    NOT_BETWEEN,
-    GREATER_THAN,
-    GREATER_THAN_OR_EQUAL,
-    LESS_THAN,
-    LESS_THAN_OR_EQUAL,
-    DISTINCT,
-    INDEXED_BY,
-    NOT_CONTAINS,
-    NOT_LIKE,
-    ASSETS_ONLY,
-    NOT_GLOB,
-    OPERATOR_MAX
-};
-using DataValue = std::variant<int64_t, std::string>;
-struct RdbPredicateOperation {
-    RdbPredicateOperator operator_;
-    std::string field_;
-    std::vector<DataValue> values_;
-};
-
-struct PredicatesMemo {
-    inline void AddOperation(const RdbPredicateOperator op, const std::string &field, const std::string &value)
-    {
-        operations_.push_back({ op, field, { value } });
-    }
-    inline void AddOperation(const RdbPredicateOperator op, const std::string &field, const int64_t &value)
-    {
-        operations_.push_back({ op, field, { value } });
-    }
-    inline void AddOperation(
-        const RdbPredicateOperator op, const std::string &field, const std::vector<std::string> &values)
-    {
-        std::vector<DataValue> values_;
-        values_.reserve(values.size());
-        std::copy(values.begin(), values.end(), std::back_inserter(values_));
-        operations_.push_back({ op, field, values_ });
-    }
-
-    inline void AddOperation(
-        const RdbPredicateOperator op, const std::string &field, const std::vector<int64_t> &values)
-    {
-        std::vector<DataValue> values_;
-        values_.reserve(values.size());
-        std::copy(values.begin(), values.end(), std::back_inserter(values_));
-        operations_.push_back({ op, field, values_ });
-    }
-
-    std::vector<std::string> tables_;
-    std::vector<std::string> devices_;
-    std::vector<RdbPredicateOperation> operations_;
-};
-
 struct Date {
     Date() {}
     Date(int64_t date) : date(date) {}
@@ -511,6 +442,7 @@ struct RdbChangeProperties {
     bool isTrackedDataChange = false;
     bool isP2pSyncDataChange = false;
     bool isKnowledgeDataChange = false;
+    bool isCloudSyncDataChange = false;
 };
 
 struct RdbChangedData {

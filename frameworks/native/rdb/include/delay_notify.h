@@ -59,6 +59,7 @@ private:
     void StartTimer();
     void StopTimer();
     void ExecuteTask();
+    void MergeChangeData(const DistributedRdb::RdbChangedData &changedData);
     void RestoreDefaultSyncInterval();
     uint32_t autoSyncInterval_ = AUTO_SYNC_INTERVAL;
 };

@@ -48,13 +48,18 @@ void DelayNotify::UpdateNotify(const DistributedRdb::RdbChangedData &changedData
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto &[k, v] : changedData.tableData) {
-            if (!v.isP2pSyncDataChange && !v.isKnowledgeDataChange) {
+            if (!v.isP2pSyncDataChange && !v.isKnowledgeDataChange && !v.isCloudSyncDataChange) {
                 continue;
             }
             auto it = changedData_.tableData.find(k);
             if (it == changedData_.tableData.end()) {
                 changedData_.tableData.insert_or_assign(k, v);
                 tableChanged_ = true;
+            } else {
+                it->second.isTrackedDataChange = it->second.isTrackedDataChange || v.isTrackedDataChange;
+                it->second.isP2pSyncDataChange = it->second.isP2pSyncDataChange || v.isP2pSyncDataChange;
+                it->second.isKnowledgeDataChange = it->second.isKnowledgeDataChange || v.isKnowledgeDataChange;
+                it->second.isCloudSyncDataChange = it->second.isCloudSyncDataChange || v.isCloudSyncDataChange;
             }
         }
         isFull_ |= isFull;
@@ -140,6 +145,22 @@ void DelayNotify::StopTimer()
     delaySyncTaskId_ = TaskExecutor::INVALID_TASK_ID;
 }
 
+void DelayNotify::MergeChangeData(const DistributedRdb::RdbChangedData &changedData)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto &[k, v] : changedData.tableData) {
+        auto it = changedData_.tableData.find(k);
+        if (it == changedData_.tableData.end()) {
+            changedData_.tableData.insert_or_assign(k, v);
+        } else {
+            it->second.isTrackedDataChange = it->second.isTrackedDataChange || v.isTrackedDataChange;
+            it->second.isP2pSyncDataChange = it->second.isP2pSyncDataChange || v.isP2pSyncDataChange;
+            it->second.isKnowledgeDataChange = it->second.isKnowledgeDataChange || v.isKnowledgeDataChange;
+            it->second.isCloudSyncDataChange = it->second.isCloudSyncDataChange || v.isCloudSyncDataChange;
+        }
+    }
+}
+
 void DelayNotify::ExecuteTask()
 {
     LOG_DEBUG("Notify data change.");
@@ -160,10 +181,7 @@ void DelayNotify::ExecuteTask()
         int errCode = task_(changedData, rdbNotifyConfig);
         if (errCode != 0) {
             LOG_ERROR("NotifyDataChange is failed, err is %{public}d.", errCode);
-            std::lock_guard<std::mutex> lock(mutex_);
-            for (auto &[k, v] : changedData.tableData) {
-                changedData_.tableData.insert_or_assign(k, v);
-            }
+            MergeChangeData(changedData);
             return;
         }
     }
