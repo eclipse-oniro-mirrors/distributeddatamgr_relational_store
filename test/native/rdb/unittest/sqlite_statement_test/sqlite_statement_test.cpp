@@ -375,3 +375,41 @@ HWTEST_F(RdbSqliteStatementTest, S_ErrMsg_006, TestSize.Level0)
     conn = nullptr;
     RdbHelper::DeleteRdbStore(dbPath);
 }
+
+/**
+ * @tc.name: S_ErrMsg_007
+ * @tc.desc: Verify Execute clears a residual message at entry so a stale message from
+ *           a previous round cannot shadow the current one.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbSqliteStatementTest, S_ErrMsg_007, TestSize.Level0)
+{
+    const std::string dbPath = RDB_TEST_PATH + "S_ErrMsg_007.db";
+    RdbHelper::DeleteRdbStore(dbPath);
+    SqliteGlobalConfig::InitSqliteGlobalConfig();
+    RdbStoreConfig config(dbPath);
+    config.SetDBType(OHOS::NativeRdb::DBType::DB_SQLITE);
+    auto [errCode, conn] = Connection::Create(config, true);
+    ASSERT_EQ(errCode, E_OK);
+    ASSERT_NE(conn, nullptr);
+
+    auto [crtErr, crtStmt] = conn->CreateStatement("CREATE TABLE IF NOT EXISTS test(id INTEGER)", conn);
+    ASSERT_EQ(crtErr, E_OK);
+    ASSERT_NE(crtStmt, nullptr);
+    ASSERT_EQ(crtStmt->Execute(), E_OK);
+
+    auto [stmtErr, statement] = conn->CreateStatement("INSERT INTO test(id) VALUES(?)", conn);
+    ASSERT_EQ(stmtErr, E_OK);
+    ASSERT_NE(statement, nullptr);
+
+    // Simulate a residual message from a previous round
+    auto sqliteStatement = std::static_pointer_cast<SqliteStatement>(statement);
+    sqliteStatement->SetErrorMsg("residual message");
+    // A new execute round starts: the entry clear drops the residual
+    std::vector<ValueObject> args = { ValueObject(1) };
+    EXPECT_EQ(statement->Execute(args), E_OK);
+    EXPECT_TRUE(statement->GetLastErrorMsg().empty());
+
+    conn = nullptr;
+    RdbHelper::DeleteRdbStore(dbPath);
+}

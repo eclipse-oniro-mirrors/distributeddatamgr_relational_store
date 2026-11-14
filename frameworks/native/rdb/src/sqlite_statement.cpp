@@ -992,8 +992,11 @@ std::string SqliteStatement::GetLastErrorMsg() const
     auto dbHandle = sqlite3_db_handle(stmt_);
     // sqlite3_errmsg returns "not an error" (SQLITE_OK's message) when no actual
     // sqlite error occurred (e.g. the failure was in BindArgs before step()).
-    // Use sqlite3_errcode to detect this case and return empty instead.
-    if (sqlite3_errcode(dbHandle) == SQLITE_OK) {
+    // After a successful step the errcode is SQLITE_DONE/SQLITE_ROW, the same
+    // "no actual error" state, so the whole success family returns empty to
+    // keep the artifact from leaking.
+    int errcode = sqlite3_errcode(dbHandle);
+    if (errcode == SQLITE_OK || errcode == SQLITE_DONE || errcode == SQLITE_ROW) {
         return std::string();
     }
     return std::string(sqlite3_errmsg(dbHandle));

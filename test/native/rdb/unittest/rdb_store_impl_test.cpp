@@ -3352,3 +3352,42 @@ HWTEST_F(RdbStoreImplTest, RdbStore_Backup_SourceFileRemoved_001, TestSize.Level
     RdbHelper::DeleteRdbStore(db);
     RdbHelper::DeleteRdbStore(RDB_TEST_PATH + "backup_source_removed_dst.db");
 }
+
+/* *
+ * @tc.name: StoreImplErrMsg_001
+ * @tc.desc: Verify a write-path failure appends the database and table fault-object
+ *           context to the last error message (SetLastErrorContext).
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbStoreImplTest, StoreImplErrMsg_001, TestSize.Level1)
+{
+    store_->ExecuteSql("DROP TABLE IF EXISTS err_msg_ctx");
+    store_->ExecuteSql("CREATE TABLE err_msg_ctx (id INTEGER PRIMARY KEY, name TEXT NOT NULL)");
+    ValuesBucket valuesBucket(std::map<std::string, ValueObject> { { "id", ValueObject(1) },
+        { "name", ValueObject("first") } });
+    int64_t rowId = -1;
+    int errCode = store_->Insert(rowId, "err_msg_ctx", valuesBucket);
+    EXPECT_EQ(errCode, E_OK);
+    // Duplicate primary key: the write path fails and the context is appended
+    errCode = store_->Insert(rowId, "err_msg_ctx", valuesBucket);
+    EXPECT_EQ(errCode, E_SQLITE_CONSTRAINT);
+    std::string msg = store_->GetLastErrorMsg();
+    EXPECT_NE(msg.find("UNIQUE constraint failed"), std::string::npos);
+    EXPECT_NE(msg.find("database:"), std::string::npos);
+    EXPECT_NE(msg.find("table: err_msg_ctx"), std::string::npos);
+    store_->ExecuteSql("DROP TABLE IF EXISTS err_msg_ctx");
+}
+
+/* *
+ * @tc.name: StoreImplErrMsg_002
+ * @tc.desc: Verify the rollback without an active transaction reports the
+ *           E_NO_TRANSACTION_IN_SESSION semantic message.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbStoreImplTest, StoreImplErrMsg_002, TestSize.Level1)
+{
+    int errCode = store_->RollBack();
+    EXPECT_EQ(errCode, E_NO_TRANSACTION_IN_SESSION);
+    std::string msg = store_->GetLastErrorMsg();
+    EXPECT_NE(msg.find("No transaction in session for rollback"), std::string::npos);
+}
