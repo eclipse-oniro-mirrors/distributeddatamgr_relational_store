@@ -33,7 +33,7 @@ static UNUSED_FUNCTION uint32_t GetAppUid()
 {
 #ifdef WINDOWS_PLATFORM
     return 0;
-#elif defined(MAC_PLATFORM)
+#elif defined(CROSS_PLATFORM)
     return getuid();
 #else
     return getappuid();
