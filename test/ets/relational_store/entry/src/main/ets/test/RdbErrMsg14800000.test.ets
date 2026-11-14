@@ -440,7 +440,7 @@ export default function rdbErrMsg14800000Test() {
      * @tc.name Verify 14800000 attach a corrupted database file
      * @tc.desc 1.Create an auxiliary db, close it and corrupt the file (TestUtils)
      *          2.Attach the corrupted file and expect err.code == 14800000 with the
-     *            sqlite message surfaced via conn GetLastErrorMsg
+     *            sqlite message from the connection's GetLastErrorMsg
      */
     it('ErrMsg_14800000_AttachCorruptedDb_013', 0, async (done: Function) => {
       console.log(TAG + "************* 013 start *************");
@@ -514,9 +514,9 @@ export default function rdbErrMsg14800000Test() {
 
     /**
      * @tc.number SUB_DDM_AppDataFWK_ETSRDB_RdbErrMsg14800000_017
-     * @tc.name Verify lockRow error surfacing on a non-distributed table
+     * @tc.name Verify the error returned by lockRow on a non-distributed table
      * @tc.desc 1.lockRow on a plain local table (no distributed log table)
-     *          2.Expect a 148000xx error with the ModifyLockStatus message
+     *          2.Expect a 148000xx error code with the corresponding message
      */
     it('ErrMsg_14800000_LockRowNonDistributed_017', 0, async (done: Function) => {
       console.log(TAG + "************* 017 start *************");
@@ -538,11 +538,13 @@ export default function rdbErrMsg14800000Test() {
 
     /**
      * @tc.number SUB_DDM_AppDataFWK_ETSRDB_RdbErrMsg14800000_0180
-     * @tc.name Verify sequential transaction failures surface fresh messages (no stale)
-     * @tc.desc 1.Transaction op A fails (batchInsertSync empty table, message consumed
-     *            by A's error read)
-     *          2.Transaction op B fails (execute unsupported SQL)
-     *          3.Expect B's message to be B's own semantic text without A's residual
+     * @tc.name Verify the second failure in a transaction returns its own error message
+     * @tc.desc 1.The first transaction operation fails (batchInsertSync with an
+     *            empty table name); its message is used for that error
+     *          2.The second operation then fails (execute with an unsupported
+     *            SQL type)
+     *          3.Expect the second message to describe the second failure and
+     *            not contain the message of the first one
      */
     it('ErrMsg_14800000_TransSequentialErrorsNoStale_0180', 0, async (done: Function) => {
       console.log(TAG + "************* 0180 start *************");
@@ -556,7 +558,7 @@ export default function rdbErrMsg14800000Test() {
         transaction.batchInsertSync("", [valueBucket]);
         expect(true).assertFail();
       } catch (err) {
-        // op A's message is consumed by A's own error read (move-out semantics)
+        // The message of the first failure has been read for that error
         console.log(`${TAG} 0180 opA code:${err.code}, message:${err.message}`);
         expect(14800000).assertEqual(Number(err.code));
         expect(err.message).assertContain("Invalid args: table is empty or batch sqls are empty");
@@ -565,7 +567,7 @@ export default function rdbErrMsg14800000Test() {
         await transaction.execute("SELECT * FROM test");
         expect(true).assertFail();
       } catch (err) {
-        // op B's message must be B's fresh semantic text, not A's residual
+        // The message of the second failure must describe its own cause
         console.log(`${TAG} 0180 opB code:${err.code}, message:${err.message}`);
         expect(14800000).assertEqual(Number(err.code));
         expect(err.message).assertContain("Invalid args: this SQL type is not supported in transaction execute");
