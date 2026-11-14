@@ -104,7 +104,7 @@ std::string ProbeAuditDir()
 {
     struct stat st;
     if (stat(AUDIT_DIR_SA_ROOT, &st) == 0 && S_ISDIR(st.st_mode)) {
-        int32_t uid = static_cast<int32_t>(GetUid());
+        int32_t uid = static_cast<int32_t>(GetAppUid());
         std::string saDir = std::string(AUDIT_DIR_SA_ROOT) + "/" + std::to_string(uid) + "/";
         if (MkDirP(saDir)) {
             return saDir;

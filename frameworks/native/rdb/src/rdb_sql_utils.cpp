@@ -37,6 +37,11 @@ using namespace Rdb;
 namespace NativeRdb {
 using namespace OHOS::DATABASE_UTILS;
 const int32_t FIELDS_LIMIT = 4;
+bool RdbSqlUtils::RenameFile(const std::string &srcFile, const std::string &destFile)
+{
+    return SqliteUtils::RenameFile(srcFile, destFile);
+}
+
 int RdbSqlUtils::CreateDirectory(const std::string &databaseDir)
 {
     std::string tempDirectory = databaseDir;
@@ -62,7 +67,7 @@ int RdbSqlUtils::CreateDirectory(const std::string &databaseDir)
             // Set the default ACL attribute to the database root directory to ensure that files created by the server
             // also have permission to operate on the client side.
             Acl aclDefault(databaseDirectory, Acl::ACL_XATTR_DEFAULT);
-            aclDefault.SetDefaultGroup(GetUid(), Acl::R_RIGHT | Acl::W_RIGHT);
+            aclDefault.SetDefaultGroup(GetAppUid(), Acl::R_RIGHT | Acl::W_RIGHT);
         }
     }
     return E_OK;

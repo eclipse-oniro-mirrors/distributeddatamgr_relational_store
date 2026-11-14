@@ -19,6 +19,8 @@
 #include <gtest/gtest.h>
 
 #include <climits>
+#include <cstdio>
+#include <fstream>
 #include <string>
 
 #include "grd_type_export.h"
@@ -458,4 +460,25 @@ HWTEST_F(RdbSqlUtilsTest, IsValidMaxCount_ValidateValues, TestSize.Level1)
     EXPECT_FALSE(RdbSqlUtils::IsValidReturningMaxCount(0));
     EXPECT_TRUE(RdbSqlUtils::IsValidReturningMaxCount(ReturningConfig::MAX_RETURNING_COUNT));
     EXPECT_FALSE(RdbSqlUtils::IsValidReturningMaxCount(ReturningConfig::MAX_RETURNING_COUNT + 1));
+}
+
+/**
+ * @tc.name: RdbSqlUtils_RenameFile_001
+ * @tc.desc: test RdbSqlUtils::RenameFile renames an existing file to a new path
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbSqlUtilsTest, RdbSqlUtils_RenameFile_001, TestSize.Level1)
+{
+    const std::string srcPath = "/data/test/rdb_rename_src.txt";
+    const std::string destPath = "/data/test/rdb_rename_dest.txt";
+
+    std::ofstream src(srcPath);
+    ASSERT_TRUE(src.is_open());
+    src << "hello rdb rename";
+    src.close();
+
+    EXPECT_TRUE(RdbSqlUtils::RenameFile(srcPath, destPath));
+
+    remove(destPath.c_str());
+    remove(srcPath.c_str());
 }

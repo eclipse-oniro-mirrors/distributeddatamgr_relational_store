@@ -10,7 +10,7 @@
 
 默认只读本文件。涉及需求设计或代码开发时，最多按需加载：
 
-1. **代码开发/修改任务**：**MUST** 加载 [`docs/code_standards.md`](docs/code_standards.md)（强制规范 R1～R10、反馈闭环）。
+1. **代码开发/修改任务**：**MUST** 加载 [`docs/code_standards.md`](docs/code_standards.md)（强制规范、反馈闭环）。
 2. 如果影响范围不清楚，读取 `docs/rdb_native.md` 了解核心类关系和目录结构。
 3. 读取一个与任务领域匹配的专题页（`docs/error_code_layers.md` 或 `docs/dynamic_loading.md`）。
 4. **新增或修改测试用例**：**MUST** 加载 [`docs/test_case_spec.md`](docs/test_case_spec.md)（用例目录划分、文件命名、隔离规范、禁止 sleep、TearDown 清理、AAA 结构、FIRST 原则）。
@@ -106,8 +106,9 @@ relational_store/
 | `跨模块` / `新服务接入` / `rdb_native` / `connection_pool`   | `docs/rdb_native.md`                               | 跨模块改动 MUST 不破坏 inner_api 兼容        |
 | `加密` / `crypt` / `HUKS` / `rdb_crypt`                      | `docs/error_code_layers.md` + `docs/rdb_native.md` | 加密相关改动 MUST 通过 rdb_crypt 适配层      |
 | `云同步` / `cloud` / `cloud_data`                            | `docs/rdb_native.md`                               | 云同步 MUST 通过 IPC 与 native_rdb 交互      |
-| 任何代码修改/新增任务 / `函数行数` / `入参` / `拆分` / 写代码前 | `docs/code_standards.md`                           | 开工前 MUST 完整阅读 R1～R10 规则            |
+| 任何代码修改/新增任务 / `函数行数` / `入参` / `拆分` / 写代码前 | `docs/code_standards.md`                           | 开工前 MUST 完整阅读全部规则            |
 | `测试用例` / `_test.cpp` / `HWTEST` / 新增用例 / 修改用例 | `docs/test_case_spec.md`                          | MUST 确保用例隔离、无 sleep、TearDown 清理、AAA 结构  |
+| `故障注入` / `fault inject` / `rdb_fault_inject_config.json` / `RdbFaultInjector` / `Decorator` | `docs/fault_injection_guide.md` | user 版 MUST 保持零行为；配置解析 MUST 走 Serializable |
 
 # 专家经验
 
@@ -169,6 +170,10 @@ Commit 信息 **MUST** 包含 `Co-Authored-By` 协作者署名，依据 git 实�
 > 修改类任务完成后 MUST 执行以下验证步骤（格式化按用户意愿，修改完代码后询问用户是否执行；编译构建和单元测试 NEVER 跳过）。
 >
 > **新增或修改测试用例前 MUST 先阅读 [`docs/test_case_spec.md`](docs/test_case_spec.md)**：用例目录划分、文件命名、HWTEST 宏用法、AAA 结构、用例隔离（独立数据库文件 + TearDown 清理）、禁止 sleep、禁止临时文件残留、错误码验证、FIRST 原则。
+
+## 测试约束
+
+- 单元测试模拟身份、权限或账号状态时，必须使用 mock 隔离真实系统服务，优先复用已有实现并按场景配置，保留业务断言，在测试结束后恢复状态。
 
 ## 修改类任务验证步骤模板
 

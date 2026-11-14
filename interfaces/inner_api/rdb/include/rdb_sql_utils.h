@@ -39,6 +39,11 @@ using Resolution = ConflictResolution;
 class API_EXPORT RdbSqlUtils {
 public:
     /**
+     * @brief rename file from srcFile to destFile.
+     */
+    static bool RenameFile(const std::string &srcFile, const std::string &destFile);
+
+    /**
      * @brief create data base directory.
      */
     static int CreateDirectory(const std::string &databaseDir);

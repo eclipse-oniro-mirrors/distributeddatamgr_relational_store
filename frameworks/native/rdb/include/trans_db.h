@@ -27,8 +27,11 @@ public:
     std::pair<int, int64_t> Insert(
         const std::string &table, const Row &row, const InsertConfig &config = {}) override;
     std::pair<int, int64_t> BatchInsert(const std::string &table, const RefRows &rows) override;
+    // No default argument (the base declaration has none either): with one,
+    // a two-argument qualified call would be ambiguous against the
+    // two-parameter overload above.
     std::pair<int32_t, Results> BatchInsert(const std::string &table, const RefRows &rows,
-        const BatchInsertConfig &config = {}) override;
+        const BatchInsertConfig &config) override;
     std::pair<int32_t, Results> Update(const Row &row, const AbsRdbPredicates &predicates,
         const UpdateConfig &config = {}) override;
     std::pair<int32_t, Results> Delete(

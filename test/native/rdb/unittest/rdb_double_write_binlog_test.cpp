@@ -2246,3 +2246,4 @@ HWTEST_F(RdbDoubleWriteBinlogTest, RdbStore_Binlog_043, TestSize.Level1)
     EXPECT_EQ(store->ForceRestore(std::string(""), {}), E_OK);
     EXPECT_EQ(store->ExecuteSql("PRAGMA integrity_check"), E_OK);
 }
+

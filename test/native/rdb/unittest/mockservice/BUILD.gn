@@ -116,6 +116,11 @@ mockservice_sources = [
   "${relational_store_native_path}/rdb/src/values_buckets.cpp",
 ]
 
+# rdb_store_manager.cpp / transaction_impl.cpp / sqlite_connection.cpp (all
+# in mockservice_sources) reference the decorator and injector symbols, so
+# the fault-injection mock sources must be compiled in as well.
+mockservice_sources += rdb_fault_mock_sources
+
 mockservice_external_deps = [
   "c_utils:utils",
   "googletest:gmock",

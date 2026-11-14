@@ -392,6 +392,9 @@ void AniGetRdbConfigAppend(const ohos::data::relationalStore::StoreConfig &store
     if (storeConfig.enableSemanticIndex.has_value()) {
         storeConfigNative.enableSemanticIndex = storeConfig.enableSemanticIndex.value();
     }
+    if (storeConfig.haMode.has_value()) {
+        storeConfigNative.haMode = static_cast<int32_t>(storeConfig.haMode.value());
+    }
 }
 
 OHOS::AppDataMgrJsKit::JSUtils::RdbConfig AniGetRdbConfig(const ohos::data::relationalStore::StoreConfig &storeConfig)

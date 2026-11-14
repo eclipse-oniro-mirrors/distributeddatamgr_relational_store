@@ -482,7 +482,8 @@ HWTEST_F(RdbTimeoutInterruptTest, Transaction_BatchInsert_Timeout_001, TestSize.
 
 /* *
  * @tc.name: Transaction_Update_Timeout_001
- * @tc.desc: Transaction Update with min timeout(100ms) on a large table, interrupt should be effective.
+ * @brief Verify that a transaction updating existing rows is interrupted and rolled back.
+ * @tc.desc: Transaction Update with a 30ms timeout must interrupt a large write and release its lock.
  * @tc.type: FUNC
  */
 HWTEST_F(RdbTimeoutInterruptTest, Transaction_Update_Timeout_001, TestSize.Level1)
@@ -500,7 +501,8 @@ HWTEST_F(RdbTimeoutInterruptTest, Transaction_Update_Timeout_001, TestSize.Level
     updateRow.PutBlob("data", blobData);
 
     AbsRdbPredicates predicates(tableName);
-    predicates.EqualTo("name", "nonexistent"); // Force full table scan
+    // Match existing rows so the 8MB value is written instead of only scanning for a missing name.
+    predicates.GreaterThanOrEqualTo("id", "1");
 
     UpdateConfig config;
     config.timeoutMs = 20;
@@ -512,7 +514,7 @@ HWTEST_F(RdbTimeoutInterruptTest, Transaction_Update_Timeout_001, TestSize.Level
     printf("Transaction_Update_Timeout_001: elapsed=%lldms, errCode=%d, timeoutMs=%lld\n",
         static_cast<long long>(elapsed), errCode, static_cast<long long>(config.timeoutMs));
 
-    EXPECT_TRUE(errCode == E_SQLITE_INTERRUPT) << "Unexpected errCode=" << errCode;
+    EXPECT_EQ(errCode, E_SQLITE_INTERRUPT) << "elapsed=" << elapsed << "ms, timeoutMs=" << config.timeoutMs;
 
     auto updatedCount = QueryCount("SELECT COUNT(*) FROM " + tableName + " WHERE name = 'updated'");
     EXPECT_EQ(updatedCount, 0) << "Trans Update should not modify any rows, updatedCount=" << updatedCount;

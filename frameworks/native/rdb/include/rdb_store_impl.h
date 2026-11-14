@@ -107,13 +107,16 @@ class RdbStoreImpl : public RdbStore {
 public:
     RdbStoreImpl(const RdbStoreConfig &config);
     ~RdbStoreImpl() override;
-    int32_t Init(int version, RdbOpenCallback &openCallback, bool isNeedSetAcl = false,
+    virtual int32_t Init(int version, RdbOpenCallback &openCallback, bool isNeedSetAcl = false,
         bool isSilentAccessible = false);
     std::pair<int, int64_t> Insert(
         const std::string &table, const Row &row, const InsertConfig &config = {}) override;
     std::pair<int, int64_t> BatchInsert(const std::string &table, const ValuesBuckets &rows) override;
+    // No default argument here (the base declaration has none either): with
+    // one, a two-argument qualified call would be ambiguous against the
+    // two-parameter overload above.
     std::pair<int32_t, Results> BatchInsert(const std::string &table, const RefRows &rows,
-        const BatchInsertConfig &config = {}) override;
+        const BatchInsertConfig &config) override;
     std::pair<int32_t, Results> Update(const Row &row, const AbsRdbPredicates &predicates,
         const UpdateConfig &config = {}) override;
     std::pair<int32_t, Results> Delete(
@@ -225,6 +228,23 @@ private:
     using Options = DistributedRdb::RdbService::Option;
     using Memo = DistributedRdb::PredicatesMemo;
     using ReportFunc = std::function<void(const DistributedRdb::RdbStatEvent &)>;
+
+protected:
+    // Exposed for the fault-injection decorator (RdbStoreDecorator), which
+    // carries the RdbStatReporter instrumentation moved out of the sink
+    // methods; the report function itself stays owned by the store.
+    std::shared_ptr<ReportFunc> GetReportFunc() const
+    {
+        return reportFunc_;
+    }
+
+    // Transaction-object factory used by CreateTransaction; the
+    // fault-injection decorator overrides it to construct the decorated
+    // transaction with the store's injector member.
+    virtual std::pair<int32_t, std::shared_ptr<Transaction>> CreateTransactionObj(
+        int32_t type, std::shared_ptr<Connection> conn);
+
+private:
     class CloudTables {
     public:
         int32_t AddTables(const std::vector<std::string> &tables);
