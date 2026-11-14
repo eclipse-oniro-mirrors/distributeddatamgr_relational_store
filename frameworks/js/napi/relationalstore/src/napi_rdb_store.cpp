@@ -1854,6 +1854,24 @@ napi_value RdbStoreProxy::ObtainDistributedTableName(napi_env env, napi_callback
     return ASYNC_CALL(env, context);
 }
 
+AppDataMgrJsKit::UvQueue::Args RdbStoreProxy::MakeSyncErrorCallback(
+    const std::shared_ptr<NativeRdb::RdbStore> &rdbStore, int ret)
+{
+    auto errMsg = rdbStore->GetLastErrorMsg();
+    return [ret, errMsg](napi_env env, int &argc, napi_value *argv) mutable {
+        SetBusinessError(env, std::make_shared<InnerError>(ret, errMsg), &argv[0]);
+    };
+}
+
+AppDataMgrJsKit::UvQueue::Args RdbStoreProxy::MakeSyncErrorCallbackExt(
+    const std::shared_ptr<NativeRdb::RdbStore> &rdbStore, int ret)
+{
+    auto errMsg = rdbStore->GetLastErrorMsg();
+    return [ret, errMsg](napi_env env, int &argc, napi_value *argv) mutable {
+        SetBusinessError(env, std::make_shared<InnerErrorExt>(ret, errMsg), &argv[0]);
+    };
+}
+
 napi_value RdbStoreProxy::Sync(napi_env env, napi_callback_info info)
 {
     auto context = std::make_shared<RdbStoreContext>();
@@ -1894,10 +1912,7 @@ napi_value RdbStoreProxy::Sync(napi_env env, napi_callback_info info)
                      : queue->AsyncPromise({ defer }, args, "DistributedSync::OnComplete");
         });
         if (ret != NativeRdb::E_OK) {
-            auto errMsg = rdbStore->GetLastErrorMsg();
-            auto args = [ret, errMsg](napi_env env, int &argc, napi_value *argv) mutable {
-                SetBusinessError(env, std::make_shared<InnerError>(ret, errMsg), &argv[0]);
-            };
+            auto args = MakeSyncErrorCallback(rdbStore, ret);
             callback ? queue->AsyncCall({ callback }, args, {}, "DistributedSync::OnError")
                      : queue->AsyncPromise({ defer }, args, "DistributedSync::OnError");
         }
@@ -1982,10 +1997,7 @@ napi_value RdbStoreProxy::SyncEx(napi_env env, napi_callback_info info)
         SyncOption option{ static_cast<DistributedRdb::SyncMode>(enumArg), false, true };
         auto ret = rdbStore->SyncEx(option, predicates, syncCallback);
         if (ret != NativeRdb::E_OK) {
-            auto errMsg = rdbStore->GetLastErrorMsg();
-            auto args = [ret, errMsg](napi_env env, int &argc, napi_value *argv) mutable {
-                SetBusinessError(env, std::make_shared<InnerErrorExt>(ret, errMsg), &argv[0]);
-            };
+            auto args = MakeSyncErrorCallbackExt(rdbStore, ret);
             callback ? queue->AsyncCall({ callback }, args, {}, "DistributedSync::OnErrorEx")
                      : queue->AsyncPromise({ defer }, args, "DistributedSync::OnErrorEx");
         }
