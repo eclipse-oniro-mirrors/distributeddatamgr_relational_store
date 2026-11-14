@@ -130,7 +130,7 @@ void RdbFaultHiViewReporter::ReportSlaveInconsistent(const RdbStoreConfig &confi
 
 void RdbFaultHiViewReporter::CollectDfxInfo(const RdbStoreConfig &config, DfxInfo &dfxInfo)
 {
-    dfxInfo.procUid_ = GetUid();
+    dfxInfo.procUid_ = GetAppUid();
     dfxInfo.procGid_ = GetGid();
     dfxInfo.procUmask_ = SqliteUtils::GetProcUmask();
     std::string dbPath = config.GetPath();
@@ -169,7 +169,7 @@ void RdbFaultHiViewReporter::ReportCorrupted(const RdbCorruptedEvent &eventInfo)
 {
     std::string bundleName = GetBundleName(eventInfo.bundleName);
     if (bundleName.empty()) {
-        bundleName = std::to_string(GetUid());
+        bundleName = std::to_string(GetAppUid());
     }
     std::string moduleName = eventInfo.moduleName;
     std::string storeType = eventInfo.storeType;
@@ -381,7 +381,7 @@ RdbFaultEvent::RdbFaultEvent(const std::string &faultType, int32_t errorCode, co
     faultType_ = faultType;
     errorCode_ = errorCode;
     if (bundleName.empty()) {
-        bundleName_ = std::to_string(GetUid());
+        bundleName_ = std::to_string(GetAppUid());
     } else {
         bundleName_ = bundleName;
     }

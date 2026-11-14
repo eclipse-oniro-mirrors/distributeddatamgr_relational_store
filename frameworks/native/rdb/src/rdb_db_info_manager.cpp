@@ -50,7 +50,7 @@ CallerInfo RdbDbInfoManager::CollectCaller()
     CallerInfo info;
     info.pid = GetPid();
     info.tid = gettid();
-    info.uid = GetUid();
+    info.uid = GetAppUid();
     info.gid = GetGid();
     return info;
 }

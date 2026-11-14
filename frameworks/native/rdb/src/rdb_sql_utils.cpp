@@ -67,7 +67,7 @@ int RdbSqlUtils::CreateDirectory(const std::string &databaseDir)
             // Set the default ACL attribute to the database root directory to ensure that files created by the server
             // also have permission to operate on the client side.
             Acl aclDefault(databaseDirectory, Acl::ACL_XATTR_DEFAULT);
-            aclDefault.SetDefaultGroup(GetUid(), Acl::R_RIGHT | Acl::W_RIGHT);
+            aclDefault.SetDefaultGroup(GetAppUid(), Acl::R_RIGHT | Acl::W_RIGHT);
         }
     }
     return E_OK;

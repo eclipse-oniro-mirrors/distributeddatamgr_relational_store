@@ -29,12 +29,14 @@
 namespace OHOS {
 namespace NativeRdb {
 static constexpr mode_t DIR_RIGHT = 0771;
-static UNUSED_FUNCTION uint32_t GetUid()
+static UNUSED_FUNCTION uint32_t GetAppUid()
 {
 #ifdef WINDOWS_PLATFORM
     return 0;
-#else
+#elif defined(CROSS_PLATFORM)
     return getuid();
+#else
+    return getappuid();
 #endif
 }
 
