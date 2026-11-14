@@ -36,7 +36,7 @@ config("module_private_config") {
     "${relational_store_base_path}/test/native/rdb/unittest",
   ]
 
-  defines = [ "RELATIONAL_STORE" ]
+  defines = [ "RELATIONAL_STORE" ] + rdb_fault_injection_defines
 }
 
 ohos_unittest("IoguardTest") {

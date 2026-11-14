@@ -30,6 +30,22 @@ using namespace OHOS::Rdb;
 namespace OHOS {
 namespace NativeRdb {
 
+// Inject-and-return guard for the decorated transaction data sinks: the
+// verdict is by method name first, then operation family - the same shape
+// as RDB_INJECT_GUARD in rdb_store_decorator.h.
+#define RDB_TXN_INJECT_GUARD(op, name, ...) \
+    if (injector_.Hit(name, RdbFaultOp::op)) { \
+        return __VA_ARGS__; \
+    }
+// Inject-and-return guard for the decorated transaction cleanup methods
+// (Commit/Rollback/Close): only an explicit per-method configuration can
+// hit them, so the transaction-family verdict stays at the store entry
+// points. On a hit return the given value without executing the parent.
+#define RDB_TXN_METHOD_GUARD(name, ...) \
+    if (injector_.CheckMethod(name)) { \
+        return __VA_ARGS__; \
+    }
+
 TransactionImplDecorator::TransactionImplDecorator(std::shared_ptr<Connection> connection,
     const std::string &path, bool auditEnabled, std::shared_ptr<RdbFaultInjector> injector)
     : TransactionImpl(std::move(connection), path, auditEnabled), injectorHolder_(std::move(injector)),
@@ -60,27 +76,21 @@ std::pair<int32_t, std::shared_ptr<Transaction>> TransactionImplDecorator::Creat
 int32_t TransactionImplDecorator::Commit()
 {
     // Fault-injection mock: return the corruption error without touching the database.
-    if (injector_.CheckMethod("Commit")) {
-        return E_SQLITE_CORRUPT;
-    }
+    RDB_TXN_METHOD_GUARD("Commit", E_SQLITE_CORRUPT)
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return TransactionImpl::Commit();
 }
 
 int32_t TransactionImplDecorator::Rollback()
 {
-    if (injector_.CheckMethod("Rollback")) {
-        return E_SQLITE_CORRUPT;
-    }
+    RDB_TXN_METHOD_GUARD("Rollback", E_SQLITE_CORRUPT)
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return TransactionImpl::Rollback();
 }
 
 int32_t TransactionImplDecorator::Close()
 {
-    if (injector_.CheckMethod("Close")) {
-        return E_SQLITE_CORRUPT;
-    }
+    RDB_TXN_METHOD_GUARD("Close", E_SQLITE_CORRUPT)
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return TransactionImpl::Close();
 }
@@ -88,9 +98,7 @@ int32_t TransactionImplDecorator::Close()
 std::pair<int32_t, int64_t> TransactionImplDecorator::Insert(
     const std::string &table, const Row &row, const InsertConfig &config)
 {
-    if (injector_.Hit("Insert", RdbFaultOp::INSERT)) {
-        return { E_SQLITE_CORRUPT, -1 };
-    }
+    RDB_TXN_INJECT_GUARD(INSERT, "Insert", { E_SQLITE_CORRUPT, -1 })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return TransactionImpl::Insert(table, row, config);
 }
@@ -98,9 +106,7 @@ std::pair<int32_t, int64_t> TransactionImplDecorator::Insert(
 std::pair<int32_t, int64_t> TransactionImplDecorator::BatchInsert(
     const std::string &table, const Rows &rows)
 {
-    if (injector_.Hit("BatchInsert", RdbFaultOp::INSERT)) {
-        return { E_SQLITE_CORRUPT, -1 };
-    }
+    RDB_TXN_INJECT_GUARD(INSERT, "BatchInsert", { E_SQLITE_CORRUPT, -1 })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return TransactionImpl::BatchInsert(table, rows);
 }
@@ -108,9 +114,7 @@ std::pair<int32_t, int64_t> TransactionImplDecorator::BatchInsert(
 std::pair<int32_t, int64_t> TransactionImplDecorator::BatchInsert(
     const std::string &table, const RefRows &rows)
 {
-    if (injector_.Hit("BatchInsert", RdbFaultOp::INSERT)) {
-        return { E_SQLITE_CORRUPT, -1 };
-    }
+    RDB_TXN_INJECT_GUARD(INSERT, "BatchInsert", { E_SQLITE_CORRUPT, -1 })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return TransactionImpl::BatchInsert(table, rows);
 }
@@ -118,9 +122,7 @@ std::pair<int32_t, int64_t> TransactionImplDecorator::BatchInsert(
 std::pair<int32_t, Results> TransactionImplDecorator::BatchInsert(
     const std::string &table, const RefRows &rows, const BatchInsertConfig &config)
 {
-    if (injector_.Hit("BatchInsert", RdbFaultOp::INSERT)) {
-        return { E_SQLITE_CORRUPT, {} };
-    }
+    RDB_TXN_INJECT_GUARD(INSERT, "BatchInsert", { E_SQLITE_CORRUPT, {} })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return TransactionImpl::BatchInsert(table, rows, config);
 }
@@ -128,9 +130,7 @@ std::pair<int32_t, Results> TransactionImplDecorator::BatchInsert(
 std::pair<int32_t, Results> TransactionImplDecorator::Update(
     const Row &row, const AbsRdbPredicates &predicates, const UpdateConfig &config)
 {
-    if (injector_.Hit("Update", RdbFaultOp::UPDATE)) {
-        return { E_SQLITE_CORRUPT, {} };
-    }
+    RDB_TXN_INJECT_GUARD(UPDATE, "Update", { E_SQLITE_CORRUPT, {} })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return TransactionImpl::Update(row, predicates, config);
 }
@@ -138,9 +138,7 @@ std::pair<int32_t, Results> TransactionImplDecorator::Update(
 std::pair<int32_t, Results> TransactionImplDecorator::Delete(
     const AbsRdbPredicates &predicates, const DeleteConfig &config)
 {
-    if (injector_.Hit("Delete", RdbFaultOp::DELETE)) {
-        return { E_SQLITE_CORRUPT, {} };
-    }
+    RDB_TXN_INJECT_GUARD(DELETE, "Delete", { E_SQLITE_CORRUPT, {} })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return TransactionImpl::Delete(predicates, config);
 }
@@ -148,9 +146,7 @@ std::pair<int32_t, Results> TransactionImplDecorator::Delete(
 std::shared_ptr<ResultSet> TransactionImplDecorator::QueryByStep(const std::string &sql, const Values &args,
     const QueryOptions &options, const QueryConfig &config)
 {
-    if (injector_.Hit("QueryByStep", RdbFaultOp::QUERY)) {
-        return nullptr;
-    }
+    RDB_TXN_INJECT_GUARD(QUERY, "QueryByStep", nullptr)
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return WrapIfConfigured(TransactionImpl::QueryByStep(sql, args, options, config));
 }
@@ -158,9 +154,7 @@ std::shared_ptr<ResultSet> TransactionImplDecorator::QueryByStep(const std::stri
 std::shared_ptr<ResultSet> TransactionImplDecorator::QueryByStep(const AbsRdbPredicates &predicates,
     const Fields &columns, const QueryOptions &options, const QueryConfig &config)
 {
-    if (injector_.Hit("QueryByStep", RdbFaultOp::QUERY)) {
-        return nullptr;
-    }
+    RDB_TXN_INJECT_GUARD(QUERY, "QueryByStep", nullptr)
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return WrapIfConfigured(TransactionImpl::QueryByStep(predicates, columns, options, config));
 }
@@ -168,9 +162,7 @@ std::shared_ptr<ResultSet> TransactionImplDecorator::QueryByStep(const AbsRdbPre
 std::pair<int32_t, ValueObject> TransactionImplDecorator::Execute(
     const std::string &sql, const Values &args, const ExecuteConfig &config)
 {
-    if (injector_.Hit("Execute", RdbFaultOp::EXECUTE_SQL)) {
-        return { E_SQLITE_CORRUPT, {} };
-    }
+    RDB_TXN_INJECT_GUARD(EXECUTE_SQL, "Execute", { E_SQLITE_CORRUPT, {} })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return TransactionImpl::Execute(sql, args, config);
 }
@@ -178,9 +170,7 @@ std::pair<int32_t, ValueObject> TransactionImplDecorator::Execute(
 std::pair<int32_t, Results> TransactionImplDecorator::ExecuteExt(
     const std::string &sql, const Values &args, const ExecuteConfig &config)
 {
-    if (injector_.Hit("ExecuteExt", RdbFaultOp::EXECUTE_SQL)) {
-        return { E_SQLITE_CORRUPT, {} };
-    }
+    RDB_TXN_INJECT_GUARD(EXECUTE_SQL, "ExecuteExt", { E_SQLITE_CORRUPT, {} })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return TransactionImpl::ExecuteExt(sql, args, config);
 }

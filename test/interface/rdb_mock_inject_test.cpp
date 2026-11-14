@@ -1163,3 +1163,97 @@ HWTEST_F(RdbMockInjectTest, RdbFaultInject_ManagerGetRdbOpenError_046, TestSize.
     RemoveConfig();
 }
 
+/**
+ * @tc.name: RdbFaultInject_TransactionCreateBeginFail_047
+ * @tc.desc: Verify the Begin-failure branch of the decorated transaction
+ *           factory (TransactionImplDecorator::Create): an invalid
+ *           transaction type fails Begin with E_INVALID_ARGS and the error
+ *           is surfaced with a null transaction; the store stays usable
+ *           afterwards.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectTest, RdbFaultInject_TransactionCreateBeginFail_047, TestSize.Level1)
+{
+    // No entry configured: the Begin-failure branch is injection-independent.
+    RemoveConfig();
+    int errCode = E_ERROR;
+    auto store = OpenMockStore(errCode);
+    ASSERT_NE(store, nullptr);
+
+    auto [buttRet, buttTrans] = store->CreateTransaction(Transaction::TRANS_BUTT);
+    EXPECT_EQ(buttRet, E_INVALID_ARGS) << "TRANS_BUTT fails Begin inside the factory";
+    EXPECT_EQ(buttTrans, nullptr);
+    auto [negRet, negTrans] = store->CreateTransaction(-1);
+    EXPECT_EQ(negRet, E_INVALID_ARGS) << "negative type also rejected";
+    EXPECT_EQ(negTrans, nullptr);
+
+    // The failed creates leave the store usable.
+    auto [ret, transaction] = store->CreateTransaction(Transaction::IMMEDIATE);
+    EXPECT_EQ(ret, E_OK);
+    ASSERT_NE(transaction, nullptr);
+    EXPECT_EQ(transaction->Rollback(), E_OK);
+}
+
+/**
+ * @tc.name: RdbFaultInject_TransactionQueryPassthrough_048
+ * @tc.desc: Verify the passthrough branch of the transaction query wrap
+ *           (TransactionImplDecorator::WrapIfConfigured): without any
+ *           configured entry the result set of a transaction query is
+ *           returned unwrapped and reads succeed.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectTest, RdbFaultInject_TransactionQueryPassthrough_048, TestSize.Level1)
+{
+    RemoveConfig();
+    int errCode = E_ERROR;
+    auto store = OpenMockStore(errCode);
+    ASSERT_NE(store, nullptr);
+    ValuesBucket bucket;
+    bucket.PutString("name", "alice");
+    int64_t outRowId = 0;
+    ASSERT_EQ(store->Insert(outRowId, "mock_test", bucket), E_OK);
+
+    auto [ret, transaction] = store->CreateTransaction(Transaction::IMMEDIATE);
+    EXPECT_EQ(ret, E_OK);
+    ASSERT_NE(transaction, nullptr);
+    auto resultSet = transaction->QueryByStep("SELECT id FROM mock_test");
+    ASSERT_NE(resultSet, nullptr);
+    int rowCount = 0;
+    EXPECT_EQ(resultSet->GetRowCount(rowCount), E_OK) << "unwrapped read succeeds";
+    EXPECT_EQ(rowCount, 1);
+    EXPECT_EQ(resultSet->Close(), E_OK);
+    EXPECT_EQ(transaction->Rollback(), E_OK);
+}
+
+/**
+ * @tc.name: RdbFaultInject_StoreQueryNoEntryPassthrough_049
+ * @tc.desc: Verify the no-entry passthrough branches of the store query
+ *           sinks (RdbStoreDecorator::QuerySql/QueryByStep): with no
+ *           configured entry (HasEntry false) the parent result sets are
+ *           returned unwrapped and reads succeed end to end.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectTest, RdbFaultInject_StoreQueryNoEntryPassthrough_049, TestSize.Level1)
+{
+    RemoveConfig();
+    int errCode = E_ERROR;
+    auto store = OpenMockStore(errCode);
+    ASSERT_NE(store, nullptr);
+    ValuesBucket bucket;
+    bucket.PutString("name", "alice");
+    int64_t outRowId = 0;
+    ASSERT_EQ(store->Insert(outRowId, "mock_test", bucket), E_OK);
+
+    auto sharedRs = store->QuerySql("SELECT id FROM mock_test");
+    ASSERT_NE(sharedRs, nullptr);
+    EXPECT_EQ(sharedRs->GoToNextRow(), E_OK) << "unwrapped shared read succeeds";
+    EXPECT_EQ(sharedRs->Close(), E_OK);
+
+    auto stepRs = store->QueryByStep("SELECT id FROM mock_test");
+    ASSERT_NE(stepRs, nullptr);
+    int rowCount = 0;
+    EXPECT_EQ(stepRs->GetRowCount(rowCount), E_OK) << "unwrapped step read succeeds";
+    EXPECT_EQ(rowCount, 1);
+    EXPECT_EQ(stepRs->Close(), E_OK);
+}
+
