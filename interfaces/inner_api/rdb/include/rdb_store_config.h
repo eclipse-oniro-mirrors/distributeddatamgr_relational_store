@@ -875,6 +875,8 @@ public:
      *        exceeds this value, sqlite3_wal_checkpoint_v2 will be considered.
      *        The value is clamped to [0, checkpointSize] to ensure it does not
      *        exceed the force-checkpoint threshold.
+     *        Note: Setting this value too small will cause frequent checkpoints,
+     *        which degrades write performance.
      * @param size The start checkpoint size in bytes.
      */
     void SetStartCheckpointSize(ssize_t size);
