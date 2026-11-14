@@ -441,7 +441,8 @@ HWTEST_F(CheckpointSizeTest, Checkpoint_SetStartThenWalLimit_001, TestSize.Level
 
     // Assert: raw 300MB preserved and re-clamped against new checkpointSize (384MB), 300 < 384, not clamped
     EXPECT_EQ(config.GetCheckpointSize(), SIZE_384MB) << "checkpointSize should be 384MB after SetWalLimitSize(512MB)";
-    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_300MB) << "startCheckpointSize should be 300MB (preserved, not 20MB formula)";
+    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_300MB) <<
+        "startCheckpointSize should be 300MB (preserved, not 20MB formula)";
 
     // Assert: DB opens and read/write works
     auto store = GetStore(config);
@@ -476,7 +477,8 @@ HWTEST_F(CheckpointSizeTest, Checkpoint_SetStartThenWalLimitClamped_001, TestSiz
 
     // Assert: raw 500MB re-clamped to 384MB (500 > 384)
     EXPECT_EQ(config.GetCheckpointSize(), SIZE_384MB) << "checkpointSize should be 384MB";
-    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_384MB) << "startCheckpointSize should be clamped to 384MB (not 20MB formula)";
+    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_384MB) <<
+        "startCheckpointSize should be clamped to 384MB (not 20MB formula)";
 
     // Assert: DB opens and read/write works
     auto store = GetStore(config);
@@ -540,7 +542,8 @@ HWTEST_F(CheckpointSizeTest, Checkpoint_WalLimitOnlyFormula_001, TestSize.Level1
 
     // Assert: startCheckpointSize is formula value (512MB>>5)+(512MB>>7) = 16MB + 4MB = 20MB
     EXPECT_EQ(config.GetCheckpointSize(), SIZE_384MB) << "checkpointSize should be 384MB";
-    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_20MB) << "startCheckpointSize should be 20MB (formula, not user-set)";
+    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_20MB) <<
+        "startCheckpointSize should be 20MB (formula, not user-set)";
 
     // Assert: DB opens and read/write works
     auto store = GetStore(config);
