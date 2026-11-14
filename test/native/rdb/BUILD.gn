@@ -273,6 +273,11 @@ ohos_unittest("SilentProxyTest") {
     "${relational_store_native_path}/rdb/src/rdb_audit_utils.cpp",
   ]
 
+  # Link the fault-injection decorator sources: these targets compile
+  # rdb_store_manager.cpp / transaction_impl.cpp / sqlite_connection.cpp,
+  # which reference the decorator and injector symbols.
+  sources += rdb_fault_mock_sources
+
   include_dirs = [
     "${relational_store_common_path}/include",
     "${relational_store_native_path}/rdb/include",
@@ -392,6 +397,11 @@ ohos_unittest("NativeRdbTest") {
     "unittest/sqlite_utils_test.cpp",
     "unittest/transaction_test.cpp",
   ]
+
+  # Link the fault-injection decorator sources: these targets compile
+  # rdb_store_manager.cpp / transaction_impl.cpp / sqlite_connection.cpp,
+  # which reference the decorator and injector symbols.
+  sources += rdb_fault_mock_sources
 
   if (is_ohos) {
     sources += [
@@ -595,6 +605,11 @@ ohos_unittest("RdbAuditTest") {
     "${relational_store_native_path}/rdb/src/rdb_audit_utils.cpp",
   ]
 
+  # Link the fault-injection decorator sources: these targets compile
+  # rdb_store_manager.cpp / transaction_impl.cpp / sqlite_connection.cpp,
+  # which reference the decorator and injector symbols.
+  sources += rdb_fault_mock_sources
+
   include_dirs = [
     "${relational_store_common_path}/include",
     "${relational_store_native_path}/rdb/include",
@@ -738,6 +753,11 @@ ohos_unittest("RdbAuditTxnTest") {
     "${relational_store_native_path}/rdb/src/rdb_db_logger_manager.cpp",
     "${relational_store_native_path}/rdb/src/rdb_audit_utils.cpp",
   ]
+
+  # Link the fault-injection decorator sources: these targets compile
+  # rdb_store_manager.cpp / transaction_impl.cpp / sqlite_connection.cpp,
+  # which reference the decorator and injector symbols.
+  sources += rdb_fault_mock_sources
 
   include_dirs = [
     "${relational_store_common_path}/include",

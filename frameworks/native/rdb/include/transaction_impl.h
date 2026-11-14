@@ -44,7 +44,7 @@ public:
     std::pair<int32_t, int64_t> BatchInsert(const std::string &table, const Rows &rows) override;
     std::pair<int32_t, int64_t> BatchInsert(const std::string &table, const RefRows &rows) override;
     std::pair<int32_t, Results> BatchInsert(const std::string &table, const RefRows &rows,
-        const BatchInsertConfig &config = {}) override;
+        const BatchInsertConfig &config) override;
     std::pair<int32_t, Results> Update(const Row &row, const AbsRdbPredicates &predicates,
         const UpdateConfig &config = {}) override;
     std::pair<int32_t, Results> Delete(
@@ -61,9 +61,13 @@ public:
         int32_t type, std::shared_ptr<Connection> connection, const std::string &path,
         bool auditEnabled = false);
 
+protected:
+    // Begin is invoked by TransactionImplDecorator::Create, which
+    // constructs the decorated transaction for a decorated store.
+    int32_t Begin(int32_t type);
+
 private:
     static std::string GetBeginSql(int32_t type);
-    int32_t Begin(int32_t type);
     int32_t CloseInner(bool connRecycle = true);
     std::shared_ptr<RdbStore> GetStore();
     std::shared_ptr<Connection> GetConnection();

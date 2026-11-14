@@ -21,8 +21,10 @@
 #include "logger.h"
 #include "rdb_errno.h"
 #include "rdb_fault_hiview_reporter.h"
+#include "rdb_fault_injector.h"
 #include "rdb_manager.h"
 #include "rdb_radar_reporter.h"
+#include "rdb_store_decorator.h"
 #include "rdb_store_impl.h"
 #include "rdb_time_utils.h"
 #include "restricted_db_manager.h"
@@ -61,14 +63,15 @@ std::shared_ptr<RdbStoreImpl> RdbStoreManager::GetStoreFromCache(
     std::shared_ptr<RdbStoreImpl> rdbStore = nullptr;
     auto it = storeCache_.find(path);
     if (it == storeCache_.end()) {
-        rdbStore = std::make_shared<RdbStoreImpl>(config);
+        // Fault-injection mock: the decorator is the default store object.
+        rdbStore = std::make_shared<RdbStoreDecorator>(config);
         storeCache_[path] = rdbStore;
         return rdbStore;
     }
 
     rdbStore = it->second.lock();
     if (rdbStore == nullptr) {
-        rdbStore = std::make_shared<RdbStoreImpl>(config);
+        rdbStore = std::make_shared<RdbStoreDecorator>(config);
         storeCache_[path] = rdbStore;
         return rdbStore;
     }
@@ -88,10 +91,33 @@ std::shared_ptr<RdbStoreImpl> RdbStoreManager::GetStoreFromCache(
             rdbStore = nullptr;
             return rdbStore;
         }
-        rdbStore = std::make_shared<RdbStoreImpl>(config);
+        rdbStore = std::make_shared<RdbStoreDecorator>(config);
         storeCache_[path] = rdbStore;
     }
     return rdbStore;
+}
+
+// Fault-injection mock, open path in default error mode: return the
+// corruption error directly without opening, repairing or rebuilding;
+// the code flows through the existing corruption callback and fault
+// reporting chain. A short-lived injector for the open decision: its
+// snapshot (and the open budget) is naturally per open cycle.
+bool RdbStoreManager::ShouldInjectOpenError(const std::string &path)
+{
+    RdbFaultInjector injector(path);
+    return injector.ConsumeOpen();
+}
+
+bool RdbStoreManager::IsSilentAccessibleDb(const RdbStoreConfig &config)
+{
+    if (config.IsLocalOnly()) {
+        return false;
+    }
+    if (config.GetSilentAccessibleStatus() == SilentAccessibleStatus::SUPPORT) {
+        return true;
+    }
+    return config.GetSilentAccessibleStatus() == SilentAccessibleStatus::UNKNOWN &&
+        silentProxyManager_.IsSupportSilent(config.GetBundleName(), config.GetName()).second;
 }
 
 std::shared_ptr<RdbStore> RdbStoreManager::GetRdbStore(
@@ -104,6 +130,12 @@ std::shared_ptr<RdbStore> RdbStoreManager::GetRdbStore(
     }
     errCode = CheckConfig(config, path);
     if (errCode != E_OK) {
+        return nullptr;
+    }
+    // Fault-injection mock, open path in default error mode (see
+    // ShouldInjectOpenError).
+    if (ShouldInjectOpenError(path)) {
+        errCode = E_SQLITE_CORRUPT;
         return nullptr;
     }
     std::shared_ptr<RdbStoreImpl> rdbStore = nullptr;
@@ -123,15 +155,10 @@ std::shared_ptr<RdbStore> RdbStoreManager::GetRdbStore(
     // If configured to NOSUPPORT, never need ACL
     // If it is a distributeddata request, never need ACL
     // If it is a local-only database, never need ACL
-    auto isSilentAccessible = [this, &config]() {
-        return !config.IsLocalOnly() &&
-            (config.GetSilentAccessibleStatus() == SilentAccessibleStatus::SUPPORT ||
-                (config.GetSilentAccessibleStatus() == SilentAccessibleStatus::UNKNOWN &&
-                    silentProxyManager_.IsSupportSilent(config.GetBundleName(), config.GetName()).second));
-    };
+    bool isSilentAccessible = IsSilentAccessibleDb(config);
     bool isNeedAcl = (RdbMgr::GetInstance().IsProxy()) && (config.GetRoleType() == OWNER) &&
-                    (!config.IsLocalOnly()) && (config.IsSearchable() || isSilentAccessible());
-    errCode = rdbStore->Init(version, openCallback, isNeedAcl, isSilentAccessible());
+                    (!config.IsLocalOnly()) && (config.IsSearchable() || isSilentAccessible);
+    errCode = rdbStore->Init(version, openCallback, isNeedAcl, isSilentAccessible);
     if (errCode != E_OK) {
         if (modifyConfig.IsEncrypt() != config.IsEncrypt()) {
             rdbStore = nullptr;
@@ -139,7 +166,7 @@ std::shared_ptr<RdbStore> RdbStoreManager::GetRdbStore(
             if (rdbStore == nullptr) {
                 return rdbStore;
             }
-            errCode = rdbStore->Init(version, openCallback, isNeedAcl, isSilentAccessible());
+            errCode = rdbStore->Init(version, openCallback, isNeedAcl, isSilentAccessible);
         }
         if (errCode != E_OK || rdbStore == nullptr) {
             rdbStore = nullptr;
@@ -182,6 +209,17 @@ std::shared_ptr<RdbStore> RdbStoreManager::GetRdb(const RdbStoreConfig &config)
     std::string path;
     int errCode = SqliteGlobalConfig::GetDbPath(config, path);
     if (errCode != E_OK) {
+        return nullptr;
+    }
+    // Open path in default error mode (see ShouldInjectOpenError). GetRdb has
+    // no error-code out parameter, so surface E_SQLITE_CORRUPT through the
+    // fault reporting chain instead.
+    if (ShouldInjectOpenError(path)) {
+        errCode = E_SQLITE_CORRUPT;
+        LOG_ERROR("Open fault injected, path: %{public}s, errCode: %{public}d",
+            SqliteUtils::Anonymous(path).c_str(), errCode);
+        Reportor::ReportFault(
+            RdbFaultDbFileEvent(RdbFaultType::FT_OPEN, errCode, config, "open fault injected in default error mode"));
         return nullptr;
     }
     std::lock_guard<std::mutex> lock(mutex_);
