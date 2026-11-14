@@ -56,7 +56,7 @@ private:
     int64_t vSchema_ = 0;
     std::weak_ptr<Connection> conn_;
     std::string path_;
-    std::string lastErrMsg_;
+    mutable std::string lastErrMsg_;
 };
 } // namespace OHOS::NativeRdb
 #endif // NATIVE_RDB_TRANS_DB_H

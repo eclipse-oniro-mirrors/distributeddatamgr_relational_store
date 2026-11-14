@@ -535,5 +535,48 @@ export default function rdbErrMsg14800000Test() {
       done();
       console.log(TAG + "************* 017 end *************");
     })
+
+    /**
+     * @tc.number SUB_DDM_AppDataFWK_ETSRDB_RdbErrMsg14800000_0180
+     * @tc.name Verify sequential transaction failures surface fresh messages (no stale)
+     * @tc.desc 1.Transaction op A fails (batchInsertSync empty table, message consumed
+     *            by A's error read)
+     *          2.Transaction op B fails (execute unsupported SQL)
+     *          3.Expect B's message to be B's own semantic text without A's residual
+     */
+    it('ErrMsg_14800000_TransSequentialErrorsNoStale_0180', 0, async (done: Function) => {
+      console.log(TAG + "************* 0180 start *************");
+      const transaction = await rdbStore.createTransaction({
+        transactionType: data_relationalStore.TransactionType.IMMEDIATE
+      });
+      try {
+        const valueBucket: data_relationalStore.ValuesBucket = {
+          "name": "lisi",
+        }
+        transaction.batchInsertSync("", [valueBucket]);
+        expect(true).assertFail();
+      } catch (err) {
+        // op A's message is consumed by A's own error read (move-out semantics)
+        console.log(`${TAG} 0180 opA code:${err.code}, message:${err.message}`);
+        expect(14800000).assertEqual(Number(err.code));
+        expect(err.message).assertContain("Invalid args: table is empty or batch sqls are empty");
+      }
+      try {
+        await transaction.execute("SELECT * FROM test");
+        expect(true).assertFail();
+      } catch (err) {
+        // op B's message must be B's fresh semantic text, not A's residual
+        console.log(`${TAG} 0180 opB code:${err.code}, message:${err.message}`);
+        expect(14800000).assertEqual(Number(err.code));
+        expect(err.message).assertContain("Invalid args: this SQL type is not supported in transaction execute");
+        expect(-1).assertEqual(err.message.indexOf("table is empty or batch sqls are empty"));
+      } finally {
+        try {
+          await transaction.rollback();
+        } catch (err) { }
+      }
+      done();
+      console.log(TAG + "************* 0180 end *************");
+    })
   })
 }

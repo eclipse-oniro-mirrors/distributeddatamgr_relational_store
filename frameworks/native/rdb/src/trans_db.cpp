@@ -402,7 +402,8 @@ std::pair<int32_t, Results> TransDB::GenerateResult(int32_t code, std::shared_pt
 std::string TransDB::GetLastErrorMsg() const
 {
     if (!lastErrMsg_.empty()) {
-        return lastErrMsg_;
+        // Read-once semantics aligned with RdbStoreImpl/AbsResultSet/SqliteStatement.
+        return std::move(lastErrMsg_);
     }
     auto connection = conn_.lock();
     if (connection != nullptr) {

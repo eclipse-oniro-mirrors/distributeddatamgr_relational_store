@@ -157,6 +157,9 @@ void AsyncCall::SetBusinessError(napi_env env, std::shared_ptr<Error> error, nap
     if (status != napi_ok) {
         LOG_ERROR("SetBusinessError create code failed, status=%{public}d, code=%{public}d", status,
             error->GetCode());
+        // Degrade to a legal JS null so napi_create_error never receives a bare
+        // C++ nullptr for the code (AD-02).
+        (void)napi_get_null(env, &code);
     }
     status = napi_create_string_utf8(env, error->GetMessage().c_str(), NAPI_AUTO_LENGTH, &msg);
     if (status != napi_ok) {

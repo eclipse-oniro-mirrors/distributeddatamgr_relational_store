@@ -1802,7 +1802,10 @@ void RdbStoreImpl::SetLastErrorContext(const std::string &table) const
         context += "database: " + name_;
     }
     if (!table.empty()) {
-        context += (context.empty() ? std::string() : std::string(" ")) + std::string("table: ") + table;
+        if (!context.empty()) {
+            context += " ";
+        }
+        context += "table: " + table;
     }
     if (context.empty()) {
         return;

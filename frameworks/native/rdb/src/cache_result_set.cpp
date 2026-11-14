@@ -165,20 +165,30 @@ int CacheResultSet::GetRow(RowEntity &rowEntity)
     if (isClosed_) {
         return E_ALREADY_CLOSED;
     }
-    std::shared_lock<decltype(rwMutex_)> lock(rwMutex_);
-    if (row_ < 0 || row_ >= maxRow_) {
-        return E_ROW_OUT_RANGE;
-    }
-    rowEntity.Clear(colNames_.size());
-    int32_t index = 0;
-    for (auto &columnName : colNames_) {
-        ValueObject object;
-        if (!valueBuckets_[row_].GetObject(columnName, object)) {
-            SetLastErrorMsg("Failed to get row: column value not found in cache");
-            return E_ERROR;
+    // Record the failure flag under the shared lock; write the message only after
+    // the lock is released (SetLastErrorMsg takes the exclusive lock itself) so
+    // the shared-lock region never writes lastErrMsg_.
+    int errCode = E_OK;
+    {
+        std::shared_lock<decltype(rwMutex_)> lock(rwMutex_);
+        if (row_ < 0 || row_ >= maxRow_) {
+            return E_ROW_OUT_RANGE;
         }
-        rowEntity.Put(columnName, index, std::move(object));
-        index++;
+        rowEntity.Clear(colNames_.size());
+        int32_t index = 0;
+        for (auto &columnName : colNames_) {
+            ValueObject object;
+            if (!valueBuckets_[row_].GetObject(columnName, object)) {
+                errCode = E_ERROR;
+                break;
+            }
+            rowEntity.Put(columnName, index, std::move(object));
+            index++;
+        }
+    }
+    if (errCode != E_OK) {
+        SetLastErrorMsg("Failed to get row: column value not found in cache");
+        return E_ERROR;
     }
     return E_OK;
 }
