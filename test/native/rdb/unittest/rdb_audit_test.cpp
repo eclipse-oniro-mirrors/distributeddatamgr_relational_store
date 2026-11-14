@@ -439,6 +439,7 @@ HWTEST_F(RdbAuditTest, AuditDisabled_010, TestSize.Level0)
 
 /**
  * @tc.name: RdbAudit_RealDbOpen_011
+ * @brief Wait for both the OPEN event and the asynchronously written lastOpen block.
  * @tc.desc: Real DB open writes OPEN event + lastOpen block
  * @tc.type: FUNC
  */
@@ -450,7 +451,7 @@ HWTEST_F(RdbAuditTest, RealDbOpen_011, TestSize.Level0)
     ASSERT_NE(store, nullptr);
     EXPECT_EQ(WaitEventLines(EVENT_LINES_OPEN), EVENT_LINES_OPEN);
     EXPECT_TRUE(WaitFileExists(AuditJsonPath()));
-    EXPECT_NE(ReadFileContent(AuditJsonPath()).find("lastOpen"), NPOS);
+    EXPECT_TRUE(WaitJsonContains("lastOpen")) << "OPEN event was recorded but lastOpen was not written";
 }
 
 /**

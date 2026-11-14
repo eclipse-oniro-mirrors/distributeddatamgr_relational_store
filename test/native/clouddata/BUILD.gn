@@ -43,9 +43,13 @@ ohos_unittest("NativeCloudDataTest") {
     "${cloud_data_native_path}/src/cloud_service_proxy.cpp",
     "${cloud_data_native_path}/src/cloud_types_util.cpp",
     "unittest/cloud_data_test.cpp",
+    "unittest/mock/src/mock_cloud_remote.cpp",
   ]
 
-  configs = [ ":module_private_config" ]
+  configs = [
+    ":module_private_config",
+    ":mock_config",
+  ]
   cflags = [
     "-fno-access-control",  # Ignore Private Member Access Control
   ]
@@ -54,13 +58,16 @@ ohos_unittest("NativeCloudDataTest") {
   sanitize = {
     ubsan = true
     boundary_sanitize = true
-    cfi = true
-    cfi_cross_dso = true
+    # GTest/GMock are static archives without CFI instrumentation; instrumenting
+    # this target makes GMock's virtual dispatch fail CFI before the test runs.
+    cfi = false
+    cfi_cross_dso = false
     debug = false
   }
 
   external_deps = [
     "c_utils:utils",
+    "googletest:gmock",
     "googletest:gtest_main",
     "kv_store:datamgr_common",
   ]
@@ -74,12 +81,6 @@ ohos_unittest("NativeCloudDataTest") {
   deps += deps_ipc_core
   deps += deps_samgr
 
-  external_deps += external_deps_access_token_libaccesstoken_sdk
-  external_deps += external_deps_access_token_libtoken_setproc
-  external_deps += external_deps_access_token_libtokenid_sdk
-  deps += deps_access_token_libaccesstoken_sdk
-  deps += deps_access_token_libtoken_setproc
-  deps += deps_access_token_libtokenid_sdk
 }
 
 ohos_unittest("CloudManagerMockTest") {
