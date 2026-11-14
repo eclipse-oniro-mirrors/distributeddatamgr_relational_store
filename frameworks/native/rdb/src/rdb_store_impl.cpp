@@ -1624,17 +1624,11 @@ bool RdbStoreImpl::TryAsyncRepair()
 
     int errCode = Connection::CheckReplicaIntegrity(config_);
     if (errCode != E_OK) {
-        bool masterCorrupt = Reportor::IsCorruptedFlagExist(config_.GetPath());
         auto event = Reportor::Create(config_, E_DFX_SLAVE_CORRUPT,
             "slave corrupt on open", false);
         event.subCaseDesc = RdbSubCase::BOTH_FAIL;
-        Reportor::ReportCorruptedOnce(event);
-        if (masterCorrupt) {
-            auto bothEvent = Reportor::Create(config_, E_DFX_MASTER_SLAVE_BOTH_CORRUPT,
-                "master and slave both corrupt on open", false);
-            bothEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
-            Reportor::ReportCorrupted(bothEvent);
-        }
+        Reportor::ReportSlaveCorruptWithMasterCheck(event, config_,
+            "master and slave both corrupt on open");
         return false;
     }
 

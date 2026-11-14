@@ -492,6 +492,65 @@ HWTEST_F(RdbFaultHiViewReporterTest, RestoreFailed_ReportCorrupted_Test_001, Tes
 }
 
 /*
+ * @tc.name: ReportSlaveCorruptWithMasterCheck_Test_001
+ * @tc.desc: Verify ReportSlaveCorruptWithMasterCheck reports both events when master flag exists
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, ReportSlaveCorruptWithMasterCheck_Test_001, TestSize.Level1)
+{
+    std::string masterPath = TEST_DB;
+    std::string slavePath = std::string(TEST_DB) + "_slave.db";
+    RdbStoreConfig masterConfig(masterPath);
+    RdbStoreConfig slaveConfig(slavePath);
+
+    std::ofstream f(masterPath + ".corruptedflg");
+    f.close();
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsCorruptedFlagExist(masterPath));
+
+    auto slaveEvent = RdbFaultHiViewReporter::Create(slaveConfig, E_DFX_SLAVE_CORRUPT,
+        "slave corrupt on open", false, true);
+    slaveEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+
+    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveCorruptWithMasterCheck(
+        slaveEvent, masterConfig, "master and slave both corrupt"));
+
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsReportCorruptedFault(slavePath));
+    EXPECT_TRUE(access((slavePath + ".corruptedflg").c_str(), F_OK) == 0);
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsCorruptedFlagExist(masterPath));
+
+    unlink((slavePath + ".corruptedflg").c_str());
+    unlink((masterPath + ".corruptedflg").c_str());
+    RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+}
+
+/*
+ * @tc.name: ReportSlaveCorruptWithMasterCheck_Test_002
+ * @tc.desc: Verify ReportSlaveCorruptWithMasterCheck reports only slave event when master flag absent
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, ReportSlaveCorruptWithMasterCheck_Test_002, TestSize.Level1)
+{
+    std::string slavePath = std::string(TEST_DB) + "_slave.db";
+    RdbStoreConfig masterConfig((std::string(TEST_DB)));
+    RdbStoreConfig slaveConfig(slavePath);
+
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsCorruptedFlagExist(masterConfig.GetPath()));
+
+    auto slaveEvent = RdbFaultHiViewReporter::Create(slaveConfig, E_DFX_SLAVE_CORRUPT,
+        "slave corrupt on open", false, true);
+    slaveEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+
+    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveCorruptWithMasterCheck(
+        slaveEvent, masterConfig, "master and slave both corrupt"));
+
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsReportCorruptedFault(slavePath));
+    EXPECT_TRUE(access((slavePath + ".corruptedflg").c_str(), F_OK) == 0);
+
+    unlink((slavePath + ".corruptedflg").c_str());
+    RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+}
+
+/*
  * @tc.name: ReportCorruptedOnce_SubCase_Test_001
  * @tc.desc: Verify ReportCorruptedOnce creates corruptedflg and dedup blocks second report
  * @tc.type: FUNC

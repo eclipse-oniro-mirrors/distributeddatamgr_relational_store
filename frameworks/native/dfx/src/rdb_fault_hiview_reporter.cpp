@@ -113,6 +113,18 @@ void RdbFaultHiViewReporter::ReportCorruptedOnce(const RdbCorruptedEvent &eventI
     }
 }
 
+void RdbFaultHiViewReporter::ReportSlaveCorruptWithMasterCheck(const RdbCorruptedEvent &slaveEvent,
+    const RdbStoreConfig &masterConfig, const std::string &bothAppendix)
+{
+    bool masterCorrupt = IsCorruptedFlagExist(masterConfig.GetPath());
+    ReportCorruptedOnce(slaveEvent);
+    if (masterCorrupt) {
+        auto bothEvent = Create(masterConfig, E_DFX_MASTER_SLAVE_BOTH_CORRUPT, bothAppendix, false);
+        bothEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+        ReportCorrupted(bothEvent);
+    }
+}
+
 void RdbFaultHiViewReporter::ReportSlaveInconsistent(const RdbStoreConfig &config, const std::string &msg)
 {
     if (SqliteUtils::IsSlaveInvalid(config.GetPath())) {

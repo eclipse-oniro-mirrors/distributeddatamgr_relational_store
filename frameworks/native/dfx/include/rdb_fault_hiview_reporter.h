@@ -131,6 +131,8 @@ public:
     static bool RegCollector(Collector collector);
     static void ReportCorrupted(const RdbCorruptedEvent &eventInfo);
     static void ReportCorruptedOnce(const RdbCorruptedEvent &eventInfo);
+    static void ReportSlaveCorruptWithMasterCheck(const RdbCorruptedEvent &slaveEvent,
+        const RdbStoreConfig &masterConfig, const std::string &bothAppendix);
     static void ReportSlaveInconsistent(const RdbStoreConfig &config, const std::string &msg);
     API_EXPORT static void ReportFault(const RdbFaultEvent &faultEvent);
     static void ReportRestore(const RdbCorruptedEvent &eventInfo, bool repair = true);
