@@ -980,6 +980,8 @@ private:
     ssize_t walLimitSize_;
     ssize_t checkpointSize_;
     ssize_t startCheckpointSize_;
+    ssize_t startCheckpointSizeRaw_ = 0;
+    bool isStartCheckpointSizeUserSet_ = false;
     int32_t clearMemorySize_;
     mutable CollatorLocales collatorLocales_;
     // distributed rdb

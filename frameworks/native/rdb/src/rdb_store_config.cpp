@@ -746,8 +746,17 @@ void RdbStoreConfig::SetWalLimitSize(ssize_t size)
     walLimitSize_ = size;
     // '(size >> 1) + (size >> 2)' Size of the WAL file that does not checkpoint within 5 minutes when sqlite_busy
     checkpointSize_ = (size >> 1) + (size >> 2);
-    // '(size >> 5) + (size >> 7)' Size of the WAL file for starting checkpoint.
-    startCheckpointSize_ = (size >> 5) + (size >> 7);
+    if (isStartCheckpointSizeUserSet_) {
+        ssize_t userStartCheckpointSize = startCheckpointSizeRaw_;
+        if (userStartCheckpointSize > checkpointSize_) {
+            LOG_WARN("startCheckpointSize exceeds checkpointSize, clamped: %{public}zd", userStartCheckpointSize);
+            userStartCheckpointSize = checkpointSize_;
+        }
+        startCheckpointSize_ = userStartCheckpointSize;
+    } else {
+        // '(size >> 5) + (size >> 7)' Size of the WAL file for starting checkpoint.
+        startCheckpointSize_ = (size >> 5) + (size >> 7);
+    }
 }
 
 int32_t RdbStoreConfig::GetClearMemorySize() const
@@ -924,6 +933,8 @@ void RdbStoreConfig::SetStartCheckpointSize(ssize_t size)
         LOG_WARN("startCheckpointSize is invalid, size:%{public}zd", size);
         size = GlobalExpr::DB_WAL_SIZE_LIMIT_MIN;
     }
+    startCheckpointSizeRaw_ = size;
+    isStartCheckpointSizeUserSet_ = true;
     if (size > checkpointSize_) {
         LOG_WARN("startCheckpointSize exceeds checkpointSize, clamped: %{public}zd", size);
         size = checkpointSize_;

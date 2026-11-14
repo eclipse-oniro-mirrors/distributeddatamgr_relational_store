@@ -35,7 +35,10 @@ constexpr ssize_t SIZE_100KB = 100 * 1024;
 constexpr ssize_t SIZE_300KB = 300 * 1024;
 constexpr ssize_t SIZE_20MB = 20 * 1024 * 1024;
 constexpr ssize_t SIZE_100MB = 100 * 1024 * 1024;
+constexpr ssize_t SIZE_300MB = 300 * 1024 * 1024;
 constexpr ssize_t SIZE_384MB = 384 * 1024 * 1024;
+constexpr ssize_t SIZE_500MB = 500 * 1024 * 1024;
+constexpr ssize_t SIZE_512MB = 512 * 1024 * 1024;
 }
 
 class CheckpointSizeTest : public testing::Test {
@@ -414,6 +417,178 @@ HWTEST_F(CheckpointSizeTest, Checkpoint_MemoryDb_001, TestSize.Level1)
     // Cleanup
     store = nullptr;
     RdbHelper::ClearCache();
+}
+
+/**
+ * @brief SetStartCheckpointSize(300MB) then SetWalLimitSize(512MB).
+ *        checkpointSize becomes 384MB. Raw 300MB < 384MB, re-clamped to 300MB (not clamped).
+ *        Before fix: SetWalLimitSize overwrites startCheckpointSize to 20MB (formula), user setting lost.
+ *        After fix: raw value preserved, re-clamped against new checkpointSize.
+ * @param TestCaseName Checkpoint_SetStartThenWalLimit_001
+ * @since 1.0
+ */
+HWTEST_F(CheckpointSizeTest, Checkpoint_SetStartThenWalLimit_001, TestSize.Level1)
+{
+    std::string dbPath = RDB_TEST_PATH + "ckpt_set_start_then_walimit_001.db";
+    // Arrange: SetStartCheckpointSize before SetWalLimitSize
+    RdbHelper::DeleteRdbStore(dbPath);
+    RdbStoreConfig config(dbPath);
+    config.SetStartCheckpointSize(SIZE_300MB);
+    // At this point: checkpointSize_ is default 256MB, 300MB > 256MB, temporarily clamped to 256MB
+
+    // Act: SetWalLimitSize(512MB) → checkpointSize_ = 384MB, re-clamp raw 300MB against 384MB
+    config.SetWalLimitSize(SIZE_512MB);
+
+    // Assert: raw 300MB preserved and re-clamped against new checkpointSize (384MB), 300 < 384, not clamped
+    EXPECT_EQ(config.GetCheckpointSize(), SIZE_384MB) << "checkpointSize should be 384MB after SetWalLimitSize(512MB)";
+    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_300MB) << "startCheckpointSize should be 300MB (preserved, not 20MB formula)";
+
+    // Assert: DB opens and read/write works
+    auto store = GetStore(config);
+    ASSERT_NE(store, nullptr) << "Store should open";
+    InsertRows(store, 200, 1024);
+    EXPECT_EQ(QueryCount(store), 200) << "Row count should be 200";
+
+    // Cleanup
+    store = nullptr;
+    CleanupDb(dbPath);
+}
+
+/**
+ * @brief SetStartCheckpointSize(500MB) then SetWalLimitSize(512MB).
+ *        checkpointSize becomes 384MB. Raw 500MB > 384MB, re-clamped to 384MB.
+ *        Before fix: SetWalLimitSize overwrites startCheckpointSize to 20MB (formula).
+ *        After fix: raw value re-clamped against new checkpointSize.
+ * @param TestCaseName Checkpoint_SetStartThenWalLimitClamped_001
+ * @since 1.0
+ */
+HWTEST_F(CheckpointSizeTest, Checkpoint_SetStartThenWalLimitClamped_001, TestSize.Level1)
+{
+    std::string dbPath = RDB_TEST_PATH + "ckpt_set_start_then_walimit_clamped_001.db";
+    // Arrange: SetStartCheckpointSize(500MB) before SetWalLimitSize
+    RdbHelper::DeleteRdbStore(dbPath);
+    RdbStoreConfig config(dbPath);
+    config.SetStartCheckpointSize(SIZE_500MB);
+    // At this point: checkpointSize_ is default 256MB, 500MB > 256MB, temporarily clamped to 256MB
+
+    // Act: SetWalLimitSize(512MB) → checkpointSize_ = 384MB, re-clamp raw 500MB against 384MB
+    config.SetWalLimitSize(SIZE_512MB);
+
+    // Assert: raw 500MB re-clamped to 384MB (500 > 384)
+    EXPECT_EQ(config.GetCheckpointSize(), SIZE_384MB) << "checkpointSize should be 384MB";
+    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_384MB) << "startCheckpointSize should be clamped to 384MB (not 20MB formula)";
+
+    // Assert: DB opens and read/write works
+    auto store = GetStore(config);
+    ASSERT_NE(store, nullptr) << "Store should open with re-clamped config";
+    InsertRows(store, 200, 1024);
+    EXPECT_EQ(QueryCount(store), 200) << "Row count should be 200";
+
+    // Cleanup
+    store = nullptr;
+    CleanupDb(dbPath);
+}
+
+/**
+ * @brief SetWalLimitSize(512MB) then SetStartCheckpointSize(300MB).
+ *        checkpointSize is 384MB. 300MB < 384MB, not clamped.
+ *        This order already worked correctly before fix, verifying no regression.
+ * @param TestCaseName Checkpoint_SetWalLimitThenStart_001
+ * @since 1.0
+ */
+HWTEST_F(CheckpointSizeTest, Checkpoint_SetWalLimitThenStart_001, TestSize.Level1)
+{
+    std::string dbPath = RDB_TEST_PATH + "ckpt_set_walimit_then_start_001.db";
+    // Arrange: SetWalLimitSize before SetStartCheckpointSize
+    RdbHelper::DeleteRdbStore(dbPath);
+    RdbStoreConfig config(dbPath);
+    config.SetWalLimitSize(SIZE_512MB);
+    // checkpointSize_ = 384MB, startCheckpointSize_ = 20MB (formula)
+
+    // Act: SetStartCheckpointSize(300MB), 300MB < 384MB, not clamped
+    config.SetStartCheckpointSize(SIZE_300MB);
+
+    // Assert: startCheckpointSize is 300MB (user value, not clamped)
+    EXPECT_EQ(config.GetCheckpointSize(), SIZE_384MB) << "checkpointSize should be 384MB";
+    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_300MB) << "startCheckpointSize should be 300MB";
+
+    // Assert: DB opens and read/write works
+    auto store = GetStore(config);
+    ASSERT_NE(store, nullptr) << "Store should open";
+    InsertRows(store, 200, 1024);
+    EXPECT_EQ(QueryCount(store), 200) << "Row count should be 200";
+
+    // Cleanup
+    store = nullptr;
+    CleanupDb(dbPath);
+}
+
+/**
+ * @brief SetWalLimitSize(512MB) only, no SetStartCheckpointSize.
+ *        startCheckpointSize should be formula value (512MB>>5)+(512MB>>7) = 20MB.
+ *        Verifies backward compatibility: formula is used when user does not explicitly set startCheckpointSize.
+ * @param TestCaseName Checkpoint_WalLimitOnlyFormula_001
+ * @since 1.0
+ */
+HWTEST_F(CheckpointSizeTest, Checkpoint_WalLimitOnlyFormula_001, TestSize.Level1)
+{
+    std::string dbPath = RDB_TEST_PATH + "ckpt_walimit_only_formula_001.db";
+    // Arrange: SetWalLimitSize only, no SetStartCheckpointSize
+    RdbHelper::DeleteRdbStore(dbPath);
+    RdbStoreConfig config(dbPath);
+    config.SetWalLimitSize(SIZE_512MB);
+
+    // Assert: startCheckpointSize is formula value (512MB>>5)+(512MB>>7) = 16MB + 4MB = 20MB
+    EXPECT_EQ(config.GetCheckpointSize(), SIZE_384MB) << "checkpointSize should be 384MB";
+    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_20MB) << "startCheckpointSize should be 20MB (formula, not user-set)";
+
+    // Assert: DB opens and read/write works
+    auto store = GetStore(config);
+    ASSERT_NE(store, nullptr) << "Store should open";
+    InsertRows(store, 200, 1024);
+    EXPECT_EQ(QueryCount(store), 200) << "Row count should be 200";
+
+    // Cleanup
+    store = nullptr;
+    CleanupDb(dbPath);
+}
+
+/**
+ * @brief SetStartCheckpointSize(100KB) then SetWalLimitSize(512MB), insert 200KB data.
+ *        Before fix: SetWalLimitSize overwrites startCheckpointSize to 20MB (formula),
+ *        200KB < 20MB → no checkpoint → WAL stays ~200KB.
+ *        After fix: raw 100KB preserved, re-clamped against 384MB → 100KB,
+ *        200KB > 100KB → checkpoint triggered → WAL < 100KB.
+ * @param TestCaseName Checkpoint_SetStartThenWalLimitTrigger_001
+ * @since 1.0
+ */
+HWTEST_F(CheckpointSizeTest, Checkpoint_SetStartThenWalLimitTrigger_001, TestSize.Level1)
+{
+    std::string dbPath = RDB_TEST_PATH + "ckpt_set_start_then_walimit_trigger_001.db";
+    // Arrange: SetStartCheckpointSize(100KB) before SetWalLimitSize(512MB)
+    RdbHelper::DeleteRdbStore(dbPath);
+    RdbStoreConfig config(dbPath);
+    config.SetStartCheckpointSize(SIZE_100KB);
+    config.SetWalLimitSize(SIZE_512MB);
+
+    // Assert: startCheckpointSize is 100KB (preserved, not overwritten to 20MB formula)
+    EXPECT_EQ(config.GetStartCheckpointSize(), SIZE_100KB) << "startCheckpointSize should be 100KB (preserved)";
+
+    // Act: open DB, insert 200 rows × 1KB = 200KB (> 100KB threshold, < 20MB old formula threshold)
+    auto store = GetStore(config);
+    ASSERT_NE(store, nullptr) << "Store should open";
+    InsertRows(store, 200, 1024);
+
+    // Assert: checkpoint triggered at 100KB threshold (not 20MB), WAL < 100KB
+    int64_t walSize = GetFileSize(dbPath + "-wal");
+    EXPECT_LT(walSize, SIZE_100KB) << "WAL should be below 100KB after checkpoint, got " << walSize;
+
+    // Assert: data intact
+    EXPECT_EQ(QueryCount(store), 200) << "Row count should be 200";
+
+    // Cleanup
+    store = nullptr;
+    CleanupDb(dbPath);
 }
 
 /**
