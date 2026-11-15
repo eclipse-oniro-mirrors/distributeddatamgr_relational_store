@@ -392,10 +392,15 @@ std::pair<int32_t, Results> TransDB::GenerateResult(int32_t code, std::shared_pt
 
 std::string TransDB::GetLastErrorMsg() const
 {
-    if (!lastErrMsg_.empty()) {
-        // Read-once semantics aligned with RdbStoreImpl/AbsResultSet/SqliteStatement.
-        return std::move(lastErrMsg_);
+    {
+        std::lock_guard<std::mutex> lock(errMsgMutex_);
+        if (!lastErrMsg_.empty()) {
+            // Read-once semantics aligned with RdbStoreImpl/AbsResultSet/SqliteStatement.
+            return std::move(lastErrMsg_);
+        }
     }
+    // Fall back to the connection message outside the lock to avoid holding
+    // the error message lock while calling into the connection layer.
     auto connection = conn_.lock();
     if (connection != nullptr) {
         return connection->GetLastErrorMsg();

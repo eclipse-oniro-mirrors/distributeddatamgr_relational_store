@@ -16,6 +16,7 @@
 #ifndef NATIVE_RDB_TRANS_DB_H
 #define NATIVE_RDB_TRANS_DB_H
 #include <memory>
+#include <mutex>
 
 #include "connection.h"
 #include "rdb_store.h"
@@ -47,7 +48,11 @@ public:
     int SetVersion(int version) override;
     int Sync(const SyncOption &option, const std::vector<std::string> &tables, const AsyncDetail &async) override;
     std::string GetLastErrorMsg() const override;
-    void SetErrorMsg(const std::string &msg) { lastErrMsg_ = msg; }
+    void SetErrorMsg(const std::string &msg)
+    {
+        std::lock_guard<std::mutex> lock(errMsgMutex_);
+        lastErrMsg_ = msg;
+    }
 
 private:
     std::pair<int32_t, std::shared_ptr<Statement>> GetStatement(
@@ -60,6 +65,7 @@ private:
     std::weak_ptr<Connection> conn_;
     std::string path_;
     mutable std::string lastErrMsg_;
+    mutable std::mutex errMsgMutex_;
 };
 } // namespace OHOS::NativeRdb
 #endif // NATIVE_RDB_TRANS_DB_H
