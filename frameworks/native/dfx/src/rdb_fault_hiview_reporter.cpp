@@ -322,7 +322,7 @@ void RdbFaultHiViewReporter::DeleteBothCorruptFlag(const std::string &dbPath)
         return;
     }
     std::string flagFilename = dbPath + DB_BOTH_CORRUPT_POSTFIX;
-    remove(flagFilename.c_str());
+    SqliteUtils::DeleteFile(flagFilename);
 }
 
 RdbCorruptedEvent RdbFaultHiViewReporter::Create(
