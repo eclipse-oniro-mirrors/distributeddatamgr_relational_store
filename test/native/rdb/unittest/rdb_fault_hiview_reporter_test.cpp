@@ -106,6 +106,7 @@ public:
     void SetUp() override
     {
         RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+        RdbFaultHiViewReporter::bothCorruptReportedFlg_ = false;
     }
     void TearDown() override
     {
@@ -113,6 +114,7 @@ public:
         unlink((std::string(TEST_DB) + "-slaveFailure").c_str());
         unlink((std::string(TEST_DB) + "-syncInterrupt").c_str());
         RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+        RdbFaultHiViewReporter::bothCorruptReportedFlg_ = false;
     }
 };
 
@@ -548,6 +550,39 @@ HWTEST_F(RdbFaultHiViewReporterTest, ReportSlaveCorruptWithMasterCheck_Test_002,
 
     unlink((slavePath + ".corruptedflg").c_str());
     RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+}
+
+/*
+ * @tc.name: ReportSlaveCorruptWithMasterCheck_Test_003
+ * @tc.desc: Verify both-corrupt event is deduplicated across multiple calls
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, ReportSlaveCorruptWithMasterCheck_Test_003, TestSize.Level1)
+{
+    std::string masterPath = TEST_DB;
+    std::string slavePath = std::string(TEST_DB) + "_slave.db";
+    RdbStoreConfig masterConfig(masterPath);
+    RdbStoreConfig slaveConfig(slavePath);
+
+    std::ofstream f(masterPath + ".corruptedflg");
+    f.close();
+
+    auto slaveEvent = RdbFaultHiViewReporter::Create(slaveConfig, E_DFX_SLAVE_CORRUPT,
+        "slave corrupt on open", false, true);
+    slaveEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+
+    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveCorruptWithMasterCheck(
+        slaveEvent, masterConfig, "master and slave both corrupt"));
+    EXPECT_TRUE(RdbFaultHiViewReporter::bothCorruptReportedFlg_);
+
+    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveCorruptWithMasterCheck(
+        slaveEvent, masterConfig, "master and slave both corrupt on restore"));
+    EXPECT_TRUE(RdbFaultHiViewReporter::bothCorruptReportedFlg_);
+
+    unlink((slavePath + ".corruptedflg").c_str());
+    unlink((masterPath + ".corruptedflg").c_str());
+    RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+    RdbFaultHiViewReporter::bothCorruptReportedFlg_ = false;
 }
 
 /*

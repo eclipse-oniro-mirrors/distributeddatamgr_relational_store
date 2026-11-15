@@ -153,6 +153,7 @@ private:
     static Collector collector_;
     static RdbFaultCode faultCounters_[];
     static bool memCorruptReportedFlg_;
+    static bool bothCorruptReportedFlg_;
 };
 } // namespace OHOS::NativeRdb
 #endif // DISTRIBUTEDDATAMGR_RDB_FAULT_HIVIEW_REPORTER_H

@@ -98,6 +98,7 @@ RdbFaultCode RdbFaultHiViewReporter::faultCounters_[] = {
 RdbFaultEvent::~RdbFaultEvent() = default;
 
 bool RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+bool RdbFaultHiViewReporter::bothCorruptReportedFlg_ = false;
 
 void RdbFaultHiViewReporter::ReportCorruptedOnce(const RdbCorruptedEvent &eventInfo)
 {
@@ -118,10 +119,13 @@ void RdbFaultHiViewReporter::ReportSlaveCorruptWithMasterCheck(const RdbCorrupte
 {
     bool masterCorrupt = IsCorruptedFlagExist(masterConfig.GetPath());
     ReportCorruptedOnce(slaveEvent);
-    if (masterCorrupt) {
+    if (masterCorrupt && !bothCorruptReportedFlg_) {
         auto bothEvent = Create(masterConfig, E_DFX_MASTER_SLAVE_BOTH_CORRUPT, bothAppendix, false);
         bothEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+        bothEvent.appendix += SqliteUtils::FormatDebugInfo(bothEvent.debugInfos, "");
+        bothEvent.appendix += SqliteUtils::FormatDfxInfo(bothEvent.dfxInfo);
         ReportCorrupted(bothEvent);
+        bothCorruptReportedFlg_ = true;
     }
 }
 
@@ -175,6 +179,7 @@ void RdbFaultHiViewReporter::ReportRestore(const RdbCorruptedEvent &eventInfo, b
     ReportCorrupted(eventInfoAppend);
     DeleteCorruptedFlag(eventInfo.path);
     memCorruptReportedFlg_ = false;
+    bothCorruptReportedFlg_ = false;
 }
 
 void RdbFaultHiViewReporter::ReportCorrupted(const RdbCorruptedEvent &eventInfo)
