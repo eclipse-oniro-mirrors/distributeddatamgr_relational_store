@@ -918,6 +918,7 @@ group("unittest") {
     ":RdbAuditTxnTest",
     ":SilentProxyTest",
     "unittest/mock_timeout_test:MockNativeRdbTest",
+    "unittest/rdb_store_fault_test:RdbStoreFaultTest",
   ]
 }
 
