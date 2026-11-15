@@ -22,10 +22,12 @@ config("module_private_config") {
 
   include_dirs = [
     "${relational_store_common_path}/include",
+    "${relational_store_native_path}/rdb_crypt",
     "${relational_store_native_path}/rdb/include",
     "${relational_store_native_path}/rd/include",
     "${relational_store_innerapi_path}/rdb/include",
     "${relational_store_native_path}/dfx/include",
+    "${relational_store_native_path}/obs_mgr_adapter",
     "${relational_store_native_path}/rdb/src",
     "${relational_store_native_path}/rd/src",
     "${relational_store_innerapi_path}/appdatafwk/include",
@@ -44,10 +46,32 @@ ohos_unittest("RdbStoreFaultTest") {
     "-Werror=vla",
   ]
 
-  sources = [
+  sources = base_sources
+  sources += [
     "rdb_store_fault_test.cpp",
     "${relational_store_base_path}/test/native/rdb/unittest/common.cpp",
+    "${relational_store_native_path}/appdatafwk/src/general_endian.cpp",
+    "${relational_store_native_path}/appdatafwk/src/serializable.cpp",
+    "${relational_store_native_path}/appdatafwk/src/shared_block.cpp",
+    "${relational_store_native_path}/rdb/src/abs_shared_result_set.cpp",
+    "${relational_store_native_path}/rdb/src/rdb_file_system.cpp",
+    "${relational_store_native_path}/rdb/src/share_block.cpp",
+    "${relational_store_native_path}/rdb/src/shared_block_serializer_info.cpp",
+    "${relational_store_native_path}/rdb/src/sqlite_shared_result_set.cpp",
   ]
+  if (is_ohos) {
+    sources += [
+      "${relational_store_native_path}/rdb_service_adapter/src/marshal_utils_impl.cpp",
+      "${relational_store_native_path}/rdb_service_adapter/src/rdb_manager_impl.cpp",
+      "${relational_store_native_path}/rdb_service_adapter/src/rdb_notifier_stub.cpp",
+      "${relational_store_native_path}/rdb_service_adapter/src/rdb_service_proxy.cpp",
+      "${relational_store_native_path}/rdb_service_adapter/src/rdb_types_util.cpp",
+      "${relational_store_native_path}/rdb_service_adapter/src/result_set_proxy.cpp",
+    ]
+  }
+  if (is_linux) {
+    sources += [ "${relational_store_mock_path}/external_inner_kit/c_utils/ashmem.cpp" ]
+  }
 
   configs = [ ":module_private_config" ]
 
@@ -60,6 +84,8 @@ ohos_unittest("RdbStoreFaultTest") {
   ]
   external_deps += external_deps_file_api
   external_deps += external_deps_hilog
+  external_deps += external_deps_rdb_hmac
+  external_deps += external_deps_huks
   external_deps += external_deps_ability_base_zuri
   external_deps += external_deps_ability_runtime_dataobs_manager
   external_deps += external_deps_hisysevent
@@ -76,7 +102,8 @@ ohos_unittest("RdbStoreFaultTest") {
   deps += deps_ability_base_zuri
   deps += deps_ability_runtime_dataobs_manager
   deps += deps_file_api
-  deps += dep_hilog
+  deps += deps_hilog
+  deps += deps_huks
   deps += deps_hisysevent
   deps += deps_ipc_core
   deps += deps_database_utils
