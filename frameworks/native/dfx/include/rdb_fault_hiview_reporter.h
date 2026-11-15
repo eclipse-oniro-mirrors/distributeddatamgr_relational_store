@@ -138,6 +138,7 @@ public:
     static void ReportRestore(const RdbCorruptedEvent &eventInfo, bool repair = true);
     static bool IsReportCorruptedFault(const std::string &dbPath);
     static bool IsCorruptedFlagExist(const std::string &dbPath);
+    static bool IsBothCorruptFlagExist(const std::string &dbPath);
     static std::string GetBundleName(const std::string &bundleName);
     static void ReportRAGFault(const std::string &errMsg, const std::string &functionName,
         const std::string &bundleName, const int faultType, const int errCode);
@@ -146,6 +147,8 @@ private:
     static void Update(std::map<std::string, DebugInfo> &localInfos, const std::map<std::string, DebugInfo> &infos);
     static void CreateCorruptedFlag(const std::string &dbPath);
     static void DeleteCorruptedFlag(const std::string &dbPath);
+    static void CreateBothCorruptFlag(const std::string &dbPath);
+    static void DeleteBothCorruptFlag(const std::string &dbPath);
     static bool IsReportFault(int32_t errCode);
     static std::atomic<uint8_t> *GetFaultCounter(int32_t errCode);
     static void CollectDfxInfo(const RdbStoreConfig &config, DfxInfo &dfxInfo);
@@ -153,7 +156,6 @@ private:
     static Collector collector_;
     static RdbFaultCode faultCounters_[];
     static bool memCorruptReportedFlg_;
-    static bool bothCorruptReportedFlg_;
 };
 } // namespace OHOS::NativeRdb
 #endif // DISTRIBUTEDDATAMGR_RDB_FAULT_HIVIEW_REPORTER_H

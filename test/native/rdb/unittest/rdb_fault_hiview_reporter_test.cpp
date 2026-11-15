@@ -106,15 +106,14 @@ public:
     void SetUp() override
     {
         RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
-        RdbFaultHiViewReporter::bothCorruptReportedFlg_ = false;
     }
     void TearDown() override
     {
         unlink((std::string(TEST_DB) + ".corruptedflg").c_str());
+        unlink((std::string(TEST_DB) + ".bothcorruptedflg").c_str());
         unlink((std::string(TEST_DB) + "-slaveFailure").c_str());
         unlink((std::string(TEST_DB) + "-syncInterrupt").c_str());
         RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
-        RdbFaultHiViewReporter::bothCorruptReportedFlg_ = false;
     }
 };
 
@@ -519,9 +518,11 @@ HWTEST_F(RdbFaultHiViewReporterTest, ReportSlaveCorruptWithMasterCheck_Test_001,
     EXPECT_FALSE(RdbFaultHiViewReporter::IsReportCorruptedFault(slavePath));
     EXPECT_TRUE(access((slavePath + ".corruptedflg").c_str(), F_OK) == 0);
     EXPECT_TRUE(RdbFaultHiViewReporter::IsCorruptedFlagExist(masterPath));
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsBothCorruptFlagExist(masterPath));
 
     unlink((slavePath + ".corruptedflg").c_str());
     unlink((masterPath + ".corruptedflg").c_str());
+    unlink((masterPath + ".bothcorruptedflg").c_str());
     RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
 }
 
@@ -571,18 +572,19 @@ HWTEST_F(RdbFaultHiViewReporterTest, ReportSlaveCorruptWithMasterCheck_Test_003,
         "slave corrupt on open", false, true);
     slaveEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
 
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsBothCorruptFlagExist(masterPath));
     EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveCorruptWithMasterCheck(
         slaveEvent, masterConfig, "master and slave both corrupt"));
-    EXPECT_TRUE(RdbFaultHiViewReporter::bothCorruptReportedFlg_);
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsBothCorruptFlagExist(masterPath));
 
     EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveCorruptWithMasterCheck(
         slaveEvent, masterConfig, "master and slave both corrupt on restore"));
-    EXPECT_TRUE(RdbFaultHiViewReporter::bothCorruptReportedFlg_);
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsBothCorruptFlagExist(masterPath));
 
     unlink((slavePath + ".corruptedflg").c_str());
     unlink((masterPath + ".corruptedflg").c_str());
+    unlink((masterPath + ".bothcorruptedflg").c_str());
     RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
-    RdbFaultHiViewReporter::bothCorruptReportedFlg_ = false;
 }
 
 /*
