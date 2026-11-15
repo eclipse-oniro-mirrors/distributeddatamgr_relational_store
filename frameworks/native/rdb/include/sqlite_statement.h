@@ -73,7 +73,6 @@ public:
 
 private:
     friend class SqliteConnection;
-    mutable std::string lastErrMsg_;
     using Asset = ValueObject::Asset;
     using Assets = ValueObject::Assets;
     using BigInt = ValueObject::BigInt;
@@ -124,6 +123,7 @@ private:
     sqlite3_stmt *stmt_;
     std::shared_ptr<Connection> conn_;
     std::string sql_;
+    mutable std::string lastErrMsg_;
     mutable std::vector<int32_t> types_;
     std::shared_ptr<Statement> slave_;
     const RdbStoreConfig *config_ = nullptr;
