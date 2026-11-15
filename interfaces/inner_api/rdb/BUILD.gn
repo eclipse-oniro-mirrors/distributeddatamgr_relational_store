@@ -35,6 +35,9 @@ config("native_rdb_config") {
   include_dirs = native_rdb_platform_include_dirs
 
   defines = native_rdb_platform_defines
+  if (rdb_fault_injection_enable) {
+    defines += [ "RDB_FAULT_INJECTION_ENABLE" ]
+  }
 }
 
 config("native_rdb_public_config") {

@@ -34,7 +34,7 @@ config("module_private_config") {
     "${relational_store_native_path}/rdb_service_adapter/include",
   ]
 
-  defines = [ "RELATIONAL_STORE" ]
+  defines = [ "RELATIONAL_STORE" ] + rdb_fault_injection_defines
 }
 
 ohos_unittest("NativeRdbMultiThreadTest") {
@@ -102,7 +102,7 @@ ohos_unittest("NativeRdbMultiProcessTest") {
     "${relational_store_native_path}/rdb_crypt",
   ]
 
-  defines = [ "RELATIONAL_STORE" ]
+  defines = [ "RELATIONAL_STORE" ] + rdb_fault_injection_defines
 
   external_deps = [
     "c_utils:utils",
@@ -166,7 +166,7 @@ ohos_unittest("NativeRdbLogTest") {
     "${relational_store_base_path}/test/native/rdb/unittest",
   ]
 
-  defines = [ "RELATIONAL_STORE" ]
+  defines = [ "RELATIONAL_STORE" ] + rdb_fault_injection_defines
 
   external_deps = [
     "c_utils:utils",
@@ -294,7 +294,7 @@ ohos_unittest("SilentProxyTest") {
     "${relational_store_mock_test_path}/",
   ]
 
-  defines = [ "RELATIONAL_STORE" ]
+  defines = [ "RELATIONAL_STORE" ] + rdb_fault_injection_defines
 
   cflags = [ "-fno-access-control" ]
 
@@ -626,7 +626,7 @@ ohos_unittest("RdbAuditTest") {
     "${relational_store_base_path}/test/native/rdb/unittest",
   ]
 
-  defines = [ "RELATIONAL_STORE" ]
+  defines = [ "RELATIONAL_STORE" ] + rdb_fault_injection_defines
 
   external_deps = [
     "c_utils:utils",
@@ -775,7 +775,7 @@ ohos_unittest("RdbAuditTxnTest") {
     "${relational_store_base_path}/test/native/rdb/unittest",
   ]
 
-  defines = [ "RELATIONAL_STORE" ]
+  defines = [ "RELATIONAL_STORE" ] + rdb_fault_injection_defines
 
   external_deps = [
     "c_utils:utils",
@@ -897,7 +897,7 @@ ohos_unittest("DelayActuatorTest") {
     "${relational_store_base_path}/test/native/rdb/unittest",
   ]
 
-  defines = [ "RELATIONAL_STORE" ]
+  defines = [ "RELATIONAL_STORE" ] + rdb_fault_injection_defines
 
   external_deps = [
     "c_utils:utils",

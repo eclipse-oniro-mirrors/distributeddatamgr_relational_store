@@ -37,7 +37,7 @@ config("module_private_config") {
     "${relational_store_native_path}/rdb_service_adapter/include",
   ]
 
-  defines = [ "RELATIONAL_STORE" ]
+  defines = [ "RELATIONAL_STORE" ] + rdb_fault_injection_defines
 }
 
 ohos_unittest("DynamicLoadTest") {

@@ -39,6 +39,21 @@ namespace NativeRdb {
 using namespace OHOS::Rdb;
 using Reportor = RdbFaultHiViewReporter;
 using RdbMgr = DistributedRdb::RdbManager;
+// Inject-and-return guard for the open paths (GetRdbStore/GetRdb): on a hit
+// the open fails before the database is touched, and GetRdbStore also
+// reports the corruption code through its out parameter. Gated by the
+// root-build switch (relational_store.gni): with RDB_FAULT_INJECTION_ENABLE
+// undefined in user builds the guard expands to nothing and the open
+// proceeds as if unconfigured.
+#ifdef RDB_FAULT_INJECTION_ENABLE
+#define RDB_MANAGER_OPEN_INJECT_GUARD(...) \
+    if (ShouldInjectOpenError(path)) { \
+        __VA_ARGS__; \
+        return nullptr; \
+    }
+#else
+#define RDB_MANAGER_OPEN_INJECT_GUARD(...)
+#endif
 __attribute__((used))
 const bool RdbStoreManager::regCollector_ = RdbFaultHiViewReporter::RegCollector(RdbStoreManager::Collector);
 RdbStoreManager &RdbStoreManager::GetInstance()
@@ -134,10 +149,7 @@ std::shared_ptr<RdbStore> RdbStoreManager::GetRdbStore(
     }
     // Fault-injection mock, open path in default error mode (see
     // ShouldInjectOpenError).
-    if (ShouldInjectOpenError(path)) {
-        errCode = E_SQLITE_CORRUPT;
-        return nullptr;
-    }
+    RDB_MANAGER_OPEN_INJECT_GUARD(errCode = E_SQLITE_CORRUPT)
     std::shared_ptr<RdbStoreImpl> rdbStore = nullptr;
     RdbStoreConfig modifyConfig = config;
     if (config.GetRoleType() == OWNER && IsConfigInvalidChanged(path, modifyConfig)) {
@@ -211,17 +223,8 @@ std::shared_ptr<RdbStore> RdbStoreManager::GetRdb(const RdbStoreConfig &config)
     if (errCode != E_OK) {
         return nullptr;
     }
-    // Open path in default error mode (see ShouldInjectOpenError). GetRdb has
-    // no error-code out parameter, so surface E_SQLITE_CORRUPT through the
-    // fault reporting chain instead.
-    if (ShouldInjectOpenError(path)) {
-        errCode = E_SQLITE_CORRUPT;
-        LOG_ERROR("Open fault injected, path: %{public}s, errCode: %{public}d",
-            SqliteUtils::Anonymous(path).c_str(), errCode);
-        Reportor::ReportFault(
-            RdbFaultDbFileEvent(RdbFaultType::FT_OPEN, errCode, config, "open fault injected in default error mode"));
-        return nullptr;
-    }
+    // Open path in default error mode (see ShouldInjectOpenError).
+    RDB_MANAGER_OPEN_INJECT_GUARD()
     std::lock_guard<std::mutex> lock(mutex_);
     std::shared_ptr<RdbStoreImpl> rdbStore = nullptr;
     auto it = storeCache_.find(path);
