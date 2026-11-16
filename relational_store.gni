@@ -189,8 +189,10 @@ base_sources = [
 # The fault-injection mock layer follows the build variant (dsoftbus pattern):
 # root version builds compile the real injector, user (release) builds compile
 # the no-op implementation instead, so the shipped artifact carries no mock
-# behavior at all. build/common.gni (imported above) provides build_variant.
-rdb_fault_injection_enable = (build_variant == "root")
+# behavior at all - and only OHOS builds enable it at all, so the
+# cross-platform (SDK) variants never do. build/common.gni (imported above)
+# provides build_variant.
+rdb_fault_injection_enable = (is_ohos && build_variant == "root")
 
 rdb_fault_mock_sources = [
   "${relational_store_native_path}/rdb/src/rdb_store_decorator.cpp",

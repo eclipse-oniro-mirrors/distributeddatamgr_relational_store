@@ -154,6 +154,29 @@ protected:
         return RdbHelper::GetRdbStore(config, 1, callback, errCode);
     }
 
+    // Two-phase open for configs that cover the executeSql family: the
+    // injector is created before the base Init, so a fresh open would hit
+    // OnCreate's table DDL and fail the open. The table is created by a
+    // clean first open, then the cache is dropped (the file stays), the
+    // config is written and the reopen skips the open callbacks (version
+    // match), leaving the budget intact for the assertions.
+    std::shared_ptr<RdbStore> ReopenMockStoreWithConfig(const std::string &content, int &errCode)
+    {
+        RemoveConfig();
+        RdbHelper::ClearCache();
+        RdbHelper::DeleteRdbStore(RDB_TEST_PATH + MOCK_STORE_DB);
+        RdbStoreConfig config(RDB_TEST_PATH + MOCK_STORE_DB);
+        MockInjectOpenCallback callback;
+        errCode = E_ERROR;
+        if (RdbHelper::GetRdbStore(config, 1, callback, errCode) == nullptr) {
+            return nullptr;
+        }
+        RdbHelper::ClearCache();
+        WriteConfig(content);
+        errCode = E_ERROR;
+        return RdbHelper::GetRdbStore(config, 1, callback, errCode);
+    }
+
     int QueryRowCount(const std::shared_ptr<RdbStore> &store)
     {
         auto resultSet = store->QuerySql("SELECT COUNT(*) AS cnt FROM mock_test");
@@ -490,10 +513,9 @@ HWTEST_F(RdbMockInjectTest, RdbFaultInject_UpdateDeleteInterface_016, TestSize.L
  */
 HWTEST_F(RdbMockInjectTest, RdbFaultInject_QueryExecuteInterface_017, TestSize.Level1)
 {
-    WriteConfig(R"({"databases": {"mock_inject_store.db": {"operations": {
-        "query": {"count": 1}, "executeSql": {"count": 1}}}}})");
     int errCode = E_ERROR;
-    auto store = OpenMockStore(errCode);
+    auto store = ReopenMockStoreWithConfig(R"({"databases": {"mock_inject_store.db": {"operations": {
+        "query": {"count": 1}, "executeSql": {"count": 1}}}}})", errCode);
     ASSERT_NE(store, nullptr);
     ValuesBucket bucket;
     bucket.PutString("name", "alice");

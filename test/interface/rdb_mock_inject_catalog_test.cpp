@@ -110,6 +110,29 @@ protected:
         int errCode = E_ERROR;
         return RdbHelper::GetRdbStore(config, 1, callback, errCode);
     }
+
+    // Two-phase open for configs that cover the executeSql family: the
+    // injector is created before the base Init, so a fresh open would hit
+    // OnCreate's table DDL and fail the open. The table is created by a
+    // clean first open, then the cache is dropped (the file stays), the
+    // config is written and the reopen skips the open callbacks (version
+    // match), leaving the budget intact for the assertions.
+    std::shared_ptr<RdbStore> ReopenCatalogStoreWithConfig(const std::string &content)
+    {
+        RemoveCatalogConfig();
+        RdbHelper::ClearCache();
+        RdbHelper::DeleteRdbStore(RDB_TEST_PATH + CATALOG_DB);
+        RdbStoreConfig config(RDB_TEST_PATH + CATALOG_DB);
+        CatalogOpenCallback callback;
+        int errCode = E_ERROR;
+        if (RdbHelper::GetRdbStore(config, 1, callback, errCode) == nullptr) {
+            return nullptr;
+        }
+        RdbHelper::ClearCache();
+        WriteCatalogConfig(content);
+        errCode = E_ERROR;
+        return RdbHelper::GetRdbStore(config, 1, callback, errCode);
+    }
 };
 
 /**
@@ -255,8 +278,8 @@ HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_QueryOverloads_004, TestSize.L
  */
 HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_ExecuteOverloads_005, TestSize.Level2)
 {
-    WriteCatalogConfig(R"({"databases": {"mock_inject_catalog.db": {"operations": {"executeSql": {"count": 99}}}}})");
-    auto store = OpenCatalogStore();
+    auto store = ReopenCatalogStoreWithConfig(
+        R"({"databases": {"mock_inject_catalog.db": {"operations": {"executeSql": {"count": 99}}}}})");
     ASSERT_NE(store, nullptr);
 
     RdbStore::Values values;
@@ -313,10 +336,9 @@ HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_TransactionOverloads_006, Test
  */
 HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_TransactionCrudOverloads_007, TestSize.Level2)
 {
-    WriteCatalogConfig(R"({"databases": {"mock_inject_catalog.db": {"operations": {
+    auto store = ReopenCatalogStoreWithConfig(R"({"databases": {"mock_inject_catalog.db": {"operations": {
         "insert": {"count": 99}, "update": {"count": 99}, "delete": {"count": 99},
         "query": {"count": 99}, "executeSql": {"count": 99}}}}})");
-    auto store = OpenCatalogStore();
     ASSERT_NE(store, nullptr);
 
     // The transaction family is not configured, so the transaction itself
@@ -557,8 +579,8 @@ HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_StoreQueryByStepPredicatesInje
  */
 HWTEST_F(RdbMockInjectCatalogTest, RdbFaultInject_StoreExecuteForLastInsertedRowIdInjection_013, TestSize.Level1)
 {
-    WriteCatalogConfig(R"({"databases": {"mock_inject_catalog.db": {"operations": {"executeSql": {"count": 99}}}}})");
-    auto store = OpenCatalogStore();
+    auto store = ReopenCatalogStoreWithConfig(
+        R"({"databases": {"mock_inject_catalog.db": {"operations": {"executeSql": {"count": 99}}}}})");
     ASSERT_NE(store, nullptr);
 
     int64_t outRowId = 0;

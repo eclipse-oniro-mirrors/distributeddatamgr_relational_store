@@ -86,20 +86,21 @@ public:
         bool isSilentAccessible = false) override;
 
 private:
-    // Injection verdict for a hooked sink: applies only after the open
-    // (Init) completed, so OnCreate/OnUpgrade callbacks and internal
-    // statements never consume the budget.
+    // Injection verdict for a hooked sink: the injector is created before
+    // the base Init, so operations issued from the OnCreate/OnUpgrade
+    // callbacks are covered by the budget as well.
     bool ShouldInject(RdbFaultOp op, const std::string &methodName) const;
 
     std::pair<int32_t, std::shared_ptr<Transaction>> CreateTransactionObj(
         int32_t type, std::shared_ptr<Connection> conn) override;
 
     std::string dbPath_;
-    // Per-store injector: created in Init (after the base Init succeeds,
-    // outside the manager lock) so the config file read never happens inside a
-    // critical section. Passed to the transaction and result-set decorators
-    // this store creates, so the budget state is shared by everything
-    // serving the database. Holder plus reference, following the
+    // Per-store injector: created at the start of Init (outside the manager
+    // lock) so the config file read never happens inside a critical section,
+    // and ready before the open callbacks run. Passed to the transaction and
+    // result-set decorators this store creates, so the budget state is shared
+    // by everything serving the database. Holder plus reference, following
+    // the
     // configHolder_/config_ convention in rdb_store_impl.h.
     std::shared_ptr<RdbFaultInjector> injectorHolder_;
     RdbFaultInjector *injector_ = nullptr;
