@@ -42,14 +42,17 @@ RdbStoreDecorator::RdbStoreDecorator(const RdbStoreConfig &config) : RdbStoreImp
 int32_t RdbStoreDecorator::Init(int version, RdbOpenCallback &openCallback, bool isNeedSetAcl,
     bool isSilentAccessible)
 {
-    int32_t errCode = RdbStoreImpl::Init(version, openCallback, isNeedSetAcl, isSilentAccessible);
-    if (errCode == E_OK) {
-        // Read the injection config after the base Init succeeds, outside the
-        // manager's critical section (the constructor runs inside its lock).
-        injectorHolder_ = std::make_shared<RdbFaultInjector>(dbPath_);
-        injector_ = injectorHolder_.get();
-    }
-    return errCode;
+    // Create the injector before the base Init: the transaction and
+    // result-set decorators bind the holder by reference at construction
+    // (innerHolder_/inner_ convention), so the holder must already be
+    // non-null when the OnCreate/OnUpgrade callbacks run - a callback may
+    // create a transaction or query on its own store, and their operations
+    // are part of the injection budget too. Init still runs outside the
+    // manager's critical section (GetStoreFromCache's lock has been
+    // released by then).
+    injectorHolder_ = std::make_shared<RdbFaultInjector>(dbPath_);
+    injector_ = injectorHolder_.get();
+    return RdbStoreImpl::Init(version, openCallback, isNeedSetAcl, isSilentAccessible);
 }
 
 bool RdbStoreDecorator::ShouldInject(RdbFaultOp op, const std::string &methodName) const
