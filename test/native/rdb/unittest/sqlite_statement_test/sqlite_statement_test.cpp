@@ -170,7 +170,8 @@ HWTEST_F(RdbSqliteStatementTest, SqliteStatement003, TestSize.Level0)
 
 /**
  * @tc.name: S_ErrMsg_001
- * @tc.desc: Verify SqliteStatement GetLastErrorMsg returns "not an error" when no error occurred.
+ * @tc.desc: Verify SqliteStatement GetLastErrorMsg returns empty when no error occurred
+ *           (sqlite3_errcode == SQLITE_OK must not leak the "not an error" artifact).
  * @tc.type: FUNC
  */
 HWTEST_F(RdbSqliteStatementTest, S_ErrMsg_001, TestSize.Level0)
@@ -189,10 +190,10 @@ HWTEST_F(RdbSqliteStatementTest, S_ErrMsg_001, TestSize.Level0)
     ASSERT_EQ(stmtErr, E_OK);
     ASSERT_NE(statement, nullptr);
 
-    // GetLastErrorMsg delegates to sqlite3_errmsg which returns "not an error"
+    // No error occurred: errcode stays SQLITE_OK and GetLastErrorMsg returns empty
+    // instead of the sqlite3_errmsg "not an error" artifact.
     std::string result = statement->GetLastErrorMsg();
-    EXPECT_FALSE(result.empty());
-    EXPECT_NE(result.find("not an error"), std::string::npos);
+    EXPECT_TRUE(result.empty());
 
     conn = nullptr;
     RdbHelper::DeleteRdbStore(dbPath);
@@ -300,6 +301,114 @@ HWTEST_F(RdbSqliteStatementTest, S_ErrMsg_004, TestSize.Level0)
     std::string result = statement->GetLastErrorMsg();
     EXPECT_FALSE(result.empty());
     EXPECT_NE(result.find("already exists"), std::string::npos);
+
+    conn = nullptr;
+    RdbHelper::DeleteRdbStore(dbPath);
+}
+
+/**
+ * @tc.name: S_ErrMsg_005
+ * @tc.desc: Verify SetErrorMsg takes priority in GetLastErrorMsg and the message is
+ *           consumed read-once (the second read returns empty).
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbSqliteStatementTest, S_ErrMsg_005, TestSize.Level0)
+{
+    const std::string dbPath = RDB_TEST_PATH + "S_ErrMsg_005.db";
+    RdbHelper::DeleteRdbStore(dbPath);
+    SqliteGlobalConfig::InitSqliteGlobalConfig();
+    RdbStoreConfig config(dbPath);
+    config.SetDBType(OHOS::NativeRdb::DBType::DB_SQLITE);
+    auto [errCode, conn] = Connection::Create(config, true);
+    ASSERT_EQ(errCode, E_OK);
+    ASSERT_NE(conn, nullptr);
+
+    auto [stmtErr, statement] = conn->CreateStatement("CREATE TABLE IF NOT EXISTS test(id INTEGER)", conn);
+    ASSERT_EQ(stmtErr, E_OK);
+    ASSERT_NE(statement, nullptr);
+
+    // A semantic message takes priority over the sqlite3_errmsg source
+    auto sqliteStatement = std::static_pointer_cast<SqliteStatement>(statement);
+    sqliteStatement->SetErrorMsg("semantic message");
+    EXPECT_EQ(statement->GetLastErrorMsg(), "semantic message");
+    // Read-once consume semantics: the second read is empty
+    EXPECT_TRUE(statement->GetLastErrorMsg().empty());
+
+    conn = nullptr;
+    RdbHelper::DeleteRdbStore(dbPath);
+}
+
+/**
+ * @tc.name: S_ErrMsg_006
+ * @tc.desc: Verify Bind clears a residual message at entry so a stale message from a
+ *           previous round cannot shadow the current one.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbSqliteStatementTest, S_ErrMsg_006, TestSize.Level0)
+{
+    const std::string dbPath = RDB_TEST_PATH + "S_ErrMsg_006.db";
+    RdbHelper::DeleteRdbStore(dbPath);
+    SqliteGlobalConfig::InitSqliteGlobalConfig();
+    RdbStoreConfig config(dbPath);
+    config.SetDBType(OHOS::NativeRdb::DBType::DB_SQLITE);
+    auto [errCode, conn] = Connection::Create(config, true);
+    ASSERT_EQ(errCode, E_OK);
+    ASSERT_NE(conn, nullptr);
+
+    auto [crtErr, crtStmt] = conn->CreateStatement("CREATE TABLE IF NOT EXISTS test(id INTEGER)", conn);
+    ASSERT_EQ(crtErr, E_OK);
+    ASSERT_NE(crtStmt, nullptr);
+    ASSERT_EQ(crtStmt->Execute(), E_OK);
+
+    auto [stmtErr, statement] = conn->CreateStatement("INSERT INTO test(id) VALUES(?)", conn);
+    ASSERT_EQ(stmtErr, E_OK);
+    ASSERT_NE(statement, nullptr);
+
+    // Simulate a residual message from a previous round
+    auto sqliteStatement = std::static_pointer_cast<SqliteStatement>(statement);
+    sqliteStatement->SetErrorMsg("residual message");
+    // A new binding round starts: the entry clear drops the residual
+    std::vector<ValueObject> args = { ValueObject(1) };
+    EXPECT_EQ(statement->Bind(args), E_OK);
+    EXPECT_TRUE(statement->GetLastErrorMsg().empty());
+
+    conn = nullptr;
+    RdbHelper::DeleteRdbStore(dbPath);
+}
+
+/**
+ * @tc.name: S_ErrMsg_007
+ * @tc.desc: Verify Execute clears a residual message at entry so a stale message from
+ *           a previous round cannot shadow the current one.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbSqliteStatementTest, S_ErrMsg_007, TestSize.Level0)
+{
+    const std::string dbPath = RDB_TEST_PATH + "S_ErrMsg_007.db";
+    RdbHelper::DeleteRdbStore(dbPath);
+    SqliteGlobalConfig::InitSqliteGlobalConfig();
+    RdbStoreConfig config(dbPath);
+    config.SetDBType(OHOS::NativeRdb::DBType::DB_SQLITE);
+    auto [errCode, conn] = Connection::Create(config, true);
+    ASSERT_EQ(errCode, E_OK);
+    ASSERT_NE(conn, nullptr);
+
+    auto [crtErr, crtStmt] = conn->CreateStatement("CREATE TABLE IF NOT EXISTS test(id INTEGER)", conn);
+    ASSERT_EQ(crtErr, E_OK);
+    ASSERT_NE(crtStmt, nullptr);
+    ASSERT_EQ(crtStmt->Execute(), E_OK);
+
+    auto [stmtErr, statement] = conn->CreateStatement("INSERT INTO test(id) VALUES(?)", conn);
+    ASSERT_EQ(stmtErr, E_OK);
+    ASSERT_NE(statement, nullptr);
+
+    // Simulate a residual message from a previous round
+    auto sqliteStatement = std::static_pointer_cast<SqliteStatement>(statement);
+    sqliteStatement->SetErrorMsg("residual message");
+    // A new execute round starts: the entry clear drops the residual
+    std::vector<ValueObject> args = { ValueObject(1) };
+    EXPECT_EQ(statement->Execute(args), E_OK);
+    EXPECT_TRUE(statement->GetLastErrorMsg().empty());
 
     conn = nullptr;
     RdbHelper::DeleteRdbStore(dbPath);

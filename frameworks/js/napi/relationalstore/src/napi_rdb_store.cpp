@@ -733,9 +733,13 @@ napi_value RdbStoreProxy::Backup(napi_env env, napi_callback_info info)
     };
     auto exec = [context]() -> int {
         CHECK_RETURN_ERR(context->rdbStore != nullptr);
-        auto res = context->StealRdbStore()->Backup(context->tableName, context->newKey);
+        auto rdbStore = context->StealRdbStore();
+        auto res = rdbStore->Backup(context->tableName, context->newKey);
         if (res == E_DB_NOT_EXIST) {
             return E_OK;
+        }
+        if (res != E_OK) {
+            context->errorMsg_ = rdbStore->GetLastErrorMsg();
         }
         return res;
     };
@@ -795,9 +799,13 @@ napi_value RdbStoreProxy::Attach(napi_env env, napi_callback_info info)
     };
     auto exec = [context]() -> int {
         CHECK_RETURN_ERR(context->rdbStore != nullptr);
-        auto res = context->StealRdbStore()->Attach(
+        auto rdbStore = context->StealRdbStore();
+        auto res = rdbStore->Attach(
             GetRdbStoreConfig(context->config, context->param), context->attachName, context->waitTime);
         context->attachedNum = res.second;
+        if (res.first != E_OK) {
+            context->errorMsg_ = rdbStore->GetLastErrorMsg();
+        }
         return res.first;
     };
     auto output = [context](napi_env env, napi_value &result) {
@@ -911,8 +919,15 @@ napi_value RdbStoreProxy::RollBack(napi_env env, napi_callback_info info)
     RDB_NAPI_ASSERT(
         env, rdbStoreProxy->GetInstance() != nullptr, std::make_shared<InnerError>(NativeRdb::E_ALREADY_CLOSED));
     int errCode = rdbStoreProxy->GetInstance()->RollBack();
-    RDB_NAPI_ASSERT(
-        env, errCode == E_OK, std::make_shared<InnerError>(errCode, rdbStoreProxy->GetInstance()->GetLastErrorMsg()));
+    // Cache the message before the assert macro: the macro expands its error
+    // argument multiple times and GetLastErrorMsg() consumes the stored value
+    // on each read (move-on-return), so an inline call would be drained by the
+    // first (null-check) evaluation.
+    std::string errMsg;
+    if (errCode != E_OK) {
+        errMsg = rdbStoreProxy->GetInstance()->GetLastErrorMsg();
+    }
+    RDB_NAPI_ASSERT(env, errCode == E_OK, std::make_shared<InnerError>(errCode, errMsg));
     LOG_DEBUG("RdbStoreProxy::RollBack end, errCode is:%{public}d", errCode);
     return nullptr;
 }
@@ -1654,8 +1669,13 @@ napi_value RdbStoreProxy::SetDistributedTables(napi_env env, napi_callback_info 
     };
     auto exec = [context]() -> int {
         CHECK_RETURN_ERR(context->rdbStore != nullptr);
-        return context->StealRdbStore()->SetDistributedTables(
+        auto rdbStore = context->StealRdbStore();
+        auto code = rdbStore->SetDistributedTables(
             context->tablesNames, context->distributedType, context->distributedConfig);
+        if (code != E_OK) {
+            context->errorMsg_ = rdbStore->GetLastErrorMsg();
+        }
+        return code;
     };
     auto output = [context](napi_env env, napi_value &result) {
         napi_status status = napi_get_undefined(env, &result);
@@ -1834,6 +1854,24 @@ napi_value RdbStoreProxy::ObtainDistributedTableName(napi_env env, napi_callback
     return ASYNC_CALL(env, context);
 }
 
+AppDataMgrJsKit::UvQueue::Args RdbStoreProxy::MakeSyncErrorCallback(
+    const std::shared_ptr<NativeRdb::RdbStore> &rdbStore, int ret)
+{
+    auto errMsg = rdbStore->GetLastErrorMsg();
+    return [ret, errMsg](napi_env env, int &argc, napi_value *argv) mutable {
+        SetBusinessError(env, std::make_shared<InnerError>(ret, errMsg), &argv[0]);
+    };
+}
+
+AppDataMgrJsKit::UvQueue::Args RdbStoreProxy::MakeSyncErrorCallbackExt(
+    const std::shared_ptr<NativeRdb::RdbStore> &rdbStore, int ret)
+{
+    auto errMsg = rdbStore->GetLastErrorMsg();
+    return [ret, errMsg](napi_env env, int &argc, napi_value *argv) mutable {
+        SetBusinessError(env, std::make_shared<InnerErrorExt>(ret, errMsg), &argv[0]);
+    };
+}
+
 napi_value RdbStoreProxy::Sync(napi_env env, napi_callback_info info)
 {
     auto context = std::make_shared<RdbStoreContext>();
@@ -1874,9 +1912,7 @@ napi_value RdbStoreProxy::Sync(napi_env env, napi_callback_info info)
                      : queue->AsyncPromise({ defer }, args, "DistributedSync::OnComplete");
         });
         if (ret != NativeRdb::E_OK) {
-            auto args = [ret](napi_env env, int &argc, napi_value *argv) mutable {
-                SetBusinessError(env, std::make_shared<InnerError>(ret), &argv[0]);
-            };
+            auto args = MakeSyncErrorCallback(rdbStore, ret);
             callback ? queue->AsyncCall({ callback }, args, {}, "DistributedSync::OnError")
                      : queue->AsyncPromise({ defer }, args, "DistributedSync::OnError");
         }
@@ -1961,9 +1997,7 @@ napi_value RdbStoreProxy::SyncEx(napi_env env, napi_callback_info info)
         SyncOption option{ static_cast<DistributedRdb::SyncMode>(enumArg), false, true };
         auto ret = rdbStore->SyncEx(option, predicates, syncCallback);
         if (ret != NativeRdb::E_OK) {
-            auto args = [ret](napi_env env, int &argc, napi_value *argv) mutable {
-                SetBusinessError(env, std::make_shared<InnerErrorExt>(ret), &argv[0]);
-            };
+            auto args = MakeSyncErrorCallbackExt(rdbStore, ret);
             callback ? queue->AsyncCall({ callback }, args, {}, "DistributedSync::OnErrorEx")
                      : queue->AsyncPromise({ defer }, args, "DistributedSync::OnErrorEx");
         }
@@ -2469,10 +2503,12 @@ napi_value RdbStoreProxy::CreateTransaction(napi_env env, napi_callback_info inf
     auto exec = [context]() -> int {
         CHECK_RETURN_ERR(context->rdbStore != nullptr);
         int32_t code = E_ERROR;
-        std::tie(code, context->transaction) =
-            context->StealRdbStore()->CreateTransaction(context->transactionOptions.transactionType);
+        auto rdbStore = context->StealRdbStore();
+        std::tie(code, context->transaction) = rdbStore->CreateTransaction(context->transactionOptions.transactionType);
         if (code != E_OK) {
             context->transaction = nullptr;
+            // Keep the native error context (e.g. the failing database name, AC-5.2) in the message.
+            context->errorMsg_ = rdbStore->GetLastErrorMsg();
             return code;
         }
         return context->transaction != nullptr ? OK : E_ERROR;

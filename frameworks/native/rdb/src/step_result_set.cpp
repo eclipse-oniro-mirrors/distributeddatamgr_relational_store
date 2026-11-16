@@ -241,6 +241,7 @@ int StepResultSet::GoToNextRow()
         // The table is locked, retry
         if (retryCount > STEP_QUERY_RETRY_MAX_TIMES) {
             LOG_ERROR("Step in busy ret is %{public}d", errCode);
+            SetLastErrorMsg("Step query exceeded max retry times for busy or locked table");
             return E_STEP_RESULT_QUERY_EXCEEDED;
         } else {
             // Sleep to give the thread holding the lock a chance to finish

@@ -113,6 +113,14 @@ private:
     static napi_value DeleteWithReturning(napi_env env, napi_callback_info info);
 
     static void SetBusinessError(napi_env env, std::shared_ptr<Error> error, napi_value *businessError);
+    // Snapshot the store's last error message on the worker thread right after a
+    // failed sync call (read-once) and build the JS-thread rejection callback.
+    // The message must be captured at exec time: reading it later on the JS
+    // thread races with other operations setting or consuming the message.
+    static AppDataMgrJsKit::UvQueue::Args MakeSyncErrorCallback(
+        const std::shared_ptr<NativeRdb::RdbStore> &rdbStore, int ret);
+    static AppDataMgrJsKit::UvQueue::Args MakeSyncErrorCallbackExt(
+        const std::shared_ptr<NativeRdb::RdbStore> &rdbStore, int ret);
     static void UnregisterAll(
         std::shared_ptr<NativeRdb::RdbStore> rdbStore, std::shared_ptr<NapiRdbStoreData> napiRdbStoreData);
     std::shared_ptr<NapiRdbStoreData> StealNapiRdbStoreData();

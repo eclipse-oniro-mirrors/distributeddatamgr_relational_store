@@ -64,6 +64,12 @@ public:
     int ModifyLockStatus(
         const std::string &table, const std::vector<std::vector<uint8_t>> &hashKeys, bool isLock) override;
     std::string GetLastErrorMsg() const override;
+    // Set a semantic error message that GetLastErrorMsg reports with priority
+    // over sqlite3_errmsg; callers copy it into the store's last error message.
+    void SetErrorMsg(const std::string &msg) const
+    {
+        lastErrMsg_ = msg;
+    }
 
 private:
     friend class SqliteConnection;
@@ -117,6 +123,7 @@ private:
     sqlite3_stmt *stmt_;
     std::shared_ptr<Connection> conn_;
     std::string sql_;
+    mutable std::string lastErrMsg_;
     mutable std::vector<int32_t> types_;
     std::shared_ptr<Statement> slave_;
     const RdbStoreConfig *config_ = nullptr;

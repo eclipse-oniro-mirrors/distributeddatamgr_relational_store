@@ -162,6 +162,7 @@ int SqliteSharedResultSet::OnGo(int oldPosition, int newPosition)
     }
     auto sharedBlock = GetBlock();
     if (sharedBlock == nullptr) {
+        SetLastErrorMsg("Failed to go to row: shared block is null");
         return E_ERROR;
     }
 
@@ -200,6 +201,7 @@ int SqliteSharedResultSet::FillBlock(int requiredPos)
     auto block = GetBlock();
     if (block == nullptr) {
         LOG_ERROR("FillSharedBlock GetBlock failed.");
+        SetLastErrorMsg("Failed to fill shared block: shared block is null");
         return E_ERROR;
     }
     ClearBlock();
@@ -252,6 +254,7 @@ int32_t SqliteSharedResultSet::ExecuteForSharedBlock(AppDataFwk::SharedBlock *bl
     auto code = block->Clear();
     if (code != AppDataFwk::SharedBlock::SHARED_BLOCK_OK) {
         LOG_ERROR("Clear %{public}d.", code);
+        SetLastErrorMsg("Failed to execute for shared block: clear failed");
         return E_ERROR;
     }
 
@@ -263,6 +266,7 @@ int32_t SqliteSharedResultSet::ExecuteForSharedBlock(AppDataFwk::SharedBlock *bl
     code = block->SetColumnNum(blockInfo.columnNum);
     if (code != AppDataFwk::SharedBlock::SHARED_BLOCK_OK) {
         LOG_ERROR("SetColumnNum %{public}d.", code);
+        SetLastErrorMsg("Failed to execute for shared block: set column num failed");
         return E_ERROR;
     }
     std::lock_guard<decltype(globalMtx_)> lockGuard(globalMtx_);

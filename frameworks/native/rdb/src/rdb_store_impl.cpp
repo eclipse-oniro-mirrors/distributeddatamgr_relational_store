@@ -353,6 +353,9 @@ std::pair<int32_t, std::shared_ptr<Connection>> RdbStoreImpl::GetConn(bool isRea
     }
     auto connection = pool->AcquireConnection(isRead);
     if (connection == nullptr) {
+        // Keep the failing database identifiable in the 14800015 message
+        // (AC-5.2/BR-5: name only, no absolute path).
+        SetLastErrorMsg("database busy, dbName: " + name_);
         return { E_DATABASE_BUSY, nullptr };
     }
     return { E_OK, connection };
@@ -602,6 +605,7 @@ int RdbStoreImpl::CleanDirtyData(const std::string &table, uint64_t cursor)
     }
     if (table.empty()) {
         LOG_ERROR("table is empty");
+        SetLastErrorMsg("Invalid args: table is empty for clean dirty data");
         return E_INVALID_ARGS;
     }
     errCode = conn->CleanDirtyData(table, cursor);
@@ -617,6 +621,7 @@ int RdbStoreImpl::CleanDeviceDirtyData(const std::string &table, uint64_t cursor
     }
     if (table.empty()) {
         LOG_ERROR("table is empty");
+        SetLastErrorMsg("Invalid args: table is empty for clean device dirty data");
         return E_INVALID_ARGS;
     }
     auto [errCode, conn] = GetConn(false);
@@ -731,6 +736,7 @@ int RdbStoreImpl::SetDistributedTables(
         return E_NOT_SUPPORT;
     }
     if (IsInvalidDistributedConfig(distributedConfig)) {
+        SetLastErrorMsg("Invalid args: distributed config is invalid");
         return E_INVALID_ARGS;
     }
     isNeedSetAcl_ = true;
@@ -775,6 +781,7 @@ int RdbStoreImpl::RetainDeviceData(const std::map<std::string, std::vector<std::
     }
     for (auto &[table, devices] : retainDevices) {
         if (table.empty()) {
+            SetLastErrorMsg("Invalid args: table is empty for retain device data");
             return E_INVALID_ARGS;
         }
         if (devices.empty()) {
@@ -782,6 +789,7 @@ int RdbStoreImpl::RetainDeviceData(const std::map<std::string, std::vector<std::
         }
         for (auto &device : devices) {
             if (device.empty()) {
+                SetLastErrorMsg("Invalid args: device is empty for retain device data");
                 return E_INVALID_ARGS;
             }
         }
@@ -815,6 +823,7 @@ std::pair<int32_t, std::vector<std::string>> RdbStoreImpl::ConvertToUuids(const 
         return { SqliteUtils::ConvertRdbStatusNative(errorCode), {} };
     }
     if (uuids.empty() || uuids.size() != devices.size()) {
+        SetLastErrorMsg("Invalid args: uuids do not match devices for primary replica info");
         return { E_INVALID_ARGS, {} };
     }
     return { E_OK, uuids };
@@ -827,11 +836,13 @@ std::pair<int32_t, int32_t> RdbStoreImpl::UpdateDistributedInfo(
         return { E_NOT_SUPPORT_NEW, -1 };
     }
     if (distributedInfo.flag.has_value() && distributedInfo.flag == DistributedOrigin::BUTT) {
+        SetLastErrorMsg("Invalid args: distributed origin flag is BUTT");
         return { E_INVALID_ARGS, -1 };
     }
     std::string table = predicates.GetTableName();
     std::string logTable = GetLogTableName(predicates.GetTableName());
     if (table.empty() || logTable.empty()) {
+        SetLastErrorMsg("Invalid args: table is empty for update distributed info");
         return { E_INVALID_ARGS, -1 };
     }
     std::vector<ValueObject> args;
@@ -896,6 +907,9 @@ int32_t RdbStoreImpl::Rekey(const RdbStoreConfig::CryptoParam &cryptoParam)
     LOG_INFO("Start rekey, name:%{public}s, IsCustomEncrypt:%{public}d. ",
         SqliteUtils::Anonymous(config_.GetName()).c_str(), config_.IsCustomEncryptParam());
     auto errCode = pool->Rekey(cryptoParam);
+    if (errCode != E_OK) {
+        SetLastErrorMsg("Failed to rekey the database");
+    }
 
     if (service != nullptr) {
         service->Enable(syncerParam_);
@@ -938,6 +952,7 @@ int32_t RdbStoreImpl::RekeyEx(const RdbStoreConfig::CryptoParam &cryptoParam)
     bool isHasAcl = SqliteUtils::HasAccessAcl(config_.GetPath(), SERVICE_GID);
     auto errCode = Connection::RekeyEx(config_, rekeyCryptoParam);
     if (errCode != E_OK) {
+        SetLastErrorMsg("Failed to rekey the database");
         pool->ReopenConns();
         return errCode;
     }
@@ -1043,6 +1058,7 @@ int RdbStoreImpl::SyncEx(const SyncOption &option, const AbsRdbPredicates &predi
         return E_SYNC_PERMISSION_DENIED;
     }
     if (errorCode == RdbStatus::RDB_INVALID_ARGS) {
+        SetLastErrorMsg("Invalid args: sync parameters are invalid");
         return E_INVALID_ARGS;
     }
     return errorCode;
@@ -1068,6 +1084,9 @@ int RdbStoreImpl::Sync(const SyncOption &option, const AbsRdbPredicates &predica
     rdbOption.isFullSync = option.isFullSync;
     RdbRadar ret(Scene::SCENE_SYNC, __FUNCTION__, config_.GetBundleName());
     ret = InnerSync(syncerParam_, rdbOption, predicate.GetDistributedPredicates(), async);
+    if (ret != E_OK && ret != RdbStatus::RDB_NO_SYNC_PERMISSION) {
+        SetLastErrorMsg("Failed to sync the database");
+    }
     return ret;
 }
 
@@ -1481,6 +1500,7 @@ int RdbStoreImpl::GetHashKeyForLockRow(const AbsRdbPredicates &predicates, std::
     while (result->GoToNextRow() == E_OK) {
         std::vector<uint8_t> hashKey;
         if (result->GetBlob(0, hashKey) != E_OK) {
+            SetLastErrorMsg("Failed to get blob from hash key");
             return E_ERROR;
         }
         hashKeys.push_back(std::move(hashKey));
@@ -1775,6 +1795,25 @@ void RdbStoreImpl::SetLastErrorMsg(const std::string &msg) const
     lastErrMsg_ = msg;
 }
 
+void RdbStoreImpl::SetLastErrorContext(const std::string &table) const
+{
+    std::string context;
+    if (!name_.empty()) {
+        context += "database: " + name_;
+    }
+    if (!table.empty()) {
+        if (!context.empty()) {
+            context += " ";
+        }
+        context += "table: " + table;
+    }
+    if (context.empty()) {
+        return;
+    }
+    std::string currentMsg = GetLastErrorMsg();
+    SetLastErrorMsg(currentMsg + (currentMsg.empty() ? "" : " ") + context);
+}
+
 const RdbStoreConfig &RdbStoreImpl::GetConfig()
 {
     return config_;
@@ -1797,6 +1836,8 @@ std::pair<int, int64_t> RdbStoreImpl::Insert(
     }
     if (errCode == E_OK) {
         DoCloudSync(table);
+    } else {
+        SetLastErrorContext(table);
     }
     return { errCode, rowid };
 }
@@ -1821,11 +1862,13 @@ std::pair<int, int64_t> RdbStoreImpl::BatchInsert(const std::string &table, cons
     auto executeSqlArgs = SqliteSqlBuilder::GenerateSqls(table, rows, conn->GetMaxVariable());
     BatchInsertArgsDfx(static_cast<int>(executeSqlArgs.size()));
     if (executeSqlArgs.empty()) {
+        SetLastErrorMsg("Invalid args: no sqls generated for batch insert");
         return { E_INVALID_ARGS, -1 };
     }
     PauseDelayNotify pauseDelayNotify(GetDelayNotifier());
     auto [errCode, result] = ExecuteBatchInsert(pool, conn, executeSqlArgs, table);
     if (result == -1) {
+        SetLastErrorContext(table);
         return { errCode, -1 };
     }
     conn = nullptr;
@@ -1874,6 +1917,7 @@ std::pair<int32_t, Results> RdbStoreImpl::BatchInsert(
         auto [fields, values] = rows.GetFieldsAndValues();
         LOG_ERROR("invalid! rows:%{public}zu, table:%{public}s, fields:%{public}zu, max:%{public}d.", rows.RowSize(),
             SqliteUtils::Anonymous(table).c_str(), fields != nullptr ? fields->size() : 0, conn->GetMaxVariable());
+        SetLastErrorMsg("Invalid args: batch insert returning args are invalid");
         return { E_INVALID_ARGS, -1 };
     }
     auto [errCode, result] = ExecuteBatchInsertReturning(sqlArgs, conn, config, cfg.resolution);
@@ -1931,6 +1975,8 @@ std::pair<int32_t, Results> RdbStoreImpl::Update(const Row &row, const AbsRdbPre
     auditLogger_.OnSqlAudit(config_.GetPath(), "UPDATE", predicates.GetTableName(), result.changed);
     if (result.changed > 0) {
         DoCloudSync(predicates.GetTableName());
+    } else if (code != E_OK) {
+        SetLastErrorContext(predicates.GetTableName());
     }
     return { code, result };
 }
@@ -1951,6 +1997,8 @@ std::pair<int32_t, Results> RdbStoreImpl::Delete(
     auditLogger_.OnSqlAudit(config_.GetPath(), "DELETE", predicates.GetTableName(), result.changed);
     if (result.changed > 0) {
         DoCloudSync(predicates.GetTableName());
+    } else if (code != E_OK) {
+        SetLastErrorContext(predicates.GetTableName());
     }
     return { code, result };
 }
@@ -2308,6 +2356,7 @@ std::pair<int32_t, Results> RdbStoreImpl::ExecuteForRow(
         return { E_NOT_SUPPORT, -1 };
     }
     if (!RdbSqlUtils::IsValidReturningMaxCount(config.maxReturningCount)) {
+        SetLastErrorMsg("Invalid args: returning max count is invalid");
         return { E_INVALID_ARGS, -1 };
     }
     SqlTimeoutGuard guard(timeoutMs);
@@ -2387,6 +2436,7 @@ int RdbStoreImpl::Backup(const std::string &databasePath, const std::vector<uint
     if (access(walFile.c_str(), F_OK) == E_OK) {
         if (!SqliteUtils::DeleteDirtyFiles(backupFilePath)) {
             keyFiles.Unlock();
+            SetLastErrorMsg("Failed to delete dirty backup files");
             return E_ERROR;
         }
     }
@@ -2398,6 +2448,7 @@ int RdbStoreImpl::Backup(const std::string &databasePath, const std::vector<uint
             LOG_ERROR("rename backup file failed, path:%{public}s, errno:%{public}d",
                 SqliteUtils::Anonymous(backupFilePath).c_str(), errno);
             keyFiles.Unlock();
+            SetLastErrorMsg("Failed to rename backup file");
             return E_ERROR;
         }
     }
@@ -2582,6 +2633,7 @@ int RdbStoreImpl::SetDefaultEncryptAlgo(const ConnectionPool::SharedConn &conn, 
 
     if (!config.GetCryptoParam().IsValid()) {
         LOG_ERROR("Invalid crypto param, name:%{public}s", SqliteUtils::Anonymous(config.GetName()).c_str());
+        SetLastErrorMsg("Invalid args: crypto param is invalid");
         return E_INVALID_ARGS;
     }
 
@@ -2898,6 +2950,7 @@ int RdbStoreImpl::RollBack()
 
     if (pool->GetTransactionStack().empty()) {
         LOG_ERROR("[%{public}zu, %{public}s]", id, SqliteUtils::Anonymous(name_).c_str());
+        SetLastErrorMsg("No transaction in session for rollback");
         return E_NO_TRANSACTION_IN_SESSION;
     }
     BaseTransaction transaction = pool->GetTransactionStack().top();
@@ -2943,11 +2996,13 @@ int RdbStoreImpl::ExecuteByTrxId(
         return E_NOT_SUPPORT;
     }
     if (trxId == 0) {
+        SetLastErrorMsg("Invalid args: transaction id is zero");
         return E_INVALID_ARGS;
     }
 
     if (!trxConnMap_.Contains(trxId)) {
         LOG_ERROR("trxId hasn't appeared before %{public}" PRIu64, trxId);
+        SetLastErrorMsg("Invalid args: transaction id not found");
         return E_INVALID_ARGS;
     }
     auto time = static_cast<uint64_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
@@ -2956,6 +3011,7 @@ int RdbStoreImpl::ExecuteByTrxId(
     if (connection == nullptr) {
         LOG_ERROR("Get null connection, storeName: %{public}s time:%{public}" PRIu64 ".",
             SqliteUtils::Anonymous(name_).c_str(), time);
+        SetLastErrorMsg("Failed to get connection for execute");
         return E_ERROR;
     }
     auto [ret, statement] = GetStatement(sql, connection);
@@ -2966,6 +3022,7 @@ int RdbStoreImpl::ExecuteByTrxId(
     if (ret != E_OK) {
         LOG_ERROR("transaction id: %{public}" PRIu64 ", storeName: %{public}s, errCode: %{public}d" PRIu64, trxId,
             SqliteUtils::Anonymous(name_).c_str(), ret);
+        SetLastErrorMsg(statement->GetLastErrorMsg());
         return ret;
     }
     if (closeConnAfterExecute) {
@@ -3292,6 +3349,7 @@ int RdbStoreImpl::StartAsyncRestore(std::shared_ptr<ConnectionPool> pool, const 
         if (taskPool == nullptr) {
             LOG_ERROR("Get thread pool failed");
             keyFilesPtr->Unlock();
+            SetLastErrorMsg("Failed to get thread pool for async restore");
             return E_ERROR;
         }
         bool isNeedSetAcl = isNeedSetAcl_ || SqliteUtils::HasAccessAcl(config_.GetPath(), SERVICE_GID);
@@ -3329,6 +3387,7 @@ int RdbStoreImpl::StartAsyncBackupIfNeed(std::shared_ptr<SlaveStatus> slaveStatu
     auto taskPool = TaskExecutor::GetInstance().GetExecutor();
     if (taskPool == nullptr) {
         LOG_ERROR("Get thread pool failed");
+        SetLastErrorMsg("Failed to get thread pool for async backup");
         return E_ERROR;
     }
     auto config = config_;
@@ -3363,6 +3422,9 @@ int RdbStoreImpl::RestoreInner(
         bool isNeedSetAcl = isNeedSetAcl_ || SqliteUtils::HasAccessAcl(config_.GetPath(), SERVICE_GID);
         auto err = pool->ChangeDbFileForRestore(path_, destPath, newKey, slaveStatus_, isForceRestore);
         LOG_INFO("restore finished, sync mode rc=%{public}d", err);
+        if (err != E_OK) {
+            SetLastErrorMsg("Failed to change db file for restore");
+        }
         if (isNeedSetAcl) {
             SetFileGid(config_, SERVICE_GID);
         }
@@ -3377,6 +3439,7 @@ int RdbStoreImpl::RestoreInner(
 
     int errCode = connection->CheckReplicaForRestore(isForceRestore);
     if (errCode != E_OK) {
+        SetLastErrorMsg("Failed to check replica for restore");
         return errCode;
     }
     errCode = StartAsyncRestore(pool, isForceRestore);
@@ -3534,6 +3597,7 @@ int RdbStoreImpl::InterruptBackup()
     }
     // If the backup has not started, do not interrupt it
     if (*slaveStatus_ != SlaveStatus::BACKING_UP) {
+        SetLastErrorMsg("Cancel: backup has not started, nothing to interrupt");
         return E_CANCEL;
     }
     auto pool = GetPool();
@@ -3691,6 +3755,9 @@ std::pair<int32_t, std::shared_ptr<Transaction>> RdbStoreImpl::CreateTransaction
     }
     auto [errCode, conn] = pool->CreateTransConn();
     if (conn == nullptr) {
+        // Keep the failing database identifiable in the 14800015 message
+        // (AC-5.2/BR-5: name only, no absolute path).
+        SetLastErrorMsg("database busy, dbName: " + name_);
         return { errCode, nullptr };
     }
     std::shared_ptr<Transaction> trans;
@@ -3736,6 +3803,7 @@ int RdbStoreImpl::ArchiveSyncedData(const std::string &table, uint64_t cursor)
     }
     if (table.empty()) {
         LOG_ERROR("table is empty");
+        SetLastErrorMsg("Invalid args: table is empty for archive synced data");
         return E_INVALID_ARGS;
     }
     auto [errCode, conn] = GetConn(false);
@@ -3755,6 +3823,7 @@ int RdbStoreImpl::DeleteSyncedData(const std::string &table, const std::vector<s
     }
     if (table.empty()) {
         LOG_ERROR("table is empty");
+        SetLastErrorMsg("Invalid args: table is empty for delete synced data");
         return E_INVALID_ARGS;
     }
     auto [errCode, conn] = GetConn(false);
@@ -3988,6 +4057,7 @@ std::pair<int, PrimaryAndReplicaInfo> RdbStoreImpl::GetPrimaryReplicaInfo(const 
     if (tableNames.size() > MAX_PRIMARY_REPLICA_INFO_TABLES) {
         LOG_ERROR("GetPrimaryReplicaInfo: tableNames size %{public}zu exceeds limit %{public}zu",
             tableNames.size(), MAX_PRIMARY_REPLICA_INFO_TABLES);
+        SetLastErrorMsg("Invalid args: table names exceed the limit for primary replica info");
         return { E_INVALID_ARGS, {} };
     }
     if (isReadOnly_ || isMemoryRdb_ || config_.GetDBType() == DB_VECTOR) {

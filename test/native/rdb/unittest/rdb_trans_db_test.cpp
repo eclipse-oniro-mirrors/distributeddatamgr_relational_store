@@ -1248,4 +1248,77 @@ HWTEST_F(RdbTransDBTest, TD_ErrMsg_004, TestSize.Level1)
     std::string errMsg = transDB_->GetLastErrorMsg();
     EXPECT_TRUE(errMsg.empty());
 }
+/* *
+ * @tc.name: TransDBErrMsg_001
+ * @tc.desc: Verify TransDB Insert with an empty table name sets the semantic message.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbTransDBTest, TransDBErrMsg_001, TestSize.Level1)
+{
+    ValuesBucket row = row_;
+    auto [errCode, rowId] = transDB_->Insert("", row);
+    EXPECT_EQ(errCode, E_INVALID_ARGS);
+    EXPECT_EQ(rowId, -1);
+    std::string msg = transDB_->GetLastErrorMsg();
+    EXPECT_NE(msg.find("Invalid args: table is empty or row is empty"), std::string::npos);
+}
+
+/* *
+ * @tc.name: TransDBErrMsg_002
+ * @tc.desc: Verify TransDB GetLastErrorMsg consumes the semantic message read-once
+ *           (a second read no longer contains the consumed text).
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbTransDBTest, TransDBErrMsg_002, TestSize.Level1)
+{
+    ValuesBucket row = row_;
+    auto [errCode, rowId] = transDB_->Insert("", row);
+    EXPECT_EQ(errCode, E_INVALID_ARGS);
+    std::string first = transDB_->GetLastErrorMsg();
+    EXPECT_NE(first.find("Invalid args: table is empty or row is empty"), std::string::npos);
+    // Read-once consume: the semantic text is gone from the second read (the
+    // second read falls back to the connection-level state).
+    std::string second = transDB_->GetLastErrorMsg();
+    EXPECT_EQ(second.find("Invalid args: table is empty or row is empty"), std::string::npos);
+}
+
+/* *
+ * @tc.name: TransDBErrMsg_003
+ * @tc.desc: Verify TransDB GetLastErrorMsg falls back to the connection message when
+ *           lastErrMsg_ is empty (no SetErrorMsg on the sqlite failure path).
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbTransDBTest, TransDBErrMsg_003, TestSize.Level1)
+{
+    std::vector<ValueObject> emptyArgs;
+    // Valid SQL type but the prepare fails on a non-existent table: no SetErrorMsg runs,
+    // the connection-level sqlite errmsg is surfaced instead.
+    auto [errCode, object] = transDB_->Execute("INSERT INTO no_such_table VALUES(1)");
+    EXPECT_EQ(errCode, E_SQLITE_ERROR);
+    std::string msg = transDB_->GetLastErrorMsg();
+    EXPECT_NE(msg.find("no such table"), std::string::npos);
+}
+
+/* *
+ * @tc.name: TransDBErrMsg_004
+ * @tc.desc: Verify a stale message from a failed operation does not shadow the real error
+ *           of a later operation (read-once consumption across sequential failures).
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbTransDBTest, TransDBErrMsg_004, TestSize.Level1)
+{
+    ValuesBucket row = row_;
+    // Operation A fails and its message is consumed by the first read
+    auto [errCode, rowId] = transDB_->Insert("", row);
+    EXPECT_EQ(errCode, E_INVALID_ARGS);
+    std::string msgA = transDB_->GetLastErrorMsg();
+    EXPECT_NE(msgA.find("Invalid args: table is empty or row is empty"), std::string::npos);
+    // Operation B fails with a different cause
+    auto [errCodeB, object] = transDB_->Execute("INSERT INTO no_such_table VALUES(1)");
+    EXPECT_EQ(errCodeB, E_SQLITE_ERROR);
+    std::string msgB = transDB_->GetLastErrorMsg();
+    EXPECT_NE(msgB.find("no such table"), std::string::npos);
+    EXPECT_EQ(msgB.find("Invalid args: table is empty or row is empty"), std::string::npos);
+}
+
 } // namespace Test

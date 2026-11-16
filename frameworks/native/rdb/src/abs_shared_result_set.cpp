@@ -87,6 +87,7 @@ int AbsSharedResultSet::GetColumnType(int columnIndex, ColumnType &columnType)
     SharedBlock::CellUnit *cellUnit = block->GetCellUnit(block->GetBlockPos(), (uint32_t)columnIndex);
     if (!cellUnit) {
         LOG_ERROR("AbsSharedResultSet::GetColumnType cellUnit is null!");
+        SetLastErrorMsg("Failed to get column type: cell unit is null");
         return E_ERROR;
     }
     columnType = (ColumnType)cellUnit->type;
@@ -154,6 +155,7 @@ int AbsSharedResultSet::Get(int32_t col, ValueObject &value)
     auto *cellUnit = block->GetCellUnit(block->GetBlockPos(), col);
     if (cellUnit == nullptr) {
         LOG_ERROR("cellUnit is null, col is %{public}d!", col);
+        SetLastErrorMsg("Failed to get value from result set: cell unit is null");
         return E_ERROR;
     }
     switch (cellUnit->type) {
@@ -189,6 +191,7 @@ int AbsSharedResultSet::GetSize(int columnIndex, size_t &size)
     auto *cellUnit = block->GetCellUnit(GetBlock()->GetBlockPos(), columnIndex);
     if (cellUnit == nullptr) {
         LOG_ERROR("cellUnit is null!");
+        SetLastErrorMsg("Failed to get size: cell unit is null");
         return E_ERROR;
     }
 
@@ -259,6 +262,7 @@ int AbsSharedResultSet::GetCustomerValue(int index, ValueObject &value, SharedBl
     auto *cellUnit = block->GetCellUnit(block->GetBlockPos(), index);
     if (cellUnit == nullptr) {
         LOG_ERROR("cellUnit is null, col is %{public}d!", index);
+        SetLastErrorMsg("Failed to get customer value: cell unit is null");
         return E_ERROR;
     }
 
@@ -306,6 +310,7 @@ int AbsSharedResultSet::CheckState(int columnIndex)
     }
     if (GetBlock() == nullptr) {
         LOG_ERROR("SharedBlock is null!");
+        SetLastErrorMsg("Failed to check result set state: shared block is null");
         return E_ERROR;
     }
     int count = 0;

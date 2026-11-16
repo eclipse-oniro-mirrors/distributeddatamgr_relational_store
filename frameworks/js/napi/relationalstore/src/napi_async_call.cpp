@@ -148,12 +148,30 @@ void AsyncCall::SetBusinessError(napi_env env, std::shared_ptr<Error> error, nap
 {
     LOG_DEBUG("SetBusinessError enter");
     // if error is not inner error
-    if (error != nullptr) {
-        napi_value code = nullptr;
-        napi_value msg = nullptr;
-        napi_create_int32(env, error->GetCode(), &code);
-        napi_create_string_utf8(env, error->GetMessage().c_str(), NAPI_AUTO_LENGTH, &msg);
-        napi_create_error(env, code, msg, businessError);
+    if (error == nullptr) {
+        return;
+    }
+    napi_value code = nullptr;
+    napi_value msg = nullptr;
+    napi_status status = napi_create_int32(env, error->GetCode(), &code);
+    if (status != napi_ok) {
+        LOG_ERROR("SetBusinessError create code failed, status=%{public}d, code=%{public}d", status,
+            error->GetCode());
+        // Degrade to a legal JS null so napi_create_error never receives a bare
+        // C++ nullptr for the code (AD-02).
+        (void)napi_get_null(env, &code);
+    }
+    status = napi_create_string_utf8(env, error->GetMessage().c_str(), NAPI_AUTO_LENGTH, &msg);
+    if (status != napi_ok) {
+        LOG_ERROR("SetBusinessError create message failed, status=%{public}d, code=%{public}d", status,
+            error->GetCode());
+        // Degrade to a plain message so the error object stays recognizable (AD-02).
+        (void)napi_create_string_utf8(env, "Inner error.", NAPI_AUTO_LENGTH, &msg);
+    }
+    status = napi_create_error(env, code, msg, businessError);
+    if (status != napi_ok) {
+        LOG_ERROR("SetBusinessError create error failed, status=%{public}d, code=%{public}d", status,
+            error->GetCode());
     }
 }
 

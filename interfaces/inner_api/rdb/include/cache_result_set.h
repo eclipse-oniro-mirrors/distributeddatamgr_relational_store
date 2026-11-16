@@ -18,6 +18,7 @@
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <vector>
@@ -319,8 +320,22 @@ public:
     */
     API_EXPORT int Close() override;
     int GetSize(int columnIndex, size_t &size) override;
+    std::string GetLastErrorMsg() const override
+    {
+        // Read-once consume semantics aligned with RdbStoreImpl/AbsResultSet.
+        // Exclusive lock: the move-out mutates the member, a shared lock would
+        // still race between concurrent readers.
+        std::unique_lock<decltype(rwMutex_)> lock(rwMutex_);
+        return std::move(lastErrMsg_);
+    }
+    void SetLastErrorMsg(const std::string &msg) override
+    {
+        std::unique_lock<decltype(rwMutex_)> lock(rwMutex_);
+        lastErrMsg_ = msg;
+    }
 
 private:
+    mutable std::string lastErrMsg_;
 RDB_UTILS_PUSH_WARNING
 RDB_UTILS_DISABLE_WARNING("-Wc99-designator")
     static constexpr ColumnType COLUMNTYPES[ValueObject::TYPE_MAX] = {
