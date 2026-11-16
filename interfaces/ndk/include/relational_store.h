@@ -1131,7 +1131,7 @@ typedef void (*Rdb_CorruptedHandler)(void *context, OH_Rdb_ConfigV2 *config, OH_
  * @return Returns a specific error code.
  *     {@link RDB_OK} if the execution is successful.
  *     {@link RDB_E_INVALID_ARGS} - The error code for common invalid args.
- *     {@link RDB_E_SUB_OVER_LIMIT} - Indicates the number of subscriptions exceeds the limit.
+ *     {@link RDB_E_SUB_LIMIT_REACHED} - Indicates the number of subscriptions exceeds the limit.
  * Specific error codes can be referenced {@link OH_Rdb_ErrCode}.
  * @see OH_Rdb_RegisterCorruptedHandler.
  * @since 22
