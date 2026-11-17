@@ -1644,10 +1644,11 @@ bool RdbStoreImpl::TryAsyncRepair()
 
     int errCode = Connection::CheckReplicaIntegrity(config_);
     if (errCode != E_OK) {
-        auto event = Reportor::Create(config_, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL,
-            "master corrupt and slave corrupt on open", false);
+        auto event = Reportor::Create(config_, E_DFX_SLAVE_CORRUPT,
+            "slave corrupt on open", false);
         event.subCaseDesc = RdbSubCase::BOTH_FAIL;
-        Reportor::ReportCorruptedOnce(event);
+        Reportor::ReportSlaveCorruptWithMasterCheck(event, config_,
+            "master and slave both corrupt on open");
         return false;
     }
 
@@ -3491,6 +3492,10 @@ int RdbStoreImpl::RestoreCommon(const std::string &backupPath, const std::vector
         ExchangeSlaverToMaster();
         Reportor::ReportRestore(Reportor::Create(config_, E_OK, "ErrorType::RdbStoreImpl::Restore", false), corrupt);
         rebuild_ = RebuiltType::NONE;
+    } else {
+        auto event = Reportor::Create(config_, E_DFX_RESTORE_FAILED,
+            "restore failed, err:" + std::to_string(errCode), false);
+        Reportor::ReportCorrupted(event);
     }
     DoCloudSync("");
     return errCode;

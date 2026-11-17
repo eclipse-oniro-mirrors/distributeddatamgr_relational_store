@@ -42,6 +42,7 @@ static constexpr const char *CORRUPTED_EVENT = "DATABASE_CORRUPTED";
 static constexpr const char *FAULT_EVENT = "DISTRIBUTED_DATA_RDB_FAULT";
 static constexpr const char *DISTRIBUTED_DATAMGR = "DISTDATAMGR";
 static constexpr const char *DB_CORRUPTED_POSTFIX = ".corruptedflg";
+static constexpr const char *DB_BOTH_CORRUPT_POSTFIX = ".bothcorruptedflg";
 static constexpr int MAX_FAULT_TIMES = 1;
 static constexpr const char *RAG_FAULT_EVENT_NAME = "ARKDATA_RAG_FRAMEWORK_FAULT";
 RdbFaultHiViewReporter::Collector RdbFaultHiViewReporter::collector_ = nullptr;
@@ -113,6 +114,21 @@ void RdbFaultHiViewReporter::ReportCorruptedOnce(const RdbCorruptedEvent &eventI
     }
 }
 
+void RdbFaultHiViewReporter::ReportSlaveCorruptWithMasterCheck(const RdbCorruptedEvent &slaveEvent,
+    const RdbStoreConfig &masterConfig, const std::string &bothAppendix)
+{
+    bool masterCorrupt = IsCorruptedFlagExist(masterConfig.GetPath());
+    ReportCorruptedOnce(slaveEvent);
+    if (masterCorrupt && !IsBothCorruptFlagExist(masterConfig.GetPath())) {
+        auto bothEvent = Create(masterConfig, E_DFX_MASTER_SLAVE_BOTH_CORRUPT, bothAppendix, false);
+        bothEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+        bothEvent.appendix += SqliteUtils::FormatDebugInfo(bothEvent.debugInfos, "");
+        bothEvent.appendix += SqliteUtils::FormatDfxInfo(bothEvent.dfxInfo);
+        ReportCorrupted(bothEvent);
+        CreateBothCorruptFlag(masterConfig.GetPath());
+    }
+}
+
 void RdbFaultHiViewReporter::ReportSlaveInconsistent(const RdbStoreConfig &config, const std::string &msg)
 {
     if (SqliteUtils::IsSlaveInvalid(config.GetPath())) {
@@ -162,6 +178,7 @@ void RdbFaultHiViewReporter::ReportRestore(const RdbCorruptedEvent &eventInfo, b
         SqliteUtils::Anonymous(eventInfo.storeName).c_str(), eventInfo.errorCode, eventInfoAppend.appendix.c_str());
     ReportCorrupted(eventInfoAppend);
     DeleteCorruptedFlag(eventInfo.path);
+    DeleteBothCorruptFlag(eventInfo.path);
     memCorruptReportedFlg_ = false;
 }
 
@@ -233,6 +250,15 @@ bool RdbFaultHiViewReporter::IsReportCorruptedFault(const std::string &dbPath)
     return true;
 }
 
+bool RdbFaultHiViewReporter::IsCorruptedFlagExist(const std::string &dbPath)
+{
+    if (dbPath.empty()) {
+        return false;
+    }
+    std::string flagFilename = dbPath + DB_CORRUPTED_POSTFIX;
+    return access(flagFilename.c_str(), F_OK) == 0;
+}
+
 void RdbFaultHiViewReporter::CreateCorruptedFlag(const std::string &dbPath)
 {
     memCorruptReportedFlg_ = true;
@@ -262,6 +288,41 @@ void RdbFaultHiViewReporter::DeleteCorruptedFlag(const std::string &dbPath)
         LOG_WARN("Remove corrupted flg fail, flgname=%{public}s, errno=%{public}d",
             SqliteUtils::Anonymous(flagFilename).c_str(), errno);
     }
+}
+
+bool RdbFaultHiViewReporter::IsBothCorruptFlagExist(const std::string &dbPath)
+{
+    if (dbPath.empty()) {
+        return false;
+    }
+    std::string flagFilename = dbPath + DB_BOTH_CORRUPT_POSTFIX;
+    return access(flagFilename.c_str(), F_OK) == 0;
+}
+
+void RdbFaultHiViewReporter::CreateBothCorruptFlag(const std::string &dbPath)
+{
+    if (dbPath.empty()) {
+        return;
+    }
+    std::string flagFilename = dbPath + DB_BOTH_CORRUPT_POSTFIX;
+    int fd = creat(flagFilename.c_str(), S_IRUSR | S_IWUSR);
+    if (fd == -1) {
+        LOG_WARN("Creat both corrupt flg fail, flgname=%{public}s, errno=%{public}d",
+            SqliteUtils::Anonymous(flagFilename).c_str(), errno);
+        return;
+    }
+    uint64_t tag = fdsan_create_owner_tag(FDSAN_OWNER_TYPE_FILE, 0xD001650);
+    fdsan_exchange_owner_tag(fd, 0, tag);
+    fdsan_close_with_tag(fd, tag);
+}
+
+void RdbFaultHiViewReporter::DeleteBothCorruptFlag(const std::string &dbPath)
+{
+    if (dbPath.empty()) {
+        return;
+    }
+    std::string flagFilename = dbPath + DB_BOTH_CORRUPT_POSTFIX;
+    SqliteUtils::DeleteFile(flagFilename);
 }
 
 RdbCorruptedEvent RdbFaultHiViewReporter::Create(

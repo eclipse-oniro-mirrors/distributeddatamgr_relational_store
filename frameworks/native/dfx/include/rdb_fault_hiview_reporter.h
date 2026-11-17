@@ -131,10 +131,14 @@ public:
     static bool RegCollector(Collector collector);
     static void ReportCorrupted(const RdbCorruptedEvent &eventInfo);
     static void ReportCorruptedOnce(const RdbCorruptedEvent &eventInfo);
+    static void ReportSlaveCorruptWithMasterCheck(const RdbCorruptedEvent &slaveEvent,
+        const RdbStoreConfig &masterConfig, const std::string &bothAppendix);
     static void ReportSlaveInconsistent(const RdbStoreConfig &config, const std::string &msg);
     API_EXPORT static void ReportFault(const RdbFaultEvent &faultEvent);
     static void ReportRestore(const RdbCorruptedEvent &eventInfo, bool repair = true);
     static bool IsReportCorruptedFault(const std::string &dbPath);
+    static bool IsCorruptedFlagExist(const std::string &dbPath);
+    static bool IsBothCorruptFlagExist(const std::string &dbPath);
     static std::string GetBundleName(const std::string &bundleName);
     static void ReportRAGFault(const std::string &errMsg, const std::string &functionName,
         const std::string &bundleName, const int faultType, const int errCode);
@@ -143,6 +147,8 @@ private:
     static void Update(std::map<std::string, DebugInfo> &localInfos, const std::map<std::string, DebugInfo> &infos);
     static void CreateCorruptedFlag(const std::string &dbPath);
     static void DeleteCorruptedFlag(const std::string &dbPath);
+    static void CreateBothCorruptFlag(const std::string &dbPath);
+    static void DeleteBothCorruptFlag(const std::string &dbPath);
     static bool IsReportFault(int32_t errCode);
     static std::atomic<uint8_t> *GetFaultCounter(int32_t errCode);
     static void CollectDfxInfo(const RdbStoreConfig &config, DfxInfo &dfxInfo);

@@ -110,6 +110,7 @@ public:
     void TearDown() override
     {
         unlink((std::string(TEST_DB) + ".corruptedflg").c_str());
+        unlink((std::string(TEST_DB) + ".bothcorruptedflg").c_str());
         unlink((std::string(TEST_DB) + "-slaveFailure").c_str());
         unlink((std::string(TEST_DB) + "-syncInterrupt").c_str());
         RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
@@ -261,8 +262,10 @@ HWTEST_F(RdbFaultHiViewReporterTest, CorruptedFlag_Test_001, TestSize.Level1)
 
 HWTEST_F(RdbFaultHiViewReporterTest, DfxErrorCode_Test_001, TestSize.Level1)
 {
-    EXPECT_EQ(E_DFX_MASTER_SLAVE_BOTH_ABNORMAL, E_DFX_BASE + 0x1A);
+    EXPECT_EQ(E_DFX_SLAVE_CORRUPT, E_DFX_BASE + 0x1A);
     EXPECT_EQ(E_DFX_MASTER_SLAVE_INCONSISTENT, E_DFX_BASE + 0x1B);
+    EXPECT_EQ(E_DFX_MASTER_SLAVE_BOTH_CORRUPT, E_DFX_BASE + 0x1C);
+    EXPECT_EQ(E_DFX_RESTORE_FAILED, E_DFX_BASE + 0x1D);
 }
 
 /*
@@ -310,17 +313,278 @@ HWTEST_F(RdbFaultHiViewReporterTest, Create_FilePermission_Test_001, TestSize.Le
 
 /*
  * @tc.name: Create_BothFail_Test_001
- * @tc.desc: Verify Create sets MasterSlaveBothFail sub case and DFX error code for both-corrupt scenario
+ * @tc.desc: Verify Create sets MasterSlaveBothFail sub case and DFX error code for slave corrupt scenario
  * @tc.type: FUNC
  */
 HWTEST_F(RdbFaultHiViewReporterTest, Create_BothFail_Test_001, TestSize.Level1)
 {
     RdbStoreConfig config((std::string(TEST_DB)));
-    auto event = RdbFaultHiViewReporter::Create(config, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL,
-        "master and slave corrupt on open", false, true);
+    auto event = RdbFaultHiViewReporter::Create(config, E_DFX_SLAVE_CORRUPT,
+        "slave corrupt on open", false, true);
     event.subCaseDesc = RdbSubCase::BOTH_FAIL;
-    EXPECT_EQ(event.errorCode, static_cast<uint32_t>(E_DFX_MASTER_SLAVE_BOTH_ABNORMAL));
+    EXPECT_EQ(event.errorCode, static_cast<uint32_t>(E_DFX_SLAVE_CORRUPT));
     EXPECT_EQ(event.subCaseDesc, RdbSubCase::BOTH_FAIL);
+}
+
+/*
+ * @tc.name: Create_BothCorrupt_Test_001
+ * @tc.desc: Verify Create sets MasterSlaveBothFail sub case and BOTH_CORRUPT error code
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, Create_BothCorrupt_Test_001, TestSize.Level1)
+{
+    RdbStoreConfig config((std::string(TEST_DB)));
+    auto event = RdbFaultHiViewReporter::Create(config, E_DFX_MASTER_SLAVE_BOTH_CORRUPT,
+        "master and slave both corrupt", false, true);
+    event.subCaseDesc = RdbSubCase::BOTH_FAIL;
+    EXPECT_EQ(event.errorCode, static_cast<uint32_t>(E_DFX_MASTER_SLAVE_BOTH_CORRUPT));
+    EXPECT_EQ(event.subCaseDesc, RdbSubCase::BOTH_FAIL);
+}
+
+/*
+ * @tc.name: IsCorruptedFlagExist_Test_001
+ * @tc.desc: Verify IsCorruptedFlagExist checks only the on-disk corruptedflg marker file
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, IsCorruptedFlagExist_Test_001, TestSize.Level1)
+{
+    std::string path = TEST_DB;
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsCorruptedFlagExist(path));
+    RdbFaultHiViewReporter::CreateCorruptedFlag(path);
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsCorruptedFlagExist(path));
+    RdbFaultHiViewReporter::DeleteCorruptedFlag(path);
+    RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsCorruptedFlagExist(path));
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsCorruptedFlagExist(""));
+}
+
+/*
+ * @tc.name: Create_RestoreFailed_Test_001
+ * @tc.desc: Verify Create sets RESTORE_FAILED error code for restore failure scenario
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, Create_RestoreFailed_Test_001, TestSize.Level1)
+{
+    RdbStoreConfig config((std::string(TEST_DB)));
+    auto event = RdbFaultHiViewReporter::Create(config, E_DFX_RESTORE_FAILED,
+        "async restore failed, err:155", false, true);
+    EXPECT_EQ(event.errorCode, static_cast<uint32_t>(E_DFX_RESTORE_FAILED));
+}
+
+/*
+ * @tc.name: IsCorruptedFlagExist_Test_002
+ * @tc.desc: Verify IsCorruptedFlagExist is independent of memCorruptReportedFlg_ (unlike IsReportCorruptedFault)
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, IsCorruptedFlagExist_Test_002, TestSize.Level1)
+{
+    std::string path = TEST_DB;
+    RdbFaultHiViewReporter::memCorruptReportedFlg_ = true;
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsReportCorruptedFault(path));
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsCorruptedFlagExist(path));
+    RdbFaultHiViewReporter::CreateCorruptedFlag(path);
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsReportCorruptedFault(path));
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsCorruptedFlagExist(path));
+    RdbFaultHiViewReporter::DeleteCorruptedFlag(path);
+    RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+}
+
+/*
+ * @tc.name: IsCorruptedFlagExist_Test_003
+ * @tc.desc: Verify IsCorruptedFlagExist distinguishes between master and slave paths
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, IsCorruptedFlagExist_Test_003, TestSize.Level1)
+{
+    std::string masterPath = TEST_DB;
+    std::string slavePath = std::string(TEST_DB) + "_slave.db";
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsCorruptedFlagExist(masterPath));
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsCorruptedFlagExist(slavePath));
+    RdbFaultHiViewReporter::CreateCorruptedFlag(masterPath);
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsCorruptedFlagExist(masterPath));
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsCorruptedFlagExist(slavePath));
+    RdbFaultHiViewReporter::DeleteCorruptedFlag(masterPath);
+    RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+}
+
+/*
+ * @tc.name: ReportCorrupted_NoFlag_Test_001
+ * @tc.desc: Verify ReportCorrupted does not create corruptedflg (no dedup, unlike ReportCorruptedOnce)
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, ReportCorrupted_NoFlag_Test_001, TestSize.Level1)
+{
+    RdbStoreConfig config((std::string(TEST_DB)));
+    auto event = RdbFaultHiViewReporter::Create(config, E_DFX_MASTER_SLAVE_BOTH_CORRUPT,
+        "master and slave both corrupt", false, true);
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsReportCorruptedFault(TEST_DB));
+    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportCorrupted(event));
+    EXPECT_FALSE(access((std::string(TEST_DB) + ".corruptedflg").c_str(), F_OK) == 0);
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsReportCorruptedFault(TEST_DB));
+}
+
+/*
+ * @tc.name: BothCorruptFlow_Test_001
+ * @tc.desc: Verify both-corrupt flow: master flag exists, slave corrupt detected, both events created
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, BothCorruptFlow_Test_001, TestSize.Level1)
+{
+    std::string masterPath = TEST_DB;
+    std::string slavePath = std::string(TEST_DB) + "_slave.db";
+    RdbStoreConfig masterConfig(masterPath);
+    RdbStoreConfig slaveConfig(slavePath);
+
+    RdbFaultHiViewReporter::CreateCorruptedFlag(masterPath);
+    bool masterCorrupt = RdbFaultHiViewReporter::IsCorruptedFlagExist(masterPath);
+    EXPECT_TRUE(masterCorrupt);
+
+    auto slaveEvent = RdbFaultHiViewReporter::Create(slaveConfig, E_DFX_SLAVE_CORRUPT,
+        "slave corrupt on open", false, true);
+    slaveEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+    EXPECT_EQ(slaveEvent.errorCode, static_cast<uint32_t>(E_DFX_SLAVE_CORRUPT));
+
+    auto bothEvent = RdbFaultHiViewReporter::Create(masterConfig, E_DFX_MASTER_SLAVE_BOTH_CORRUPT,
+        "master and slave both corrupt on open", false);
+    bothEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+    EXPECT_EQ(bothEvent.errorCode, static_cast<uint32_t>(E_DFX_MASTER_SLAVE_BOTH_CORRUPT));
+    EXPECT_EQ(bothEvent.subCaseDesc, RdbSubCase::BOTH_FAIL);
+
+    RdbFaultHiViewReporter::DeleteCorruptedFlag(masterPath);
+    RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+}
+
+/*
+ * @tc.name: SlaveCorruptOnly_Test_001
+ * @tc.desc: Verify slave-corrupt-only flow: master flag absent, only slave corrupt event created
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, SlaveCorruptOnly_Test_001, TestSize.Level1)
+{
+    std::string masterPath = TEST_DB;
+    std::string slavePath = std::string(TEST_DB) + "_slave.db";
+    RdbStoreConfig slaveConfig(slavePath);
+
+    bool masterCorrupt = RdbFaultHiViewReporter::IsCorruptedFlagExist(masterPath);
+    EXPECT_FALSE(masterCorrupt);
+
+    auto slaveEvent = RdbFaultHiViewReporter::Create(slaveConfig, E_DFX_SLAVE_CORRUPT,
+        "slave corrupt on open", false, true);
+    slaveEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+    EXPECT_EQ(slaveEvent.errorCode, static_cast<uint32_t>(E_DFX_SLAVE_CORRUPT));
+    EXPECT_FALSE(masterCorrupt);
+}
+
+/*
+ * @tc.name: RestoreFailed_ReportCorrupted_Test_001
+ * @tc.desc: Verify restore-failed event reported via ReportCorrupted has no dedup
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, RestoreFailed_ReportCorrupted_Test_001, TestSize.Level1)
+{
+    RdbStoreConfig config((std::string(TEST_DB)));
+    auto event = RdbFaultHiViewReporter::Create(config, E_DFX_RESTORE_FAILED,
+        "restore failed, err:155", false, true);
+    EXPECT_EQ(event.errorCode, static_cast<uint32_t>(E_DFX_RESTORE_FAILED));
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsReportCorruptedFault(TEST_DB));
+    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportCorrupted(event));
+    EXPECT_FALSE(access((std::string(TEST_DB) + ".corruptedflg").c_str(), F_OK) == 0);
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsReportCorruptedFault(TEST_DB));
+}
+
+/*
+ * @tc.name: ReportSlaveCorruptWithMasterCheck_Test_001
+ * @tc.desc: Verify ReportSlaveCorruptWithMasterCheck reports both events when master flag exists
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, ReportSlaveCorruptWithMasterCheck_Test_001, TestSize.Level1)
+{
+    std::string masterPath = TEST_DB;
+    std::string slavePath = std::string(TEST_DB) + "_slave.db";
+    RdbStoreConfig masterConfig(masterPath);
+    RdbStoreConfig slaveConfig(slavePath);
+
+    std::ofstream f(masterPath + ".corruptedflg");
+    f.close();
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsCorruptedFlagExist(masterPath));
+
+    auto slaveEvent = RdbFaultHiViewReporter::Create(slaveConfig, E_DFX_SLAVE_CORRUPT,
+        "slave corrupt on open", false, true);
+    slaveEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+
+    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveCorruptWithMasterCheck(
+        slaveEvent, masterConfig, "master and slave both corrupt"));
+
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsReportCorruptedFault(slavePath));
+    EXPECT_TRUE(access((slavePath + ".corruptedflg").c_str(), F_OK) == 0);
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsCorruptedFlagExist(masterPath));
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsBothCorruptFlagExist(masterPath));
+
+    unlink((slavePath + ".corruptedflg").c_str());
+    unlink((masterPath + ".corruptedflg").c_str());
+    unlink((masterPath + ".bothcorruptedflg").c_str());
+    RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+}
+
+/*
+ * @tc.name: ReportSlaveCorruptWithMasterCheck_Test_002
+ * @tc.desc: Verify ReportSlaveCorruptWithMasterCheck reports only slave event when master flag absent
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, ReportSlaveCorruptWithMasterCheck_Test_002, TestSize.Level1)
+{
+    std::string slavePath = std::string(TEST_DB) + "_slave.db";
+    RdbStoreConfig masterConfig((std::string(TEST_DB)));
+    RdbStoreConfig slaveConfig(slavePath);
+
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsCorruptedFlagExist(masterConfig.GetPath()));
+
+    auto slaveEvent = RdbFaultHiViewReporter::Create(slaveConfig, E_DFX_SLAVE_CORRUPT,
+        "slave corrupt on open", false, true);
+    slaveEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+
+    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveCorruptWithMasterCheck(
+        slaveEvent, masterConfig, "master and slave both corrupt"));
+
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsReportCorruptedFault(slavePath));
+    EXPECT_TRUE(access((slavePath + ".corruptedflg").c_str(), F_OK) == 0);
+
+    unlink((slavePath + ".corruptedflg").c_str());
+    RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+}
+
+/*
+ * @tc.name: ReportSlaveCorruptWithMasterCheck_Test_003
+ * @tc.desc: Verify both-corrupt event is deduplicated across multiple calls
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbFaultHiViewReporterTest, ReportSlaveCorruptWithMasterCheck_Test_003, TestSize.Level1)
+{
+    std::string masterPath = TEST_DB;
+    std::string slavePath = std::string(TEST_DB) + "_slave.db";
+    RdbStoreConfig masterConfig(masterPath);
+    RdbStoreConfig slaveConfig(slavePath);
+
+    std::ofstream f(masterPath + ".corruptedflg");
+    f.close();
+
+    auto slaveEvent = RdbFaultHiViewReporter::Create(slaveConfig, E_DFX_SLAVE_CORRUPT,
+        "slave corrupt on open", false, true);
+    slaveEvent.subCaseDesc = RdbSubCase::BOTH_FAIL;
+
+    EXPECT_FALSE(RdbFaultHiViewReporter::IsBothCorruptFlagExist(masterPath));
+    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveCorruptWithMasterCheck(
+        slaveEvent, masterConfig, "master and slave both corrupt"));
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsBothCorruptFlagExist(masterPath));
+
+    EXPECT_NO_FATAL_FAILURE(RdbFaultHiViewReporter::ReportSlaveCorruptWithMasterCheck(
+        slaveEvent, masterConfig, "master and slave both corrupt on restore"));
+    EXPECT_TRUE(RdbFaultHiViewReporter::IsBothCorruptFlagExist(masterPath));
+
+    unlink((slavePath + ".corruptedflg").c_str());
+    unlink((masterPath + ".corruptedflg").c_str());
+    unlink((masterPath + ".bothcorruptedflg").c_str());
+    RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
 }
 
 /*

@@ -1701,10 +1701,11 @@ int SqliteConnection::ExchangeSlaverToMaster(bool isRestore, bool verifyDb, std:
     if (err != E_OK) {
         if (isRestore) {
             RdbStoreConfig slaveCfg(SqliteUtils::GetSlavePath(config_));
-            auto event = Reportor::Create(slaveCfg, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL,
-                "master corrupt and slave corrupt on restore", false, true);
+            auto event = Reportor::Create(slaveCfg, E_DFX_SLAVE_CORRUPT,
+                "slave corrupt on restore", false, true);
             event.subCaseDesc = RdbSubCase::BOTH_FAIL;
-            Reportor::ReportCorruptedOnce(event);
+            Reportor::ReportSlaveCorruptWithMasterCheck(event, config_,
+                "master and slave both corrupt on restore");
         }
         ReleaseTempSlaveConnection();
         *curStatus = SlaveStatus::UNDEFINED;
@@ -2224,9 +2225,9 @@ int SqliteConnection::VerifySlaveIntegrity(const bool isForceRestore)
     if (err == E_OK && (static_cast<std::string>(obj) != "ok")) {
         LOG_ERROR("slave corrupt, ret:%{public}s, cRet:%{public}d, %{public}d", static_cast<std::string>(obj).c_str(),
             err, errno);
-        auto event = Reportor::Create(slaveCfg, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL, "Slave Check", false, true);
+        auto event = Reportor::Create(slaveCfg, E_DFX_SLAVE_CORRUPT, "Slave Check", false, true);
         event.subCaseDesc = RdbSubCase::BOTH_FAIL;
-        Reportor::ReportCorruptedOnce(event);
+        Reportor::ReportSlaveCorruptWithMasterCheck(event, config_, "master and slave both corrupt");
         SqliteUtils::SetSlaveInvalid(config_.GetPath(), SqliteUtils::SlaveInvalidReason::VERIFY_FAILED);
         return E_SQLITE_CORRUPT;
     }
@@ -2292,12 +2293,14 @@ void SqliteConnection::BinlogOnErrFunc(void *pCtx, int errNo, char *errMsg, cons
     std::string dbName = SqliteUtils::Anonymous(cfg.GetName());
     std::string appendix = "slave binlog replay failed, dbName:" + dbName +
         ", errNo:" + std::to_string(errNo) + ", errMsg:" + errMsgStr;
-    auto event = Reportor::Create(cfg, E_DFX_MASTER_SLAVE_BOTH_ABNORMAL, appendix, false, true);
+    auto event = Reportor::Create(cfg, E_DFX_SLAVE_CORRUPT, appendix, false, true);
     event.subCaseDesc = RdbSubCase::NON_FIRST_PAGE;
     event.systemErrorNo = errNo;
     auto pool = TaskExecutor::GetInstance().GetExecutor();
     if (pool != nullptr) {
-        pool->Execute([event]() { Reportor::ReportCorruptedOnce(event); });
+        pool->Execute([event, cfg]() {
+            Reportor::ReportSlaveCorruptWithMasterCheck(event, cfg, "master and slave both corrupt");
+        });
     }
     SqliteUtils::SetSlaveInvalid(dbPathStr, SqliteUtils::SlaveInvalidReason::BINLOG_REPLAY_FAILED);
 }
