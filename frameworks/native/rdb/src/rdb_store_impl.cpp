@@ -755,6 +755,7 @@ int RdbStoreImpl::SetDistributedTables(
     syncerParam_.customSwitch_ = distributedConfig.customSwitch;
     syncerParam_.distributedTableMode_ = distributedConfig.tableType;
     syncerParam_.autoSyncSwitch_ = distributedConfig.autoSyncSwitch;
+    syncerParam_.autoSync_ = distributedConfig.autoSync;
     syncerParam_.assetConflictPolicy_ = distributedConfig.assetConflictPolicy;
     syncerParam_.assetTempPath_ = distributedConfig.assetTempPath;
     syncerParam_.assetDownloadOnDemand_ = distributedConfig.assetDownloadOnDemand;
@@ -764,8 +765,12 @@ int RdbStoreImpl::SetDistributedTables(
         LOG_ERROR("Fail to set distributed tables, error=%{public}d.", errorCode);
         return errorCode;
     }
-    if (type == DistributedRdb::DISTRIBUTED_DEVICE && !config_.GetRegisterInfo(RegisterType::CLIENT_OBSERVER)) {
-        RegisterDataChangeCallback();
+    if ((type == DistributedRdb::DISTRIBUTED_DEVICE || type == DistributedRdb::DISTRIBUTED_CLOUD)
+        && !config_.GetRegisterInfo(RegisterType::CLIENT_OBSERVER)) {
+        int errCode = RegisterDataChangeCallback();
+        if (errCode != E_OK) {
+            LOG_ERROR("RegisterDataChangeCallback is failed, err is %{public}d.", errCode);
+        }
     }
     if (type != DistributedRdb::DISTRIBUTED_CLOUD) {
         return E_OK;
@@ -997,7 +1002,7 @@ int RdbStoreImpl::HandleCloudSyncAfterSetDistributedTables(
     auto isRebuilt = RebuiltType::NONE;
     GetRebuilt(isRebuilt);
     if (isRebuilt == RebuiltType::REBUILT) {
-        DoCloudSync("");
+        DoCloudSync();
     }
     return E_OK;
 }
@@ -1395,7 +1400,7 @@ void RdbStoreImpl::InitDelayNotifier()
     std::weak_ptr<NativeRdb::KnowledgeSchemaHelper> helper = GetKnowledgeSchemaHelper();
     delayNotifier->SetExecutorPool(TaskExecutor::GetInstance().GetExecutor());
     delayNotifier->SetTask(
-        [param = syncerParam_, helper = helper](
+        [param = syncerParam_, helper = helper, cloudInfo = cloudInfo_](
             const DistributedRdb::RdbChangedData &rdbChangedData, const RdbNotifyConfig &rdbNotifyConfig) -> int {
             if (IsKnowledgeDataChange(rdbChangedData)) {
                 auto realHelper = helper.lock();
@@ -1405,7 +1410,7 @@ void RdbStoreImpl::InitDelayNotifier()
                     realHelper->DonateKnowledgeData(rdbChangedData);
                 }
             }
-            if (!IsNotifyService(rdbChangedData, rdbNotifyConfig)) {
+            if (!IsNotifyService(rdbChangedData, rdbNotifyConfig, cloudInfo)) {
                 return E_OK;
             }
             auto [errCode, service] = RdbMgr::GetInstance().GetRdbService(param);
@@ -1465,6 +1470,7 @@ void RdbStoreImpl::RegisterDataChangeCallback(
     };
     auto errCode = conn->SubscribeTableChanges(callBack);
     if (errCode != E_OK) {
+        LOG_ERROR("SubscribeTableChanges failed, errCode:%{public}d.", errCode);
         return;
     }
 }
@@ -1831,15 +1837,14 @@ std::pair<int, int64_t> RdbStoreImpl::Insert(
         return { status, -1 };
     }
     int64_t rowid = -1;
-    int errCode = ExecuteForLastInsertedRowId(rowid, sqlInfo.sql, sqlInfo.args, config.timeoutMs);
+    auto errCode = ExecuteForLastInsertedRowId(rowid, sqlInfo.sql, sqlInfo.args, config.timeoutMs);
     if (errCode == E_OK && rowid > 0) {
         auditLogger_.OnSqlAudit(config_.GetPath(), "INSERT", table, 1);
     }
-    if (errCode == E_OK) {
-        DoCloudSync(table);
-    } else {
+    if (errCode != E_OK) {
         SetLastErrorContext(table);
     }
+
     return { errCode, rowid };
 }
 
@@ -1875,7 +1880,6 @@ std::pair<int, int64_t> RdbStoreImpl::BatchInsert(const std::string &table, cons
     conn = nullptr;
     int64_t insertedRows = int64_t(rows.RowSize());
     auditLogger_.OnSqlAudit(config_.GetPath(), "BatchInsert", table, insertedRows);
-    DoCloudSync(table);
     return { E_OK, insertedRows };
 }
 
@@ -1923,7 +1927,6 @@ std::pair<int32_t, Results> RdbStoreImpl::BatchInsert(
     }
     auto [errCode, result] = ExecuteBatchInsertReturning(sqlArgs, conn, config, cfg.resolution);
     if (result.changed > 0) {
-        DoCloudSync(table);
         auditLogger_.OnSqlAudit(config_.GetPath(), "BatchInsert", table, result.changed);
     }
     return { errCode, result };
@@ -1974,9 +1977,7 @@ std::pair<int32_t, Results> RdbStoreImpl::Update(const Row &row, const AbsRdbPre
     auto returningSql = SqliteSqlBuilder::GetReturningSql(cfg.returning.columns);
     auto [code, result] = ExecuteForRow(sqlInfo.sql, sqlInfo.args, cfg.returning, returningSql, cfg.timeoutMs);
     auditLogger_.OnSqlAudit(config_.GetPath(), "UPDATE", predicates.GetTableName(), result.changed);
-    if (result.changed > 0) {
-        DoCloudSync(predicates.GetTableName());
-    } else if (code != E_OK) {
+    if (code != E_OK) {
         SetLastErrorContext(predicates.GetTableName());
     }
     return { code, result };
@@ -1996,9 +1997,7 @@ std::pair<int32_t, Results> RdbStoreImpl::Delete(
     auto [code, result] =
         ExecuteForRow(sqlInfo.sql, predicates.GetBindArgs(), cfg.returning, returningSql, cfg.timeoutMs);
     auditLogger_.OnSqlAudit(config_.GetPath(), "DELETE", predicates.GetTableName(), result.changed);
-    if (result.changed > 0) {
-        DoCloudSync(predicates.GetTableName());
-    } else if (code != E_OK) {
+    if (code != E_OK) {
         SetLastErrorContext(predicates.GetTableName());
     }
     return { code, result };
@@ -2141,9 +2140,6 @@ int RdbStoreImpl::ExecuteSql(const std::string &sql, const Values &args)
         HandleSchemaDDL(std::move(statement), sql);
     }
     statement = nullptr;
-    if (errCode == E_OK && (sqlType == SqliteUtils::STATEMENT_UPDATE || sqlType == SqliteUtils::STATEMENT_INSERT)) {
-        DoCloudSync("");
-    }
     return errCode;
 }
 
@@ -3183,29 +3179,17 @@ std::string RdbStoreImpl::GetName()
     return name_;
 }
 
-void RdbStoreImpl::DoCloudSync(const std::string &table)
+void RdbStoreImpl::DoCloudSync()
 {
-    auto needSync = cloudInfo_->Change(table);
-    if (!needSync) {
-        return;
-    }
     auto pool = TaskExecutor::GetInstance().GetExecutor();
     if (pool == nullptr) {
         return;
     }
     auto interval =
         std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::milliseconds(INTERVAL));
-    pool->Schedule(interval, [cloudInfo = std::weak_ptr<CloudTables>(cloudInfo_), param = syncerParam_]() {
-        auto changeInfo = cloudInfo.lock();
-        if (changeInfo == nullptr) {
-            return;
-        }
-        auto tables = changeInfo->Steal();
-        if (tables.empty()) {
-            return;
-        }
+    pool->Schedule(interval, [param = syncerParam_]() {
         DistributedRdb::RdbService::Option option = { DistributedRdb::TIME_FIRST, 0, true, true, false, false };
-        auto memo = AbsRdbPredicates(std::vector<std::string>(tables.begin(), tables.end())).GetDistributedPredicates();
+        auto memo = AbsRdbPredicates("").GetDistributedPredicates();
         InnerSync(param, option, memo, nullptr);
     });
 }
@@ -3497,7 +3481,7 @@ int RdbStoreImpl::RestoreCommon(const std::string &backupPath, const std::vector
             "restore failed, err:" + std::to_string(errCode), false);
         Reportor::ReportCorrupted(event);
     }
-    DoCloudSync("");
+    DoCloudSync();
     return errCode;
 }
 
@@ -3890,33 +3874,10 @@ int32_t RdbStoreImpl::CloudTables::RmvTables(const std::vector<std::string> &tab
     return E_OK;
 }
 
-bool RdbStoreImpl::CloudTables::Change(const std::string &table)
+bool RdbStoreImpl::CloudTables::Contains(const std::string &table)
 {
-    bool needSync = false;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (tables_.empty() || (!table.empty() && tables_.find(table) == tables_.end())) {
-            return needSync;
-        }
-        // from empty, then need schedule the cloud sync, others only wait the schedule execute.
-        needSync = changes_.empty();
-        if (!table.empty()) {
-            changes_.insert(table);
-        } else {
-            changes_.insert(tables_.begin(), tables_.end());
-        }
-    }
-    return needSync;
-}
-
-std::set<std::string> RdbStoreImpl::CloudTables::Steal()
-{
-    std::set<std::string> result;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        result = std::move(changes_);
-    }
-    return result;
+    std::lock_guard<std::mutex> lock(mutex_);
+    return tables_.find(table) != tables_.end();
 }
 
 void RdbStoreImpl::SetKnowledgeSchema()
@@ -3979,13 +3940,31 @@ bool RdbStoreImpl::IsKnowledgeDataChange(const DistributedRdb::RdbChangedData &r
 }
 
 bool RdbStoreImpl::IsNotifyService(const DistributedRdb::RdbChangedData &rdbChangedData,
-    const DistributedRdb::RdbNotifyConfig &rdbNotifyConfig)
+    const DistributedRdb::RdbNotifyConfig &rdbNotifyConfig,
+    const std::shared_ptr<CloudTables> &cloudInfo)
 {
-    if (rdbNotifyConfig.isFull_ == true) {
+    if (rdbNotifyConfig.isFull_) {
         return true;
     }
     for (const auto &item : rdbChangedData.tableData) {
         if (item.second.isP2pSyncDataChange) {
+            return true;
+        }
+    }
+    if (IsCloudTableChanged(rdbChangedData, cloudInfo)) {
+        return true;
+    }
+    return false;
+}
+
+bool RdbStoreImpl::IsCloudTableChanged(const DistributedRdb::RdbChangedData &rdbChangedData,
+    const std::shared_ptr<CloudTables> &cloudInfo)
+{
+    if (cloudInfo == nullptr) {
+        return false;
+    }
+    for (const auto &item : rdbChangedData.tableData) {
+        if (cloudInfo->Contains(item.first)) {
             return true;
         }
     }

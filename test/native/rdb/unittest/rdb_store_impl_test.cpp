@@ -3077,10 +3077,10 @@ HWTEST_F(RdbStoreImplTest, IsNotifyService_Test_001, TestSize.Level1)
     DistributedRdb::RdbChangedData changedData;
     DistributedRdb::RdbNotifyConfig notifyConfig;
     notifyConfig.isFull_ = true;
-    EXPECT_TRUE(RdbStoreImpl::IsNotifyService(changedData, notifyConfig));
+    EXPECT_TRUE(RdbStoreImpl::IsNotifyService(changedData, notifyConfig, nullptr));
 
     notifyConfig.isFull_ = false;
-    EXPECT_FALSE(RdbStoreImpl::IsNotifyService(changedData, notifyConfig));
+    EXPECT_FALSE(RdbStoreImpl::IsNotifyService(changedData, notifyConfig, nullptr));
 }
 
 /**

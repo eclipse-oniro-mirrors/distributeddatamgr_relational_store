@@ -197,3 +197,201 @@ HWTEST_F(DelayNotifyTest, UpdateNotify_Both_Test_001, TestSize.Level1)
     delayNotifier->UpdateNotify(changedData);
     EXPECT_EQ(delayNotifier->changedData_.tableData.count("Both_Table"), 1u);
 }
+
+/**
+* @tc.name: UpdateNotify_Cloud_Test_001
+* @tc.desc: Check UpdateNotify() processes the table when isCloudSyncDataChange is true.
+*           Covers the new branch of "if (!v.isCloudSyncDataChange)" when isCloudSyncDataChange is true.
+* @tc.type: FUNC
+*/
+HWTEST_F(DelayNotifyTest, UpdateNotify_Cloud_Test_001, TestSize.Level1)
+{
+    auto delayNotifier = std::make_shared<DelayNotify>();
+    delayNotifier->SetExecutorPool(std::make_shared<OHOS::ExecutorPool>(1, 1));
+    auto block = std::make_shared<OHOS::BlockData<bool>>(1, false);
+    delayNotifier->SetTask([block](const RdbChangedData &, const RdbNotifyConfig &){
+        block->SetValue(true);
+        return 0;
+    });
+    delayNotifier->delaySyncTaskId_ = 1;
+    delayNotifier->isInitialized_ = true;
+
+    auto changedData = RdbChangedData();
+    auto rdbChangeProperties = RdbChangeProperties();
+    rdbChangeProperties.isCloudSyncDataChange = true;
+    changedData.tableData.insert_or_assign("Cloud_Table", rdbChangeProperties);
+    delayNotifier->UpdateNotify(changedData);
+    EXPECT_EQ(delayNotifier->changedData_.tableData.count("Cloud_Table"), 1u);
+    EXPECT_TRUE(delayNotifier->changedData_.tableData["Cloud_Table"].isCloudSyncDataChange);
+}
+
+/**
+* @tc.name: UpdateNotify_Cloud_Test_002
+* @tc.desc: Check UpdateNotify() merges flags when table already exists.
+*           p2p first, cloud second → both flags should be true after merge.
+* @tc.type: FUNC
+*/
+HWTEST_F(DelayNotifyTest, UpdateNotify_Cloud_Test_002, TestSize.Level1)
+{
+    auto delayNotifier = std::make_shared<DelayNotify>();
+    delayNotifier->SetExecutorPool(std::make_shared<OHOS::ExecutorPool>(1, 1));
+    auto block = std::make_shared<OHOS::BlockData<bool>>(1, false);
+    delayNotifier->SetTask([block](const RdbChangedData &, const RdbNotifyConfig &){
+        block->SetValue(true);
+        return 0;
+    });
+    delayNotifier->delaySyncTaskId_ = 1;
+    delayNotifier->isInitialized_ = true;
+
+    auto changedData = RdbChangedData();
+    auto props1 = RdbChangeProperties();
+    props1.isP2pSyncDataChange = true;
+    props1.isCloudSyncDataChange = false;
+    changedData.tableData.insert_or_assign("Merge_Table", props1);
+    delayNotifier->UpdateNotify(changedData);
+
+    auto props2 = RdbChangeProperties();
+    props2.isCloudSyncDataChange = true;
+    changedData.tableData.insert_or_assign("Merge_Table", props2);
+    delayNotifier->UpdateNotify(changedData);
+
+    auto &merged = delayNotifier->changedData_.tableData["Merge_Table"];
+    EXPECT_TRUE(merged.isP2pSyncDataChange);
+    EXPECT_TRUE(merged.isCloudSyncDataChange);
+}
+
+/**
+* @tc.name: ExecuteTask_FailureRestore_Test_001
+* @tc.desc: Test ExecuteTask failure path triggers MergeChangeData to restore data.
+*           task_ returns non-zero → MergeChangeData called → changedData_ retains flags.
+* @tc.type: FUNC
+*/
+HWTEST_F(DelayNotifyTest, ExecuteTask_FailureRestore_Test_001, TestSize.Level1)
+{
+    auto delayNotifier = std::make_shared<DelayNotify>();
+    delayNotifier->SetExecutorPool(std::make_shared<OHOS::ExecutorPool>(1, 1));
+    delayNotifier->SetTask([](const RdbChangedData &, const RdbNotifyConfig &) {
+        return -1;
+    });
+    delayNotifier->delaySyncTaskId_ = 1;
+    delayNotifier->isInitialized_ = true;
+
+    auto changedData = RdbChangedData();
+    auto props = RdbChangeProperties();
+    props.isCloudSyncDataChange = true;
+    changedData.tableData.insert_or_assign("Cloud_Table", props);
+    delayNotifier->UpdateNotify(changedData);
+
+    delayNotifier->ExecuteTask();
+
+    EXPECT_EQ(delayNotifier->changedData_.tableData.count("Cloud_Table"), 1u);
+    EXPECT_TRUE(delayNotifier->changedData_.tableData["Cloud_Table"].isCloudSyncDataChange);
+}
+
+/**
+* @tc.name: ExecuteTask_FailureRestore_Test_002
+* @tc.desc: Test ExecuteTask failure path merges concurrent flags via MergeChangeData.
+*           task_ returns non-zero, concurrent UpdateNotify merged → both flags retained.
+* @tc.type: FUNC
+*/
+HWTEST_F(DelayNotifyTest, ExecuteTask_FailureRestore_Test_002, TestSize.Level1)
+{
+    auto delayNotifier = std::make_shared<DelayNotify>();
+    delayNotifier->SetExecutorPool(std::make_shared<OHOS::ExecutorPool>(1, 1));
+    delayNotifier->SetTask([](const RdbChangedData &, const RdbNotifyConfig &) {
+        return -1;
+    });
+    delayNotifier->delaySyncTaskId_ = 1;
+    delayNotifier->isInitialized_ = true;
+
+    auto firstData = RdbChangedData();
+    auto props1 = RdbChangeProperties();
+    props1.isP2pSyncDataChange = true;
+    props1.isCloudSyncDataChange = false;
+    firstData.tableData.insert_or_assign("Merge_Table", props1);
+    delayNotifier->UpdateNotify(firstData);
+
+    auto secondData = RdbChangedData();
+    auto props2 = RdbChangeProperties();
+    props2.isCloudSyncDataChange = true;
+    secondData.tableData.insert_or_assign("Merge_Table", props2);
+    delayNotifier->UpdateNotify(secondData);
+
+    delayNotifier->ExecuteTask();
+
+    auto &merged = delayNotifier->changedData_.tableData["Merge_Table"];
+    EXPECT_TRUE(merged.isP2pSyncDataChange);
+    EXPECT_TRUE(merged.isCloudSyncDataChange);
+}
+
+/**
+* @tc.name: UpdateNotify_Cloud_Test_003
+* @tc.desc: Check UpdateNotify() skips table when all flags including isCloudSyncDataChange are false.
+*           Covers the continue branch when isCloudSyncDataChange is false.
+* @tc.type: FUNC
+*/
+HWTEST_F(DelayNotifyTest, UpdateNotify_Cloud_Test_003, TestSize.Level1)
+{
+    auto delayNotifier = std::make_shared<DelayNotify>();
+    delayNotifier->SetExecutorPool(std::make_shared<OHOS::ExecutorPool>(1, 1));
+    auto block = std::make_shared<OHOS::BlockData<bool>>(1, false);
+    delayNotifier->SetTask([block](const RdbChangedData &, const RdbNotifyConfig &){
+        block->SetValue(true);
+        return 0;
+    });
+    delayNotifier->delaySyncTaskId_ = 1;
+    delayNotifier->isInitialized_ = true;
+
+    auto changedData = RdbChangedData();
+    auto rdbChangeProperties = RdbChangeProperties();
+    rdbChangeProperties.isTrackedDataChange = false;
+    rdbChangeProperties.isP2pSyncDataChange = false;
+    rdbChangeProperties.isKnowledgeDataChange = false;
+    rdbChangeProperties.isCloudSyncDataChange = false;
+    changedData.tableData.insert_or_assign("Skip_Table", rdbChangeProperties);
+    delayNotifier->UpdateNotify(changedData);
+    EXPECT_EQ(delayNotifier->changedData_.tableData.count("Skip_Table"), 0u);
+}
+
+/**
+* @tc.name: MergeChangeData_Test_001
+* @tc.desc: Test MergeChangeData inserts new table when not exists.
+* @tc.type: FUNC
+*/
+HWTEST_F(DelayNotifyTest, MergeChangeData_Test_001, TestSize.Level1)
+{
+    auto delayNotifier = std::make_shared<DelayNotify>();
+    auto changedData = RdbChangedData();
+    auto props = RdbChangeProperties();
+    props.isCloudSyncDataChange = true;
+    changedData.tableData.insert_or_assign("Restore_Table", props);
+    delayNotifier->MergeChangeData(changedData);
+    EXPECT_EQ(delayNotifier->changedData_.tableData.count("Restore_Table"), 1u);
+    EXPECT_TRUE(delayNotifier->changedData_.tableData["Restore_Table"].isCloudSyncDataChange);
+}
+
+/**
+* @tc.name: MergeChangeData_Test_002
+* @tc.desc: Test MergeChangeData merges flags when table already exists.
+* @tc.type: FUNC
+*/
+HWTEST_F(DelayNotifyTest, MergeChangeData_Test_002, TestSize.Level1)
+{
+    auto delayNotifier = std::make_shared<DelayNotify>();
+    auto props1 = RdbChangeProperties();
+    props1.isP2pSyncDataChange = true;
+    props1.isCloudSyncDataChange = false;
+    RdbChangedData firstData;
+    firstData.tableData.insert_or_assign("Merge_Table", props1);
+    delayNotifier->UpdateNotify(firstData);
+
+    auto props2 = RdbChangeProperties();
+    props2.isCloudSyncDataChange = true;
+    RdbChangedData secondData;
+    secondData.tableData.insert_or_assign("Merge_Table", props2);
+    delayNotifier->MergeChangeData(secondData);
+
+    auto &merged = delayNotifier->changedData_.tableData["Merge_Table"];
+    EXPECT_TRUE(merged.isP2pSyncDataChange);
+    EXPECT_TRUE(merged.isCloudSyncDataChange);
+}
