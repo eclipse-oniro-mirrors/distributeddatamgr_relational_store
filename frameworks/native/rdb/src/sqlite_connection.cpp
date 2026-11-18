@@ -771,7 +771,14 @@ int SqliteConnection::SubscribeTableChanges(const Connection::Notifier &notifier
     }
 
     int32_t status = RegisterClientObserver(dbHandle_, [notifier](const ClientChangedData &clientData) {
-        auto rdbChangedData = ConvertChangedData(clientData);
+        DistributedRdb::RdbChangedData rdbChangedData;
+        for (auto &[key, val] : clientData.tableData) {
+            if (val.isTrackedDataChange || val.isP2pSyncDataChange || val.isKnowledgeDataChange) {
+                rdbChangedData.tableData[key].isTrackedDataChange = val.isTrackedDataChange;
+                rdbChangedData.tableData[key].isP2pSyncDataChange = val.isP2pSyncDataChange;
+                rdbChangedData.tableData[key].isKnowledgeDataChange = val.isKnowledgeDataChange;
+            }
+        }
         notifier(rdbChangedData);
     });
     if (status != E_OK) {

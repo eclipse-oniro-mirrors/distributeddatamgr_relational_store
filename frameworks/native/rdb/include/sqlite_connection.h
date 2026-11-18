@@ -104,21 +104,6 @@ protected:
     static void CleanDonatedBinlogWithoutReplica(const RdbStoreConfig &config);
 
 private:
-    template<typename T>
-    static DistributedRdb::RdbChangedData ConvertChangedData(const T &clientData)
-    {
-        DistributedRdb::RdbChangedData rdbChangedData;
-        for (auto &[key, val] : clientData.tableData) {
-            if (val.isTrackedDataChange || val.isP2pSyncDataChange || val.isKnowledgeDataChange ||
-                val.isCloudSyncDataChange) {
-                rdbChangedData.tableData[key].isTrackedDataChange = val.isTrackedDataChange;
-                rdbChangedData.tableData[key].isP2pSyncDataChange = val.isP2pSyncDataChange;
-                rdbChangedData.tableData[key].isKnowledgeDataChange = val.isKnowledgeDataChange;
-                rdbChangedData.tableData[key].isCloudSyncDataChange = val.isCloudSyncDataChange;
-            }
-        }
-        return rdbChangedData;
-    }
     struct Suffix {
         const char *suffix_ = nullptr;
         const char *debug_ = nullptr;

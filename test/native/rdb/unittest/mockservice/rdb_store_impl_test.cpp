@@ -773,33 +773,6 @@ HWTEST_F(RdbStoreImplConditionTest, SetDistributedTables_Test_008, TestSize.Leve
 }
 
 /**
- * @tc.name: SetDistributedTables_Test_009
- * @tc.desc: Test SetDistributedTables with DISTRIBUTED_SEARCH type, RegisterDataChangeCallback not called.
- * @tc.type: FUNC
- */
-HWTEST_F(RdbStoreImplConditionTest, SetDistributedTables_Test_009, TestSize.Level2)
-{
-    auto mockRdbService = std::make_shared<MockRdbService>();
-    EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
-    EXPECT_CALL(*mockRdbService, SetDistributedTables(_, _, _, _, _)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
-    config.SetReadOnly(false);
-    config.SetStorageMode(StorageMode::MODE_DISK);
-    config.SetDBType(DB_SQLITE);
-    config.SetRegisterInfo(RegisterType::STORE_OBSERVER, true);
-    RdbStoreImplConditionTestOpenCallback helper;
-    int errCode = E_OK;
-    std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
-    ASSERT_NE(store, nullptr) << "store is null";
-    std::vector<std::string> tables;
-    OHOS::DistributedRdb::DistributedConfig distributedConfig;
-    tables.push_back("employee");
-    EXPECT_CALL(*mockConnection, SubscribeTableChanges(_)).Times(0);
-    errCode = store->SetDistributedTables(tables, DISTRIBUTED_SEARCH, distributedConfig);
-    EXPECT_EQ(E_OK, errCode);
-}
-
-/**
  * @tc.name: RetainDeviceData_Test_001
  * @tc.desc: Abnormal testCase of RetainDeviceData file service return RDB_DB_NOT_EXIST
  * @tc.type: FUNC
@@ -1709,33 +1682,6 @@ HWTEST_F(RdbStoreImplConditionTest, RegisterDataChangeCallback_Test_001, TestSiz
     storeImpl->connectionPool_ = nullptr;
     auto res = storeImpl->RegisterDataChangeCallback();
     EXPECT_EQ(E_ALREADY_CLOSED, res);
-}
-
-/**
- * @tc.name: RegisterDataChangeCallback_Test_002
- * @tc.desc: Test RegisterDataChangeCallback returns E_ALREADY_CLOSED and SetDistributedTables logs error.
- * @tc.type: FUNC
- */
-HWTEST_F(RdbStoreImplConditionTest, RegisterDataChangeCallback_Test_002, TestSize.Level2)
-{
-    auto mockRdbService = std::make_shared<MockRdbService>();
-    EXPECT_CALL(*mockRdbManagerImpl, GetRdbService(_)).WillRepeatedly(Return(std::make_pair(E_OK, mockRdbService)));
-    EXPECT_CALL(*mockRdbService, SetDistributedTables(_, _, _, _, _)).WillOnce(Return(E_OK));
-    RdbStoreConfig config(RdbStoreImplConditionTest::DATABASE_NAME);
-    config.SetReadOnly(false);
-    config.SetStorageMode(StorageMode::MODE_DISK);
-    config.SetDBType(DB_SQLITE);
-    config.SetRegisterInfo(RegisterType::STORE_OBSERVER, true);
-    RdbStoreImplConditionTestOpenCallback helper;
-    int errCode = E_OK;
-    std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
-    ASSERT_NE(store, nullptr) << "store is null";
-    std::vector<std::string> tables;
-    OHOS::DistributedRdb::DistributedConfig distributedConfig;
-    tables.push_back("employee");
-    EXPECT_CALL(*mockConnection, SubscribeTableChanges(_)).WillOnce(Return(E_ERROR));
-    errCode = store->SetDistributedTables(tables, DISTRIBUTED_CLOUD, distributedConfig);
-    EXPECT_EQ(E_OK, errCode);
 }
 
 /**
@@ -2674,166 +2620,26 @@ HWTEST_F(RdbStoreImplConditionTest, DeleteSyncedData_Test_003, TestSize.Level2)
 }
 
 /**
- * @tc.name: CloudTables_Contains_Test_001
- * @tc.desc: Test CloudTables::Contains returns true when table exists.
+ * @tc.name: CloudTables::Change_Test_001
+ * @tc.desc: Abnormal testCase of CloudTables::Change
  * @tc.type: FUNC
  */
-HWTEST_F(RdbStoreImplConditionTest, CloudTables_Contains_Test_001, TestSize.Level2)
+HWTEST_F(RdbStoreImplConditionTest, CloudTables_Change_Test_001, TestSize.Level2)
 {
     auto cloudTables = std::make_shared<RdbStoreImpl::CloudTables>();
-    cloudTables->AddTables({ "cloud_table1", "cloud_table2" });
-    EXPECT_TRUE(cloudTables->Contains("cloud_table1"));
-    EXPECT_TRUE(cloudTables->Contains("cloud_table2"));
-}
-
-/**
- * @tc.name: CloudTables_Contains_Test_002
- * @tc.desc: Test CloudTables::Contains returns false when table does not exist.
- * @tc.type: FUNC
- */
-HWTEST_F(RdbStoreImplConditionTest, CloudTables_Contains_Test_002, TestSize.Level2)
-{
-    auto cloudTables = std::make_shared<RdbStoreImpl::CloudTables>();
-    cloudTables->AddTables({ "cloud_table1" });
-    EXPECT_FALSE(cloudTables->Contains("non_exist_table"));
-    EXPECT_FALSE(cloudTables->Contains(""));
-}
-
-/**
- * @tc.name: IsCloudTableChanged_Test_001
- * @tc.desc: Test IsCloudTableChanged returns false when cloudInfo is nullptr.
- * @tc.type: FUNC
- */
-HWTEST_F(RdbStoreImplConditionTest, IsCloudTableChanged_Test_001, TestSize.Level2)
-{
-    RdbChangedData changedData;
-    changedData.tableData.insert_or_assign("test_table", RdbChangeProperties());
-    auto result = RdbStoreImpl::IsCloudTableChanged(changedData, nullptr);
-    EXPECT_FALSE(result);
-}
-
-/**
- * @tc.name: IsCloudTableChanged_Test_002
- * @tc.desc: Test IsCloudTableChanged returns true when changed table is a cloud table.
- * @tc.type: FUNC
- */
-HWTEST_F(RdbStoreImplConditionTest, IsCloudTableChanged_Test_002, TestSize.Level2)
-{
-    auto cloudTables = std::make_shared<RdbStoreImpl::CloudTables>();
-    cloudTables->AddTables({ "cloud_table" });
-
-    RdbChangedData changedData;
-    RdbChangeProperties props;
-    props.isCloudSyncDataChange = true;
-    changedData.tableData.insert_or_assign("cloud_table", props);
-
-    auto result = RdbStoreImpl::IsCloudTableChanged(changedData, cloudTables);
-    EXPECT_TRUE(result);
-}
-
-/**
- * @tc.name: IsCloudTableChanged_Test_003
- * @tc.desc: Test IsCloudTableChanged returns false when changed table is not a cloud table.
- * @tc.type: FUNC
- */
-HWTEST_F(RdbStoreImplConditionTest, IsCloudTableChanged_Test_003, TestSize.Level2)
-{
-    auto cloudTables = std::make_shared<RdbStoreImpl::CloudTables>();
-    cloudTables->AddTables({ "cloud_table" });
-
-    RdbChangedData changedData;
-    RdbChangeProperties props;
-    changedData.tableData.insert_or_assign("non_cloud_table", props);
-
-    auto result = RdbStoreImpl::IsCloudTableChanged(changedData, cloudTables);
-    EXPECT_FALSE(result);
-}
-
-/**
- * @tc.name: IsNotifyService_Cloud_Test_001
- * @tc.desc: Test IsNotifyService returns true when cloud table changed.
- * @tc.type: FUNC
- */
-HWTEST_F(RdbStoreImplConditionTest, IsNotifyService_Cloud_Test_001, TestSize.Level2)
-{
-    auto cloudTables = std::make_shared<RdbStoreImpl::CloudTables>();
-    cloudTables->AddTables({ "cloud_table" });
-
-    RdbChangedData changedData;
-    RdbChangeProperties props;
-    props.isCloudSyncDataChange = true;
-    changedData.tableData.insert_or_assign("cloud_table", props);
-
-    RdbNotifyConfig notifyConfig;
-    notifyConfig.isFull_ = false;
-    notifyConfig.delay_ = 0;
-
-    auto result = RdbStoreImpl::IsNotifyService(changedData, notifyConfig, cloudTables);
-    EXPECT_TRUE(result);
-}
-
-/**
- * @tc.name: IsNotifyService_Cloud_Test_002
- * @tc.desc: Test IsNotifyService returns false when no cloud table changed and no other changes.
- * @tc.type: FUNC
- */
-HWTEST_F(RdbStoreImplConditionTest, IsNotifyService_Cloud_Test_002, TestSize.Level2)
-{
-    auto cloudTables = std::make_shared<RdbStoreImpl::CloudTables>();
-    cloudTables->AddTables({ "cloud_table" });
-
-    RdbChangedData changedData;
-    RdbChangeProperties props;
-    changedData.tableData.insert_or_assign("non_cloud_table", props);
-
-    RdbNotifyConfig notifyConfig;
-    notifyConfig.isFull_ = false;
-    notifyConfig.delay_ = 0;
-
-    auto result = RdbStoreImpl::IsNotifyService(changedData, notifyConfig, cloudTables);
-    EXPECT_FALSE(result);
-}
-
-/**
- * @tc.name: IsNotifyService_Cloud_Test_003
- * @tc.desc: Test IsNotifyService returns false when cloudInfo is nullptr and no other changes.
- * @tc.type: FUNC
- */
-HWTEST_F(RdbStoreImplConditionTest, IsNotifyService_Cloud_Test_003, TestSize.Level2)
-{
-    RdbChangedData changedData;
-    RdbChangeProperties props;
-    changedData.tableData.insert_or_assign("test_table", props);
-
-    RdbNotifyConfig notifyConfig;
-    notifyConfig.isFull_ = false;
-
-    auto result = RdbStoreImpl::IsNotifyService(changedData, notifyConfig, nullptr);
-    EXPECT_FALSE(result);
-}
-
-/**
- * @tc.name: IsNotifyService_Cloud_Test_004
- * @tc.desc: Test IsNotifyService returns true when cloud table changed regardless of delay_ value.
- *           MAX_NOTIFY_INTERVAL escape path (delay_ != 0) must also pass cloud table check.
- * @tc.type: FUNC
- */
-HWTEST_F(RdbStoreImplConditionTest, IsNotifyService_Cloud_Test_004, TestSize.Level2)
-{
-    auto cloudTables = std::make_shared<RdbStoreImpl::CloudTables>();
-    cloudTables->AddTables({ "cloud_table" });
-
-    RdbChangedData changedData;
-    RdbChangeProperties props;
-    props.isCloudSyncDataChange = true;
-    changedData.tableData.insert_or_assign("cloud_table", props);
-
-    RdbNotifyConfig notifyConfig;
-    notifyConfig.isFull_ = false;
-    notifyConfig.delay_ = 10000;
-
-    auto result = RdbStoreImpl::IsNotifyService(changedData, notifyConfig, cloudTables);
-    EXPECT_TRUE(result);
+    std::string table = "";
+    auto res = cloudTables->Change(table);
+    EXPECT_EQ(false, res);
+    cloudTables->AddTables({ "test1" });
+    std::string table1 = "test";
+    res = cloudTables->Change(table1);
+    EXPECT_EQ(false, res);
+    cloudTables->AddTables({ "test" });
+    std::string table2 = "test";
+    res = cloudTables->Change(table2);
+    EXPECT_EQ(true, res);
+    res = cloudTables->Change(table);
+    EXPECT_EQ(false, res);
 }
 
 /**

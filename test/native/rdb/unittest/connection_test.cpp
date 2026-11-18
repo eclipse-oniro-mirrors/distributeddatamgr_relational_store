@@ -21,7 +21,6 @@
 #include <string>
 
 #include "common.h"
-#include "block_data.h"
 #include "grd_type_export.h"
 #include "knowledge_types.h"
 #include "rdb_errno.h"
@@ -29,7 +28,6 @@
 #include "rdb_open_callback.h"
 #include "rdb_store.h"
 #include "rdb_store_config.h"
-#include "rdb_types.h"
 #include "sqlite_connection.h"
 #include "sqlite_global_config.h"
 
@@ -502,58 +500,5 @@ HWTEST_F(ConnectionTest, SetKnowledgeSchema_001, TestSize.Level1)
     table.knowledgeFields.push_back(field);
     schema.tables.push_back(table);
     EXPECT_EQ(conn->SetKnowledgeSchema(schema), E_INVALID_ARGS);
-}
-
-/**
- * @tc.name: ConvertChangedData_CloudSync_Test_001
- * @tc.desc: Test ConvertChangedData propagates isCloudSyncDataChange when true.
- * @tc.type: FUNC
- */
-HWTEST_F(ConnectionTest, ConvertChangedData_CloudSync_Test_001, TestSize.Level1)
-{
-    struct MockChangeProperties {
-        bool isTrackedDataChange = false;
-        bool isP2pSyncDataChange = false;
-        bool isKnowledgeDataChange = false;
-        bool isCloudSyncDataChange = false;
-    };
-    struct MockClientChangedData {
-        std::map<std::string, MockChangeProperties> tableData;
-    };
-
-    MockClientChangedData clientData;
-    MockChangeProperties props;
-    props.isCloudSyncDataChange = true;
-    clientData.tableData["cloud_table"] = props;
-
-    auto result = SqliteConnection::ConvertChangedData(clientData);
-    EXPECT_EQ(result.tableData.count("cloud_table"), 1u);
-    EXPECT_TRUE(result.tableData["cloud_table"].isCloudSyncDataChange);
-    EXPECT_FALSE(result.tableData["cloud_table"].isTrackedDataChange);
-}
-
-/**
- * @tc.name: ConvertChangedData_CloudSync_Test_002
- * @tc.desc: Test ConvertChangedData skips table when all flags are false.
- * @tc.type: FUNC
- */
-HWTEST_F(ConnectionTest, ConvertChangedData_CloudSync_Test_002, TestSize.Level1)
-{
-    struct MockChangeProperties {
-        bool isTrackedDataChange = false;
-        bool isP2pSyncDataChange = false;
-        bool isKnowledgeDataChange = false;
-        bool isCloudSyncDataChange = false;
-    };
-    struct MockClientChangedData {
-        std::map<std::string, MockChangeProperties> tableData;
-    };
-
-    MockClientChangedData clientData;
-    MockChangeProperties props;
-    clientData.tableData["skip_table"] = props;
-
-    auto result = SqliteConnection::ConvertChangedData(clientData);
-    EXPECT_EQ(result.tableData.count("skip_table"), 0u);
 }
 } // namespace Test

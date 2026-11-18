@@ -249,11 +249,13 @@ private:
     public:
         int32_t AddTables(const std::vector<std::string> &tables);
         int32_t RmvTables(const std::vector<std::string> &tables);
-        bool Contains(const std::string &table);
+        bool Change(const std::string &table);
+        std::set<std::string> Steal();
 
     private:
         std::mutex mutex_;
         std::set<std::string> tables_;
+        std::set<std::string> changes_;
     };
     static void AfterOpen(const RdbParam &param, int32_t retry = 0,
         const std::shared_ptr<std::promise<void>> &promise = nullptr);
@@ -278,7 +280,7 @@ private:
     int CheckAttach(const std::string &sql);
     std::pair<int32_t, Stmt> BeginExecuteSql(const std::string &sql);
     int GetDataBasePath(const std::string &databasePath, std::string &backupFilePath);
-    void DoCloudSync();
+    void DoCloudSync(const std::string &table);
     int32_t InitOwner(int version, RdbOpenCallback &openCallback);
     std::pair<int32_t, int64_t> ExecuteBatchInsert(const std::shared_ptr<ConnectionPool> &pool,
         const std::shared_ptr<Connection> &conn, const SqliteSqlBuilder::BatchRefSqls &executeSqlArgs,
@@ -366,10 +368,7 @@ private:
         const bool isForceRestore = false);
     static bool IsKnowledgeDataChange(const DistributedRdb::RdbChangedData &rdbChangedData);
     static bool IsNotifyService(const DistributedRdb::RdbChangedData &rdbChangedData,
- 	    const DistributedRdb::RdbNotifyConfig &rdbNotifyConfig,
- 	    const std::shared_ptr<CloudTables> &cloudInfo);
-    static bool IsCloudTableChanged(const DistributedRdb::RdbChangedData &rdbChangedData,
-        const std::shared_ptr<CloudTables> &cloudInfo);
+ 	    const DistributedRdb::RdbNotifyConfig &rdbNotifyConfig);
     static void ReplayCallbackImpl(const RdbStoreConfig &config, std::weak_ptr<ConnectionPool> pool = {});
     std::pair<int32_t, std::vector<std::string>> ConvertToUuids(const std::vector<std::string> &devices);
 
