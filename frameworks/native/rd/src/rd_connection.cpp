@@ -35,7 +35,7 @@ __attribute__((used))
 const int32_t RdConnection::regRepairer_ = Connection::RegisterRepairer(DB_VECTOR, RdConnection::Repair);
 __attribute__((used))
 const int32_t RdConnection::regDeleter_ = Connection::RegisterDeleter(DB_VECTOR, RdConnection::Delete);
-constexpr int CONFIG_SIZE_EXCEPT_ENCRYPT = 167;  // When modifying config, this item needs to be modified
+constexpr int CONFIG_SIZE_EXCEPT_ENCRYPT = 233;  // When modifying config, this item needs to be modified
 
 std::pair<int32_t, std::shared_ptr<Connection>> RdConnection::Create(const RdbStoreConfig &config, bool isWrite)
 {
@@ -69,7 +69,7 @@ int32_t RdConnection::Repair(const RdbStoreConfig &config)
         return errCode;
     }
     std::vector<uint8_t> key = config.GetEncryptKey();
-    errCode = RdUtils::RdDbRepair(dbPath.c_str(), GetConfigStr(key, config.IsEncrypt()).c_str());
+    errCode = RdUtils::RdDbRepair(dbPath.c_str(), GetConfigStr(key, config.IsEncrypt(), config).c_str());
     key.assign(key.size(), 0);
     if (errCode != E_OK) {
         LOG_ERROR("Fail to repair db.");
@@ -116,7 +116,8 @@ RdConnection::~RdConnection()
     }
 }
 
-std::string RdConnection::GetConfigStr(const std::vector<uint8_t> &keys, bool isEncrypt)
+std::string RdConnection::GetConfigStr(
+    const std::vector<uint8_t> &keys, bool isEncrypt, const RdbStoreConfig &configuration)
 {
     std::string config = "{";
     if (isEncrypt) {
@@ -129,6 +130,9 @@ std::string RdConnection::GetConfigStr(const std::vector<uint8_t> &keys, bool is
         config += "\",";
         std::fill(keyBuff.begin(), keyBuff.end(), 0);
     }
+    config += "\"encryptionGranularity\":" + std::to_string(configuration.GetEncryptionGranularity()) + ",";
+    config += "\"baseSecurityLevel\":" + std::to_string(configuration.GetBaseSecurityLevel()) + ",";
+    config += "\"accessControl\":" + std::to_string(configuration.IsAccessControl() ? 1 : 0) + ",";
     config += RdConnection::GRD_OPEN_CONFIG_STR;
     config += "}";
     return config;
@@ -153,11 +157,11 @@ int RdConnection::InnerOpen(const RdbStoreConfig &config)
     }
 
     std::vector<uint8_t> key = config.GetEncryptKey();
-    std::string configStr = GetConfigStr(key, config.IsEncrypt());
+    std::string configStr = GetConfigStr(key, config.IsEncrypt(), config);
     errCode = RdUtils::RdDbOpen(dbPath.c_str(), configStr.c_str(),
         GRD_DB_OPEN_CREATE | GRD_DB_OPEN_IGNORE_DATA_CORRPUPTION, &dbHandle_);
     if (errCode == E_CHANGE_UNENCRYPTED_TO_ENCRYPTED) {
-        errCode = RdUtils::RdDbRekey(dbPath.c_str(), GetConfigStr({}, false).c_str(), key);
+        errCode = RdUtils::RdDbRekey(dbPath.c_str(), GetConfigStr({}, false, config).c_str(), key);
         if (errCode != E_OK) {
             key.assign(key.size(), 0);
             RdUtils::ClearAndZeroString(configStr);
@@ -244,7 +248,7 @@ int32_t RdConnection::ResetKey(const RdbStoreConfig &config)
     }
     std::vector<uint8_t> key = config.GetEncryptKey();
     std::vector<uint8_t> newKey = config.GetNewEncryptKey();
-    std::string configStr = GetConfigStr(key, config.IsEncrypt());
+    std::string configStr = GetConfigStr(key, config.IsEncrypt(), config);
     errCode = RdUtils::RdDbRekey(dbPath.c_str(), configStr.c_str(), newKey);
     RdUtils::ClearAndZeroString(configStr);
     key.assign(key.size(), 0);
@@ -306,7 +310,7 @@ int32_t RdConnection::Rekey(const RdbStoreConfig::CryptoParam &cryptoParam)
     }
     dbHandle_ = nullptr;
     std::vector<uint8_t> oldKey = config_.GetEncryptKey();
-    std::string configStr = GetConfigStr(oldKey, config_.IsEncrypt());
+    std::string configStr = GetConfigStr(oldKey, config_.IsEncrypt(), config_);
     errCode = RdUtils::RdDbRekey(dbPath.c_str(), configStr.c_str(), key);
     RdUtils::ClearAndZeroString(configStr);
     oldKey.assign(oldKey.size(), 0);
@@ -385,6 +389,34 @@ int32_t RdConnection::Subscribe(const std::shared_ptr<DistributedDB::StoreObserv
 int32_t RdConnection::Unsubscribe(const std::shared_ptr<DistributedDB::StoreObserver> &observer)
 {
     return E_NOT_SUPPORT;
+}
+
+int32_t RdConnection::SetScreenLockState(ScreenLockState state)
+{
+    LOG_INFO("Set screen lock state, state:%{public}u, granularity:%{public}d, securityLevel:%{public}d.",
+        static_cast<uint32_t>(state), config_.GetEncryptionGranularity(), config_.GetBaseSecurityLevel());
+    return RdUtils::RdSqlSetScreenLockState(static_cast<GRD_ScreenLockState>(state));
+}
+
+int32_t RdConnection::SetDeviceHealthyState(DeviceHealthyState state)
+{
+    LOG_INFO("Set device healthy state, state:%{public}u, granularity:%{public}d, securityLevel:%{public}d.",
+        static_cast<uint32_t>(state), config_.GetEncryptionGranularity(), config_.GetBaseSecurityLevel());
+    return RdUtils::RdSqlSetDeviceHealthyState(static_cast<GRD_DeviceHealthyState>(state));
+}
+
+int32_t RdConnection::AddPolicy(const std::string &policy)
+{
+    LOG_INFO("Add policy, granularity:%{public}d, securityLevel:%{public}d.",
+        config_.GetEncryptionGranularity(), config_.GetBaseSecurityLevel());
+    return RdUtils::RdSqlAddPolicy(dbHandle_, policy.c_str());
+}
+
+int32_t RdConnection::RemovePolicy(const std::string &policyName)
+{
+    LOG_INFO("Remove policy, granularity:%{public}d, securityLevel:%{public}d.",
+        config_.GetEncryptionGranularity(), config_.GetBaseSecurityLevel());
+    return RdUtils::RdSqlRemovePolicy(dbHandle_, policyName.c_str());
 }
 
 int32_t RdConnection::Backup(const std::string &databasePath, const std::vector<uint8_t> &destEncryptKey, bool isAsync,

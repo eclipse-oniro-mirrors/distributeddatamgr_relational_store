@@ -89,6 +89,10 @@ public:
 
     static int RdSqlRegistryThreadPool(GRD_DB *db);
     static int RdSqlRegistryClusterAlgo(GRD_DB *db, const char *clstAlgoName, GRD_ClusterAlgoFunc func);
+    static int RdSqlSetScreenLockState(GRD_ScreenLockState state);
+    static int RdSqlSetDeviceHealthyState(GRD_DeviceHealthyState state);
+    static int RdSqlAddPolicy(GRD_DB *db, const char *policy);
+    static int RdSqlRemovePolicy(GRD_DB *db, const char *policyName);
 private:
     static GRD_DbThreadPoolT threadPool_;
 };

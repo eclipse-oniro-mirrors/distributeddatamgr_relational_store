@@ -74,6 +74,10 @@ public:
     void ReplayBinlog(const RdbStoreConfig &config, bool chkBinlogCount) override;
     int SetMatrixFileInfo(const DistributedRdb::MatrixFileInfo &fileInfo) override;
     int UpdateTrackerMatrix(const DistributedRdb::RdbChangedData &rdbChangedData, bool isFull) override;
+    int32_t SetScreenLockState(ScreenLockState state) override;
+    int32_t SetDeviceHealthyState(DeviceHealthyState state) override;
+    int32_t AddPolicy(const std::string &policy) override;
+    int32_t RemovePolicy(const std::string &policyName) override;
 
 private:
     static constexpr int MAX_VARIABLE_NUM = 32766;
@@ -88,8 +92,8 @@ private:
     static const int32_t regRepairer_;
     static const int32_t regDeleter_;
 
-    static std::string GetConfigStr(const std::vector<uint8_t> &keys, bool isEncrypt);
-    std::string GetConfigStr(const std::vector<uint8_t> &keys);
+    static std::string GetConfigStr(
+        const std::vector<uint8_t> &keys, bool isEncrypt, const RdbStoreConfig &configuration);
     int InnerOpen(const RdbStoreConfig &config);
     std::pair<int32_t, std::vector<uint8_t>> GetRekeyNewKey(const RdbStoreConfig::CryptoParam &cryptoParam);
     bool isWriter_ = false;

@@ -64,6 +64,10 @@ void GRD_DBApiInitEnhance(GRD_APIInfo &GRD_DBApiInfo)
     GRD_DBApiInfo.DBSetConfigApi = (DBSetConfig)dlsym(g_library, "GRD_SetConfig");
     GRD_DBApiInfo.DBSqlRegistryThreadPool = (DBSqlRegistryThreadPool)dlsym(g_library, "GRD_DbRegistryThreadPool");
     GRD_DBApiInfo.DBSqlRegistryClusterAlgo = (DBSqlRegistryClusterAlgo)dlsym(g_library, "GRD_SqlRegistryClusterAlgo");
+    GRD_DBApiInfo.DBSetScreenLockStateApi = (DBSetScreenLockState)dlsym(g_library, "GsPD_SetScreenLockState");
+    GRD_DBApiInfo.DBSetDeviceHealthyStateApi = (DBSetDeviceHealthyState)dlsym(g_library, "GsPD_SetDeviceState");
+    GRD_DBApiInfo.DBAddPolicyApi = (DBAddPolicy)dlsym(g_library, "GsPD_SqlPolicyAdd");
+    GRD_DBApiInfo.DBRemovePolicyApi = (DBRemovePolicy)dlsym(g_library, "GsPD_SqlPolicyRemove");
 #endif
 }
 

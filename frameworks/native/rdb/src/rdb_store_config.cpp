@@ -813,6 +813,36 @@ void RdbStoreConfig::SetEncryptStatus(const bool status) const
     this->isEncrypt_ = status;
 }
 
+int32_t RdbStoreConfig::GetEncryptionGranularity() const
+{
+    return encryptionGranularity_;
+}
+
+void RdbStoreConfig::SetEncryptionGranularity(EncryptedConfig encryptionGranularity)
+{
+    encryptionGranularity_ = static_cast<int32_t>(encryptionGranularity);
+}
+
+int32_t RdbStoreConfig::GetBaseSecurityLevel() const
+{
+    return baseSecurityLevel_;
+}
+
+void RdbStoreConfig::SetBaseSecurityLevel(BSecurityLevel baseSecurityLevel)
+{
+    baseSecurityLevel_ = static_cast<int32_t>(baseSecurityLevel);
+}
+
+bool RdbStoreConfig::IsAccessControl() const
+{
+    return accessControl_;
+}
+
+void RdbStoreConfig::SetAccessControl(bool accessControl)
+{
+    accessControl_ = accessControl;
+}
+
 void RdbStoreConfig::SetCryptoParam(const RdbStoreConfig::CryptoParam &cryptoParam) const
 {
     cryptoParam_ = cryptoParam;
@@ -869,6 +899,7 @@ std::string RdbStoreConfig::ToString() const
     oss << " syncMode:" << syncMode_ << ",";
     oss << " databaseFileType:" << databaseFileType << ",";
     oss << " isEncrypt:" << IsEncrypt() << ",";
+    oss << " accessControl:" << IsAccessControl() << ",";
     oss << " isSearchable:" << IsSearchable() << ",";
     oss << " readOnly_:" << readOnly_ << ",";
     oss << " securityLevel:" << static_cast<int32_t>(securityLevel_) << ",";
@@ -893,6 +924,12 @@ std::string RdbStoreConfig::FormatCfg(const RdbStoreConfig &first, const RdbStor
     oss << " syncMode:" << first.syncMode_ << "->" << second.syncMode_ << ",";
     oss << " databaseFileType:" << first.databaseFileType << "->" << second.databaseFileType << ",";
     oss << " isEncrypt:" << first.IsEncrypt() << "->" << second.IsEncrypt() << ",";
+    oss << " accessControl:" << first.IsAccessControl() << "->" << second.IsAccessControl() << ",";
+    if (first.dbType_ == DB_VECTOR && second.dbType_ == DB_VECTOR) {
+        oss << " encryptionGranularity:" << first.encryptionGranularity_ << "->" << second.encryptionGranularity_
+            << ",";
+        oss << " baseSecurityLevel:" << first.baseSecurityLevel_ << "->" << second.baseSecurityLevel_ << ",";
+    }
     oss << " isSearchable:" << first.IsSearchable() << "->" << second.IsSearchable() << ",";
     oss << " readOnly_:" << first.readOnly_ << "->" << second.readOnly_ << ",";
     oss << " securityLevel:" << static_cast<int32_t>(first.securityLevel_) << "->"

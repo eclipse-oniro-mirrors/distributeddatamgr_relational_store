@@ -204,6 +204,10 @@ public:
     int ConfigLocale(const std::string &localeStr) override;
     int ArchiveSyncedData(const std::string &table, uint64_t cursor) override;
     int DeleteSyncedData(const std::string &table, const std::vector<std::vector<PRIKey>> &keys) override;
+    int SetScreenState(ScreenLockState state) override;
+    int SetDeviceHealthyState(DeviceHealthyState state) override;
+    int AddPolicy(const std::string &policy) override;
+    int RemovePolicy(const std::string &policyName) override;
     std::string GetLastErrorMsg() const override;
 
     // not virtual functions /

@@ -692,5 +692,53 @@ int RdUtils::RdSqlRegistryClusterAlgo(GRD_DB *db, const char *clstAlgoName, GRD_
     return TransferGrdErrno(GRD_KVApiInfo.DBSqlRegistryClusterAlgo(db, clstAlgoName, func));
 }
 
+int RdUtils::RdSqlSetScreenLockState(GRD_ScreenLockState state)
+{
+    if (GRD_KVApiInfo.DBSetScreenLockStateApi == nullptr) {
+        GRD_KVApiInfo = GetApiInfoInstance();
+    }
+    if (GRD_KVApiInfo.DBSetScreenLockStateApi == nullptr) {
+        LOG_ERROR("set screen lock state ptr is nullptr");
+        return E_NOT_SUPPORT;
+    }
+    return TransferGrdErrno(GRD_KVApiInfo.DBSetScreenLockStateApi(state));
+}
+
+int RdUtils::RdSqlSetDeviceHealthyState(GRD_DeviceHealthyState state)
+{
+    if (GRD_KVApiInfo.DBSetDeviceHealthyStateApi == nullptr) {
+        GRD_KVApiInfo = GetApiInfoInstance();
+    }
+    if (GRD_KVApiInfo.DBSetDeviceHealthyStateApi == nullptr) {
+        LOG_ERROR("set device healthy state ptr is nullptr");
+        return E_NOT_SUPPORT;
+    }
+    return TransferGrdErrno(GRD_KVApiInfo.DBSetDeviceHealthyStateApi(state));
+}
+
+int RdUtils::RdSqlAddPolicy(GRD_DB *db, const char *policy)
+{
+    if (GRD_KVApiInfo.DBAddPolicyApi == nullptr) {
+        GRD_KVApiInfo = GetApiInfoInstance();
+    }
+    if (GRD_KVApiInfo.DBAddPolicyApi == nullptr) {
+        LOG_ERROR("add policy ptr is nullptr");
+        return E_NOT_SUPPORT;
+    }
+    return TransferGrdErrno(GRD_KVApiInfo.DBAddPolicyApi(db, policy));
+}
+
+int RdUtils::RdSqlRemovePolicy(GRD_DB *db, const char *policyName)
+{
+    if (GRD_KVApiInfo.DBRemovePolicyApi == nullptr) {
+        GRD_KVApiInfo = GetApiInfoInstance();
+    }
+    if (GRD_KVApiInfo.DBRemovePolicyApi == nullptr) {
+        LOG_ERROR("remove policy ptr is nullptr");
+        return E_NOT_SUPPORT;
+    }
+    return TransferGrdErrno(GRD_KVApiInfo.DBRemovePolicyApi(db, policyName));
+}
+
 } // namespace NativeRdb
 } // namespace OHOS

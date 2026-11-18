@@ -145,7 +145,7 @@ int RdStatement::Prepare(GRD_DB *db, const std::string &newSql)
     sql_ = newSql;
     stmtHandle_ = tmpStmt;
     columnCount_ = RdUtils::RdSqlColCnt(tmpStmt);
-    readOnly_ = SqliteUtils::GetSqlStatementType(newSql) == SqliteUtils::STATEMENT_SELECT;
+    readOnly_ = SqliteUtils::GetSqlStatementType(newSql, DB_VECTOR) == SqliteUtils::STATEMENT_SELECT;
     return E_OK;
 }
 

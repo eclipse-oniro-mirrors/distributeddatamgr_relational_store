@@ -91,17 +91,17 @@ std::shared_ptr<RdbStoreImpl> RdbStoreManager::GetStoreFromCache(
         return rdbStore;
     }
 
-    if (!(rdbStore->GetConfig() == config)) {
-        auto log = RdbStoreConfig::FormatCfg(rdbStore->GetConfig(), config);
+    const auto &cachedConfig = rdbStore->GetConfig();
+    if (!(cachedConfig == config)) {
+        auto log = RdbStoreConfig::FormatCfg(cachedConfig, config);
         LOG_WARN("Diff config! app[%{public}s:%{public}s] path[%{public}s] cfg[%{public}s]",
             config.GetBundleName().c_str(), config.GetModuleName().c_str(), SqliteUtils::Anonymous(path).c_str(),
             log.c_str());
         Reportor::ReportFault(RdbFaultDbFileEvent(RdbFaultType::FT_OPEN, E_CONFIG_INVALID_CHANGE, config, log));
-        if (rdbStore->GetConfig().IsMemoryRdb() || config.IsMemoryRdb() ||
+        if (cachedConfig.HasVectorSecurityConflict(config) || cachedConfig.IsMemoryRdb() || config.IsMemoryRdb() ||
             config.GetVersion() >= ConfigVersion::INVALID_CONFIG_CHANGE_NOT_ALLOWED ||
-            rdbStore->GetConfig().GetVersion() >= ConfigVersion::INVALID_CONFIG_CHANGE_NOT_ALLOWED ||
-            (rdbStore->GetConfig().GetReplicaPath() != config.GetReplicaPath() &&
-            config.GetHaMode() != HAMode::SINGLE)) {
+            cachedConfig.GetVersion() >= ConfigVersion::INVALID_CONFIG_CHANGE_NOT_ALLOWED ||
+            (cachedConfig.GetReplicaPath() != config.GetReplicaPath() && config.GetHaMode() != HAMode::SINGLE)) {
             errCode = E_CONFIG_INVALID_CHANGE;
             rdbStore = nullptr;
             return rdbStore;

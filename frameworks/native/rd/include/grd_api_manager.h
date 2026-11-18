@@ -60,6 +60,10 @@ typedef GRD_DbValueT (*DBGetConfig)(GRD_DB *db, GRD_ConfigTypeE type);
 typedef int32_t (*DBSetConfig)(GRD_DB *db, GRD_ConfigTypeE type, GRD_DbValueT value);
 typedef int32_t (*DBSqlRegistryThreadPool)(GRD_DB *db, GRD_DbThreadPoolT *threadPool);
 typedef int32_t (*DBSqlRegistryClusterAlgo)(GRD_DB *db, const char *clstAlgoName, GRD_ClusterAlgoFunc func);
+typedef int32_t (*DBSetScreenLockState)(GRD_ScreenLockState state);
+typedef int32_t (*DBSetDeviceHealthyState)(GRD_DeviceHealthyState state);
+typedef int32_t (*DBAddPolicy)(GRD_DB *db, const char *policy);
+typedef int32_t (*DBRemovePolicy)(GRD_DB *db, const char *policyName);
 
 struct GRD_APIInfo {
     DBOpen DBOpenApi = nullptr;
@@ -94,6 +98,10 @@ struct GRD_APIInfo {
     DBSetConfig DBSetConfigApi = nullptr;
     DBSqlRegistryThreadPool DBSqlRegistryThreadPool = nullptr;
     DBSqlRegistryClusterAlgo DBSqlRegistryClusterAlgo = nullptr;
+    DBSetScreenLockState DBSetScreenLockStateApi = nullptr;
+    DBSetDeviceHealthyState DBSetDeviceHealthyStateApi = nullptr;
+    DBAddPolicy DBAddPolicyApi = nullptr;
+    DBRemovePolicy DBRemovePolicyApi = nullptr;
 };
 
 API_EXPORT bool IsUsingArkData();

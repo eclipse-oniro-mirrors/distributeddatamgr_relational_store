@@ -94,7 +94,7 @@ int StepResultSet::PrepareStep()
         return lastErr_;
     }
 
-    auto type = SqliteUtils::GetSqlStatementType(sql_);
+    auto type = SqliteUtils::GetSqlStatementType(sql_, conn_->GetDBType());
     if (type == SqliteUtils::STATEMENT_ERROR) {
         LOG_ERROR("invalid sql_ %{public}s!", SqliteUtils::SqlAnonymous(sql_).c_str());
         lastErr_ = E_INVALID_ARGS;

@@ -33,6 +33,7 @@ using namespace OHOS::Rdb;
 using namespace DistributedRdb;
 TransDB::TransDB(std::shared_ptr<Connection> conn, const std::string &path) : conn_(conn), path_(path)
 {
+    dbType_ = conn->GetDBType();
     maxArgs_ = conn->GetMaxVariable();
 }
 
@@ -252,7 +253,7 @@ std::pair<int32_t, ValueObject> TransDB::Execute(
 {
     (void)trxId;
     ValueObject object;
-    int sqlType = SqliteUtils::GetSqlStatementType(sql);
+    int sqlType = SqliteUtils::GetSqlStatementType(sql, dbType_);
     if (!SqliteUtils::IsSupportSqlForExecute(sqlType) && !SqliteUtils::IsSpecial(sqlType)) {
         LOG_ERROR("Not support the sql:app self can check the SQL, sqlType:%{public}d, sql:%{public}s",
             sqlType, SqliteUtils::SqlAnonymous(sql).c_str());
@@ -297,7 +298,7 @@ std::pair<int32_t, ValueObject> TransDB::Execute(
 std::pair<int32_t, Results> TransDB::ExecuteExt(const std::string &sql, const Values &args)
 {
     ValueObject object;
-    int sqlType = SqliteUtils::GetSqlStatementType(sql);
+    int sqlType = SqliteUtils::GetSqlStatementType(sql, dbType_);
     if (!SqliteUtils::IsSupportSqlForExecute(sqlType) && !SqliteUtils::IsSpecial(sqlType)) {
         LOG_ERROR("Not support the sql:app self can check the SQL");
         SetErrorMsg("Invalid args: this SQL type is not supported in transaction executeExt");

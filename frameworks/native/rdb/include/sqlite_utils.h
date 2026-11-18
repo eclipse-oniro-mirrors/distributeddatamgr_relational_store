@@ -88,7 +88,7 @@ public:
         "exchange_failed", "stale_binlog", "async_restore",
     };
 
-    static int GetSqlStatementType(const std::string &sql);
+    static int GetSqlStatementType(const std::string &sql, int32_t dbType = DB_SQLITE);
     static bool IsSupportSqlForExecute(int sqlType);
     static bool IsSqlReadOnly(int sqlType);
     static bool IsSpecial(int sqlType);
