@@ -945,7 +945,7 @@ public:
 
     void SetWalLimitSize(ssize_t size);
 
-    static constexpr uint32_t BINLOG_FILE_SIZE_DEFAULT = 1024 * 1024 * 4; // 4MB, default value when SetBinlogFileSize not called
+    static constexpr uint32_t BINLOG_FILE_SIZE_DEFAULT = 1024 * 1024 * 4; // 4MB
     static constexpr uint32_t BINLOG_FILE_SIZE_MIN = 64 * 1024;            // 64KB
     static constexpr uint32_t BINLOG_FILE_SIZE_MAX = 16 * 1024 * 1024;     // 16MB
 
