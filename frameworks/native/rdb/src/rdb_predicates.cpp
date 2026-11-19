@@ -119,6 +119,11 @@ std::string RdbPredicates::ProcessJoins() const
 {
     std::string builder;
     size_t size = joinTableNames.size();
+    if (joinTypes.size() < size) {
+        LOG_WARN("joinTypes size %{public}zu is less than joinTableNames size %{public}zu",
+                 joinTypes.size(), size);
+        size = joinTypes.size();
+    }
     for (size_t i = 0; i < size; i++) {
         if (i != 0) {
             builder = builder + " ";

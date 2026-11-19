@@ -508,3 +508,24 @@ HWTEST_F(RdbStorePredicateJoinTest, RdbStore_CrossJoin_WithoutCondition_010, Tes
     EXPECT_EQ(15, ResultSize(allDataTypes)) << "CROSS JOIN should produce Cartesian product";
     allDataTypes->Close();
 }
+
+/* *
+ * @tc.name: RdbStore_JoinTypesSizeMismatch_011
+ * @tc.desc: Verify GetJoinClause does not crash when joinTypes is shorter than joinTableNames (SIGSEGV regression)
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbStorePredicateJoinTest, RdbStore_JoinTypesSizeMismatch_011, TestSize.Level3)
+{
+    // Arrange: CrossJoin sets both joinTypes and joinTableNames to size 1
+    RdbPredicates predicates("user");
+    predicates.CrossJoin("book");
+
+    // Set joinTypes to empty (simulates NAPI SetJoinTypes with wrong size)
+    predicates.SetJoinTypes({});
+
+    // Act: GetJoinClause previously crashed on joinTypes[0] out of bounds
+    std::string joinClause = predicates.GetJoinClause();
+
+    // Assert: no crash, empty result (loop skipped due to size mismatch guard)
+    EXPECT_EQ("", joinClause) << "joinClause should be empty when joinTypes is empty";
+}
