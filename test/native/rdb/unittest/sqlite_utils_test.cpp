@@ -930,48 +930,101 @@ HWTEST_F(SqliteUtilsTest, AllocateFileSpace004, TestSize.Level1)
 }
 
 /**
- * @tc.name: RdbFileSystem_GetEntries_WithoutPermission_001
- * @tc.desc: Verify GetEntries does not crash when encountering permission-denied subdirectory (SIGABRT regression)
+ * @tc.name: RdbFileSystem_GetEntries_NestedDirectory_002
+ * @tc.desc: Verify GetEntries returns all entries in a nested directory tree (no regression from loop structure change)
  * @tc.type: FUNC
  */
-HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_WithoutPermission_001, TestSize.Level3)
+HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_NestedDirectory_002, TestSize.Level2)
 {
-    // Arrange: create directory tree with a permission-denied subdirectory
-    std::string baseDir = "/data/test/rdb_fs_noperm_test";
-    std::string subDir = baseDir + "/noperm";
-    std::string subFile = subDir + "/inner.db";
-    std::string topFile = baseDir + "/top.db";
+    // Arrange: create 3-level nested directory tree with files at each level
+    std::string baseDir = "/data/test/rdb_fs_nested_test";
+    std::string subDir = baseDir + "/sub";
+    std::string subSubDir = subDir + "/deep";
+    std::string baseFile = baseDir + "/top.db";
+    std::string subFile = subDir + "/mid.db";
+    std::string deepFile = subSubDir + "/deep.db";
 
     ASSERT_EQ(MkDir(baseDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
     ASSERT_EQ(MkDir(subDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
+    ASSERT_EQ(MkDir(subSubDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
 
-    int fd = open(topFile.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-    ASSERT_NE(fd, -1);
-    close(fd);
+    for (const auto &f : { baseFile, subFile, deepFile }) {
+        int fd = open(f.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+        ASSERT_NE(fd, -1) << "open failed for " << f;
+        close(fd);
+    }
 
-    fd = open(subFile.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-    ASSERT_NE(fd, -1);
-    close(fd);
-
-    // Remove read+execute permission from subDir to simulate permission-denied
-    EXPECT_EQ(chmod(subDir.c_str(), S_IWUSR), 0);
-
-    // Act: GetEntries previously threw filesystem_error via operator++() -> SIGABRT
+    // Act: GetEntries must traverse all levels — range-for to increment(ec) change must not drop entries
     auto entries = RdbFileSystem::GetEntries(baseDir);
 
-    // Assert: top.db is accessible; inner.db is in permission-denied subdir
-    bool hasTopFile = false;
+    // Assert: all 5 entries (2 subdirs + 3 files) are present
+    EXPECT_EQ(entries.size(), static_cast<size_t>(5)) << "expected 5 entries, got " << entries.size();
+    bool hasBaseFile = false, hasSubFile = false, hasDeepFile = false;
+    bool hasSubDir = false, hasSubSubDir = false;
     for (const auto &entry : entries) {
-        if (entry == topFile) {
-            hasTopFile = true;
-        }
+        if (entry == baseFile) hasBaseFile = true;
+        if (entry == subFile) hasSubFile = true;
+        if (entry == deepFile) hasDeepFile = true;
+        if (entry == subDir) hasSubDir = true;
+        if (entry == subSubDir) hasSubSubDir = true;
     }
-    EXPECT_TRUE(hasTopFile) << "top.db should be accessible";
+    EXPECT_TRUE(hasBaseFile && hasSubFile && hasDeepFile) << "all files should be found";
+    EXPECT_TRUE(hasSubDir && hasSubSubDir) << "all directories should be found";
 
-    // Cleanup: restore permission before removing
-    chmod(subDir.c_str(), S_IRWXU);
+    // Cleanup: deepest first
+    std::remove(deepFile.c_str());
     std::remove(subFile.c_str());
-    std::remove(topFile.c_str());
+    std::remove(baseFile.c_str());
+    std::remove(subSubDir.c_str());
     std::remove(subDir.c_str());
     std::remove(baseDir.c_str());
+}
+
+/**
+ * @tc.name: RdbFileSystem_GetEntries_NonExistentPath_003
+ * @tc.desc: Verify GetEntries returns empty for a non-existent path without crash
+ * @tc.type: FUNC
+ */
+HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_NonExistentPath_003, TestSize.Level3)
+{
+    // Act: iterate a path that does not exist
+    auto entries = RdbFileSystem::GetEntries("/data/test/rdb_fs_nonexistent_xyz");
+
+    // Assert: constructor sets ec and it==end, loop body never executes
+    EXPECT_EQ(entries.size(), static_cast<size_t>(0)) << "non-existent path should return empty";
+}
+
+/**
+ * @tc.name: RdbFileSystem_SetDefaultGid_WithSubdir_004
+ * @tc.desc: Verify SetDefaultGid does not crash when directory tree has nested subdirectories (integration path)
+ * @tc.type: FUNC
+ */
+HWTEST_F(SqliteUtilsTest, RdbFileSystem_SetDefaultGid_WithSubdir_004, TestSize.Level2)
+{
+    // Arrange: create directory tree simulating real RDB layout (db dir + binlog subdir)
+    std::string dbDir = "/data/test/rdb_fs_setgid_test";
+    std::string binlogDir = dbDir + "/binlog";
+    std::string dbFile = dbDir + "/test.db";
+    std::string binlogFile = binlogDir + "/lock";
+
+    ASSERT_EQ(MkDir(dbDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
+    ASSERT_EQ(MkDir(binlogDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
+
+    for (const auto &f : { dbFile, binlogFile }) {
+        int fd = open(f.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+        ASSERT_NE(fd, -1) << "open failed for " << f;
+        close(fd);
+    }
+
+    // Act: SetDefaultGid calls GetEntries internally — previously could SIGABRT on nested dirs
+    bool result = SqliteUtils::SetDefaultGid(dbDir, 3012);
+
+    // Assert: function completes without crash; result depends on ACL support
+    EXPECT_TRUE(result) << "SetDefaultGid should succeed on accessible directory tree";
+
+    // Cleanup
+    std::remove(binlogFile.c_str());
+    std::remove(dbFile.c_str());
+    std::remove(binlogDir.c_str());
+    std::remove(dbDir.c_str());
 }

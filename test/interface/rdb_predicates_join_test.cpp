@@ -529,3 +529,49 @@ HWTEST_F(RdbStorePredicateJoinTest, RdbStore_JoinTypesSizeMismatch_011, TestSize
     // Assert: no crash, empty result (loop skipped due to size mismatch guard)
     EXPECT_EQ("", joinClause) << "joinClause should be empty when joinTypes is empty";
 }
+
+/* *
+ * @tc.name: RdbStore_JoinConditionsShortBySetter_012
+ * @tc.desc: Verify GetJoinClause does not crash when joinConditions is set shorter than joinTableNames via SetJoinConditions (SIGSEGV regression)
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbStorePredicateJoinTest, RdbStore_JoinConditionsShortBySetter_012, TestSize.Level3)
+{
+    // Arrange: two joins produce joinTableNames of size 2
+    RdbPredicates predicates("user");
+    predicates.CrossJoin("book");
+    predicates.CrossJoin("book");
+
+    // Set joinConditions to size 1 via public setter (simulates NAPI joinConditions setter)
+    std::vector<std::string> shortConditions;
+    shortConditions.push_back("ON(user.userId = book.userId)");
+    predicates.SetJoinConditions(shortConditions);
+
+    // Act: GetJoinClause previously crashed at joinConditions[1] out of bounds
+    std::string joinClause = predicates.GetJoinClause();
+
+    // Assert: no crash; first join has condition, second join skipped (i=1, 1 < 1 = false)
+    EXPECT_EQ("CROSS JOIN book ON(user.userId = book.userId) CROSS JOIN book", joinClause)
+        << "joinClause=" << joinClause;
+}
+
+/* *
+ * @tc.name: RdbStore_LastJoinWithoutCondition_013
+ * @tc.desc: Verify GetJoinClause does not crash when the last join lacks On/Using while prior join has On (SIGSEGV regression at i≠0)
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbStorePredicateJoinTest, RdbStore_LastJoinWithoutCondition_013, TestSize.Level3)
+{
+    // Arrange: first join has On, second join does not — joinConditions=["ON(...)"], joinTableNames=["a","b"]
+    RdbPredicates predicates("user");
+    std::vector<std::string> clauses;
+    clauses.push_back("user.userId = book.userId");
+    predicates.CrossJoin("book")->On(clauses)->CrossJoin("book");
+
+    // Act: GetJoinClause accesses joinConditions[1] where size()==1 — previously SIGSEGV
+    std::string joinClause = predicates.GetJoinClause();
+
+    // Assert: no crash; first join has ON clause, second join has no condition
+    EXPECT_EQ("CROSS JOIN book ON(user.userId = book.userId) CROSS JOIN book", joinClause)
+        << "joinClause=" << joinClause;
+}
