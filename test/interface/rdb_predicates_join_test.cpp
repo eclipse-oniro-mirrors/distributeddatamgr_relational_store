@@ -532,7 +532,8 @@ HWTEST_F(RdbStorePredicateJoinTest, RdbStore_JoinTypesSizeMismatch_011, TestSize
 
 /* *
  * @tc.name: RdbStore_JoinConditionsShortBySetter_012
- * @tc.desc: Verify GetJoinClause does not crash when joinConditions is set shorter than joinTableNames via SetJoinConditions (SIGSEGV regression)
+ * @tc.desc: Verify GetJoinClause does not crash when joinConditions is set
+ * shorter than joinTableNames via SetJoinConditions (SIGSEGV regression)
  * @tc.type: FUNC
  */
 HWTEST_F(RdbStorePredicateJoinTest, RdbStore_JoinConditionsShortBySetter_012, TestSize.Level3)
@@ -557,7 +558,8 @@ HWTEST_F(RdbStorePredicateJoinTest, RdbStore_JoinConditionsShortBySetter_012, Te
 
 /* *
  * @tc.name: RdbStore_LastJoinWithoutCondition_013
- * @tc.desc: Verify GetJoinClause does not crash when the last join lacks On/Using while prior join has On (SIGSEGV regression at i≠0)
+ * @tc.desc: Verify GetJoinClause does not crash when the last join lacks On/Using
+ * while prior join has On (SIGSEGV regression at i≠0)
  * @tc.type: FUNC
  */
 HWTEST_F(RdbStorePredicateJoinTest, RdbStore_LastJoinWithoutCondition_013, TestSize.Level3)
