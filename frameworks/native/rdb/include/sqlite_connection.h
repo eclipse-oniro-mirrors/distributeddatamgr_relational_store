@@ -101,7 +101,7 @@ protected:
     int ExecuteSql(const std::string &sql, const std::vector<ValueObject> &bindArgs = std::vector<ValueObject>());
     int RegisterAlgo(const std::string &clstAlgoName, ClusterAlgoFunc func) override;
     std::string GetLastErrorMsg() const override;
-    static void CleanDonatedBinlogWithoutReplica(const RdbStoreConfig &config);
+    static void CleanDonatedBinlogWithoutReplica(const std::string &dbPath);
 
 private:
     template<typename T>

@@ -98,6 +98,7 @@ int RdbBinlogNoSlaveTestOpenCallback::OnUpgrade(RdbStore &store, int oldVersion,
 // Exposes the protected static CleanDonatedBinlogWithoutReplica for direct unit-test coverage.
 class TestableSqliteConnection : public SqliteConnection {
 public:
+    explicit TestableSqliteConnection(const RdbStoreConfig &config) : SqliteConnection(config, true) {}
     static void ExposeCleanDonatedBinlogWithoutReplica(const std::string &dbPath)
     {
         CleanDonatedBinlogWithoutReplica(dbPath);
@@ -348,6 +349,21 @@ HWTEST_F(RdbBinlogNoSlaveTest, RdbStore_Binlog_NoSlaveFull_001, TestSize.Level1)
 }
 
 /**
+ * @tc.name: RdbStore_Binlog_CleanDonated_EmptyPath_001
+ * @tc.desc: CleanDonatedBinlogWithoutReplica early-returns when dbPath is empty
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbBinlogNoSlaveTest, RdbStore_Binlog_CleanDonated_EmptyPath_001, TestSize.Level1)
+{
+    // Arrange: pass an empty db path.
+    std::string emptyPath;
+    // Act: call directly; the function should return early without opening any handle.
+    TestableSqliteConnection::ExposeCleanDonatedBinlogWithoutReplica(emptyPath);
+    // Assert: no crash, no binlog folder created.
+    EXPECT_FALSE(CheckFolderExist(binlogDatabaseName)) << "empty path must not create binlog folder";
+}
+
+/**
  * @tc.name: RdbStore_Binlog_CleanDonated_OpenFail_001
  * @tc.desc: CleanDonatedBinlogWithoutReplica early-returns when BinlogOpenHandle fails
  * @tc.type: FUNC
@@ -389,8 +405,8 @@ HWTEST_F(RdbBinlogNoSlaveTest, RdbStore_Binlog_CleanDonated_NoBinlog_001, TestSi
     }
     // Act: call on the db whose binlog files are zeroed; sqlite3_clean_binlog returns non-OK.
     TestableSqliteConnection::ExposeCleanDonatedBinlogWithoutReplica(RdbBinlogNoSlaveTest::databaseName);
-    // Assert: no crash (function handles clean failure via LOG_WARN and continues to close handle).
-    SUCCEED();
+    // Assert: no crash, binlog folder still exists (clean failure does not delete the folder).
+    EXPECT_TRUE(CheckFolderExist(binlogDatabaseName)) << "binlog folder must survive clean failure";
 }
 
 /**
@@ -417,15 +433,19 @@ HWTEST_F(RdbBinlogNoSlaveTest, RdbStore_Binlog_CleanDonated_Success_001, TestSiz
  */
 HWTEST_F(RdbBinlogNoSlaveTest, RdbStore_Binlog_OnFull_NullPath_001, TestSize.Level1)
 {
-    // Act: pass nullptr as dbPath.
+    // Arrange: no-replica store with binlog, capture baseline size.
+    InitNoSlaveDb();
+    Insert(1, CHANGENUM);
+    ssize_t sizeBefore = GetBinlogDataFileSize();
+    // Act: pass nullptr as dbPath; function early-returns without touching binlog.
     TestableSqliteConnection::ExposeBinlogOnFullFunc(nullptr, 1, nullptr);
-    // Assert: no crash.
-    SUCCEED();
+    // Assert: no crash, binlog file unchanged.
+    EXPECT_EQ(GetBinlogDataFileSize(), sizeBefore) << "binlog size must not change on null path";
 }
 
 /**
  * @tc.name: RdbStore_Binlog_OnFull_SlaveInvalid_001
- * @tc.desc: BinlogOnFullFunc skips when replica is marked invalid
+ * @tc.desc: BinlogOnFullFunc does not short-circuit when replica is marked invalid
  * @tc.type: FUNC
  */
 HWTEST_F(RdbBinlogNoSlaveTest, RdbStore_Binlog_OnFull_SlaveInvalid_001, TestSize.Level1)
@@ -435,10 +455,11 @@ HWTEST_F(RdbBinlogNoSlaveTest, RdbStore_Binlog_OnFull_SlaveInvalid_001, TestSize
     Insert(1, CHANGENUM);
     ssize_t sizeBefore = GetBinlogDataFileSize();
     SqliteUtils::SetSlaveInvalid(RdbBinlogNoSlaveTest::databaseName);
-    // Act: call directly; IsSlaveInvalid short-circuits and returns early.
+    // Act: call directly; IsSlaveInvalid no longer short-circuits, falls through to
+    // GetReplayCallback which returns null (no Backup registered), so no action is taken.
     TestableSqliteConnection::ExposeBinlogOnFullFunc(nullptr, 1, RdbBinlogNoSlaveTest::databaseName.c_str());
-    // Assert: no crash, binlog file unchanged (no clean ran).
-    EXPECT_EQ(GetBinlogDataFileSize(), sizeBefore) << "binlog size must not change when slave invalid";
+    // Assert: no crash, binlog file unchanged (callback is null, nothing executed).
+    EXPECT_EQ(GetBinlogDataFileSize(), sizeBefore) << "binlog size must not change when callback is null";
     SqliteUtils::SetSlaveValid(RdbBinlogNoSlaveTest::databaseName);
 }
 
@@ -474,25 +495,55 @@ HWTEST_F(RdbBinlogNoSlaveTest, RdbStore_Binlog_OnFull_WithCallback_001, TestSize
     EXPECT_EQ(store->Backup(std::string(""), {}), E_OK) << "Backup registers the replay callback";
     // Act: call directly; GetReplayCallback returns non-null and invokes ReplayCallbackImpl.
     TestableSqliteConnection::ExposeBinlogOnFullFunc(nullptr, 1, RdbBinlogNoSlaveTest::databaseName.c_str());
-    // Assert: no crash (callback executed; replay side-effects are environment-dependent).
-    SUCCEED();
+    // Assert: no crash, binlog folder still exists after callback invocation.
+    EXPECT_TRUE(CheckFolderExist(binlogDatabaseName)) << "binlog folder must survive callback invocation";
 }
 
 /**
- * @tc.name: RdbStore_Binlog_OnFull_NoReplicaClean_001
- * @tc.desc: BinlogOnFullFunc cleans donated binlog when no replica and no callback
+ * @tc.name: RdbStore_Binlog_ReplayNoSlave_001
+ * @tc.desc: ReplayBinlog cleans donated binlog when slaveConnection_ is null and chkBinlogCount is true
  * @tc.type: FUNC
  */
-HWTEST_F(RdbBinlogNoSlaveTest, RdbStore_Binlog_OnFull_NoReplicaClean_001, TestSize.Level1)
+HWTEST_F(RdbBinlogNoSlaveTest, RdbStore_Binlog_ReplayNoSlave_001, TestSize.Level1)
 {
-    // Arrange: no-replica store with binlog; no Backup so no replay callback registered and no slave file.
+    // Arrange: no-replica store with binlog enabled and donation data written.
     InitNoSlaveDb();
     Insert(1, CHANGENUM);
-    ASSERT_TRUE(CheckFolderExist(binlogDatabaseName)) << "binlog folder must exist";
-    // Act: call directly; GetReplayCallback returns null, slave file absent -> CleanDonatedBinlogWithoutReplica.
-    TestableSqliteConnection::ExposeBinlogOnFullFunc(nullptr, 1, RdbBinlogNoSlaveTest::databaseName.c_str());
+    ASSERT_TRUE(CheckFolderExist(binlogDatabaseName)) << "binlog folder must exist before replay";
+    // Construct a connection whose slaveConnection_ is null (no InnerOpen called).
+    RdbStoreConfig config(RdbBinlogNoSlaveTest::databaseName);
+    config.SetHaMode(HAMode::MANUAL_TRIGGER);
+    config.SetSearchable(true);
+    TestableSqliteConnection conn(config);
+    // Act: ReplayBinlog sees slaveConnection_==nullptr and chkBinlogCount=true ->
+    // routes to CleanDonatedBinlogWithoutReplica.
+    conn.ReplayBinlog(config, true);
     // Assert: no crash, binlog folder still exists (clean reclaims donated segments, not the folder).
-    EXPECT_TRUE(CheckFolderExist(binlogDatabaseName)) << "binlog folder must survive clean";
+    EXPECT_TRUE(CheckFolderExist(binlogDatabaseName)) << "binlog folder must survive replay-no-slave clean";
+}
+
+/**
+ * @tc.name: RdbStore_Binlog_ReplayNoSlave_SkipClean_001
+ * @tc.desc: ReplayBinlog skips clean when slaveConnection_ is null and chkBinlogCount is false
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbBinlogNoSlaveTest, RdbStore_Binlog_ReplayNoSlave_SkipClean_001, TestSize.Level1)
+{
+    // Arrange: no-replica store with binlog enabled and donation data written.
+    InitNoSlaveDb();
+    Insert(1, CHANGENUM);
+    ASSERT_TRUE(CheckFolderExist(binlogDatabaseName)) << "binlog folder must exist before replay";
+    ssize_t sizeBefore = GetBinlogDataFileSize();
+    // Construct a connection whose slaveConnection_ is null (no InnerOpen called).
+    RdbStoreConfig config(RdbBinlogNoSlaveTest::databaseName);
+    config.SetHaMode(HAMode::MANUAL_TRIGGER);
+    config.SetSearchable(true);
+    TestableSqliteConnection conn(config);
+    // Act: ReplayBinlog sees slaveConnection_==nullptr and chkBinlogCount=false -> skip clean.
+    conn.ReplayBinlog(config, false);
+    // Assert: no crash, binlog file unchanged (no clean ran).
+    EXPECT_EQ(GetBinlogDataFileSize(), sizeBefore) << "binlog size must not change when chkBinlogCount=false";
+    EXPECT_TRUE(CheckFolderExist(binlogDatabaseName)) << "binlog folder must survive replay-no-slave skip";
 }
 
 /**

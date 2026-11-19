@@ -2392,30 +2392,25 @@ Connection::ReplayCallBack SqliteConnection::GetReplayCallback(const std::string
     return callback;
 }
 
-void SqliteConnection::CleanDonatedBinlogWithoutReplica(const RdbStoreConfig &config)
+void SqliteConnection::CleanDonatedBinlogWithoutReplica(const std::string &dbPath)
 {
-    // Clean donated segments only when the replica file is truly absent; when the replica
-    // exists but the callback has not been registered (e.g. MAIN_REPLICA before the first
-    // exchange), leave full handling to libarkdata and the eventual replay path to avoid
-    // clearing data that should be replayed.
-    std::string slavePath = SqliteUtils::GetSlavePath(config);
-    if (access(slavePath.c_str(), F_OK) == 0) {
-        LOG_INFO("replica exists but no replay callback yet, skip donated clean.");
+    if (dbPath.empty()) {
+        LOG_WARN("dbPath is empty, skip donated clean.");
         return;
     }
     sqlite3 *dbHandle = nullptr;
-    auto dbPath = config.GetPath();
     if (BinlogOpenHandle(dbPath, dbHandle, false) != E_OK) {
-        LOG_WARN("open handle failed, skip donated clean. p=%{public}s", SqliteUtils::Anonymous(dbPath).c_str());
+        LOG_WARN("open handle[%{public}s] failed, skip donated clean.", SqliteUtils::Anonymous(dbPath).c_str());
         return;
     }
     // Empty dir path keeps the default binlog location (main db sibling).
     BinlogSetConfig(dbHandle, Sqlite3BinlogMode::ROW_FOR_SEARCH, "");
     int err = sqlite3_clean_binlog(dbHandle, BinlogFileCleanModeE::BINLOG_FILE_CLEAN_DONATED_MODE);
     if (err != SQLITE_OK) {
-        LOG_WARN("clean donated binlog failed. err=%{public}d", err);
+        LOG_WARN("clean donated binlog[%{public}s] failed. err=%{public}d", SqliteUtils::Anonymous(dbPath).c_str(),
+            err);
     } else {
-        LOG_DEBUG("cleaned donated binlog without replica.");
+        LOG_INFO("cleaned donated binlog[%{public}s] without replica.", SqliteUtils::Anonymous(dbPath).c_str());
     }
     BinlogCloseHandle(dbHandle);
 }
@@ -2424,10 +2419,6 @@ void SqliteConnection::BinlogOnFullFunc(void *pCtx, unsigned short currentCount,
 {
     if (dbPath == nullptr) {
         LOG_WARN("path is null");
-        return;
-    }
-    if (SqliteUtils::IsSlaveInvalid(dbPath)) {
-        LOG_WARN("replica invalid, skip binlog replay. count:%{public}" PRIu16, currentCount);
         return;
     }
     if (SqliteUtils::IsSlaveInterrupted(dbPath)) {
@@ -2531,7 +2522,9 @@ void SqliteConnection::ReplayBinlog(const RdbStoreConfig &config, bool chkBinlog
         return;
     }
     if (slaveConnection_ == nullptr) {
-        CleanDonatedBinlogWithoutReplica(config);
+        if (chkBinlogCount) {
+            CleanDonatedBinlogWithoutReplica(config.GetPath());
+        }
         return;
     }
     if (SqliteConnection::CheckPathExist(config.GetPath()) != E_OK) {
