@@ -1678,7 +1678,14 @@ bool RdbStoreImpl::TryAsyncRepair()
 int32_t RdbStoreImpl::CreatePool(bool &created)
 {
     int32_t errCode = E_OK;
+    bool serviceDisabled = false;
+    if (!isReadOnly_ && SqliteUtils::NeedMigrateDefaultReplica(config_)) {
+        serviceDisabled = DisableServiceForReplicaMigration();
+    }
     connectionPool_ = ConnectionPool::Create(configHolder_, config_, errCode);
+    if (serviceDisabled) {
+        EnableServiceForReplicaMigration();
+    }
     if (connectionPool_ == nullptr && (errCode == E_SQLITE_CORRUPT || errCode == E_INVALID_SECRET_KEY) &&
         !isReadOnly_) {
         LOG_ERROR("database corrupt, errCode:0x%{public}x, %{public}s, %{public}s", errCode,
@@ -2554,9 +2561,6 @@ int RdbStoreImpl::BackupSlaveDb(const std::string &databasePath, bool verifyDb)
     errCode = conn->Backup(databasePath, {}, false, slaveStatus_, verifyDb);
     // force-destroy all trans conns after a successful backup; otherwise return them to the pool
     guard.releaseNow = (errCode == E_OK);
-    if (errCode == E_OK && config_.GetHaMode() == HAMode::MANUAL_TRIGGER) {
-        MigrateReplicaIfNeeded(conn, false);
-    }
     if (SqliteUtils::HasAccessAcl(config_.GetPath(), SERVICE_GID)) {
         SetFileGid(config_, SERVICE_GID);
     }
@@ -3200,7 +3204,7 @@ int32_t RdbStoreImpl::InitOwner(int version, RdbOpenCallback &openCallback)
     if (errCode != E_OK) {
         return errCode;
     }
-    (void)ExchangeSlaverToMaster(true);
+    (void)ExchangeSlaverToMaster();
     SwitchOver(true);
     errCode = ProcessOpenCallback(version, openCallback);
     SwitchOver(false);
@@ -3662,33 +3666,26 @@ bool RdbStoreImpl::IsInAsyncRestore(const std::string &dbPath)
     return errno == EWOULDBLOCK;
 }
 
-void RdbStoreImpl::MigrateReplicaIfNeeded(const std::shared_ptr<Connection> &conn, bool isResetBinlog)
+bool RdbStoreImpl::DisableServiceForReplicaMigration()
 {
-    if (config_.GetHaMode() == HAMode::SINGLE || config_.GetReplicaPath().empty()) {
-        return;
-    }
-    std::string newSlavePath = SqliteUtils::GetSlavePath(config_);
-    std::string oldDefaultSlavePath = SqliteUtils::GetSlavePath(config_.GetPath());
-    if (newSlavePath == oldDefaultSlavePath || access(oldDefaultSlavePath.c_str(), F_OK) != 0) {
-        return;
-    }
-    if (!conn->IsSlaveAvailable()) {
-        LOG_WARN("migrate replica skip, new slave not available yet:%{public}s",
-            SqliteUtils::Anonymous(oldDefaultSlavePath).c_str());
-        return;
-    }
-    // The service may still hold the stale default replica open; close it before deleting, then restore.
+    InitSyncerParam(config_, false);
     auto [err, service] = RdbMgr::GetInstance().GetRdbService(syncerParam_);
-    if (service != nullptr) {
-        service->Disable(syncerParam_);
+    if (service == nullptr) {
+        return false;
     }
-    conn->MigrateReplica(oldDefaultSlavePath, isResetBinlog);
+    service->Disable(syncerParam_);
+    return true;
+}
+
+void RdbStoreImpl::EnableServiceForReplicaMigration()
+{
+    auto [err, service] = RdbMgr::GetInstance().GetRdbService(syncerParam_);
     if (service != nullptr) {
         service->Enable(syncerParam_);
     }
 }
 
-int32_t RdbStoreImpl::ExchangeSlaverToMaster(bool needMigrate)
+int32_t RdbStoreImpl::ExchangeSlaverToMaster()
 {
     if (isReadOnly_ || isMemoryRdb_ || rebuild_ != RebuiltType::NONE) {
         return E_OK;
@@ -3696,9 +3693,6 @@ int32_t RdbStoreImpl::ExchangeSlaverToMaster(bool needMigrate)
     auto [errCode, conn] = GetConn(false);
     if (errCode != E_OK) {
         return errCode;
-    }
-    if (needMigrate) {
-        MigrateReplicaIfNeeded(conn, true);
     }
     conn->RegisterReplayCallback(config_,
         std::bind(&RdbStoreImpl::ReplayCallbackImpl, config_, std::weak_ptr<ConnectionPool>(GetPool())));

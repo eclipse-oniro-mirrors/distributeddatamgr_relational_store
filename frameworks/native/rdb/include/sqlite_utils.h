@@ -113,7 +113,9 @@ public:
     static std::string GetBinlogFolderPath(const std::string &dbPath);
     static std::string GetBinlogFolderPath(const RdbStoreConfig &config);
     static bool IsValidReplicaPath(const std::string &replicaPath);
-    static bool MigrateBinlogFolder(const RdbStoreConfig &config);
+    static bool NeedMigrateDefaultReplica(const RdbStoreConfig &config);
+    static bool NeedMigrateReplica(const RdbStoreConfig &config);
+    static bool NeedMigrateBinlog(const RdbStoreConfig &config);
     static std::string GetMasterBackupPath(const std::string &name);
     static int SetSlaveInvalid(const std::string &dbPath, SlaveInvalidReason reason);
     static int SetSlaveInvalid(const std::string &dbPath);
@@ -195,6 +197,7 @@ private:
     static int GetPageCountCallback(void *data, int argc, char **argv, char **azColName);
     static bool HasPermit(const std::string &path, mode_t mode);
     static bool SetDefaultGid(const std::string &path, int32_t gid);
+    static bool IsMigrationAllowed(const RdbStoreConfig &config);
 };
 
 } // namespace NativeRdb

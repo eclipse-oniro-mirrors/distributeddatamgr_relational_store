@@ -72,7 +72,6 @@ public:
     int CheckReplicaForRestore(const bool isForceRestore) override;
     bool IsWriter() const override;
     bool IsSlaveAvailable() const override;
-    void MigrateReplica(const std::string &staleSlavePath, bool isResetBinlog) override;
     int SubscribeTableChanges(const Notifier &notifier) override;
     int GetMaxVariable() const override;
     int32_t GetDBType() const override;
@@ -215,6 +214,11 @@ private:
     static CodecConfig ConvertCryptoParamToCodecConfig(const RdbStoreConfig::CryptoParam &param);
     static CodecConfig CreateCodecConfig();
     static Sqlite3BinlogMode GetBinlogMode(const RdbStoreConfig &config);
+    static void MigrateDefaultReplica(const RdbStoreConfig &config);
+    static bool MigrateBinlogFolder(const RdbStoreConfig &config);
+    static bool MigrateReplicaFiles(const RdbStoreConfig &config);
+    static void CheckpointReplicaBeforeMigration(const RdbStoreConfig &config, const std::string &replicaPath);
+    static void GrantReplicaDirAcl(const RdbStoreConfig &config, const std::string &customReplica);
     static constexpr SqliteConnection::Suffix FILE_SUFFIXES[] = { { "", "DB" }, { "-shm", "SHM" }, { "-wal", "WAL" },
         { "-dwr", "DWR" }, { "-journal", "JOURNAL" }, { "-slaveFailure", nullptr }, { "-syncInterrupt", nullptr },
         { ".corruptedflg", nullptr }, { ".bothcorruptedflg", nullptr },
