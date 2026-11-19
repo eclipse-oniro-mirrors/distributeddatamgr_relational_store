@@ -77,7 +77,6 @@ constexpr ssize_t SqliteConnection::SLAVE_WAL_SIZE_LIMIT;
 constexpr ssize_t SqliteConnection::SLAVE_INTEGRITY_CHECK_LIMIT;
 constexpr uint32_t SqliteConnection::NO_ITER;
 constexpr unsigned short SqliteConnection::BINLOG_FILE_NUMS_LIMIT;
-constexpr uint32_t SqliteConnection::BINLOG_FILE_SIZE_LIMIT;
 constexpr uint32_t SqliteConnection::DB_INDEX;
 constexpr uint32_t SqliteConnection::WAL_INDEX;
 constexpr int32_t SERVICE_GID = 3012;
@@ -2433,13 +2432,13 @@ int SqliteConnection::CheckPathExist(const std::string &dbPath)
     return E_OK;
 }
 
-void SqliteConnection::BinlogSetConfig(
-    sqlite3 *dbHandle, Sqlite3BinlogMode binlogMode, const std::string &binlogDirPath)
+void SqliteConnection::BinlogSetConfig(sqlite3 *dbHandle, Sqlite3BinlogMode binlogMode,
+    const std::string &binlogDirPath, uint32_t maxFileSize)
 {
     Sqlite3BinlogConfig binLogConfig = {
         .mode = binlogMode,
         .fullCallbackThreshold = BINLOG_FILE_NUMS_LIMIT,
-        .maxFileSize = BINLOG_FILE_SIZE_LIMIT,
+        .maxFileSize = maxFileSize,
         .xErrorCallback = &BinlogOnErrFunc,
         .xLogFullCallback = nullptr,
         .callbackCtx = nullptr,
@@ -2501,7 +2500,7 @@ void SqliteConnection::CleanDonatedBinlogWithoutReplica(const std::string &dbPat
         return;
     }
     // Empty dir path keeps the default binlog location (main db sibling).
-    BinlogSetConfig(dbHandle, Sqlite3BinlogMode::ROW_FOR_SEARCH, "");
+    BinlogSetConfig(dbHandle, Sqlite3BinlogMode::ROW_FOR_SEARCH, "", config.GetBinlogFileSize());
     int err = sqlite3_clean_binlog(dbHandle, BinlogFileCleanModeE::BINLOG_FILE_CLEAN_DONATED_MODE);
     if (err != SQLITE_OK) {
         LOG_WARN("clean donated binlog[%{public}s] failed. err=%{public}d", SqliteUtils::Anonymous(dbPath).c_str(),
@@ -2545,7 +2544,7 @@ int SqliteConnection::SetBinlog()
     Sqlite3BinlogConfig binLogConfig = {
         .mode = GetBinlogMode(config_),
         .fullCallbackThreshold = BINLOG_FILE_NUMS_LIMIT,
-        .maxFileSize = BINLOG_FILE_SIZE_LIMIT,
+        .maxFileSize = config_.GetBinlogFileSize(),
         .xErrorCallback = &BinlogOnErrFunc,
         .xLogFullCallback = &BinlogOnFullFunc,
         .callbackCtx = nullptr,
@@ -2600,8 +2599,8 @@ void SqliteConnection::ReplayBinlog(
     if (errCode != E_OK) {
         return;
     }
-    SqliteConnection::BinlogSetConfig(
-        dbFrom, GetBinlogMode(slaveConn->config_), slaveConn->config_.GetReplicaPath());
+    SqliteConnection::BinlogSetConfig(dbFrom, GetBinlogMode(slaveConn->config_), slaveConn->config_.GetReplicaPath(),
+        slaveConn->config_.GetBinlogFileSize());
     errCode = SqliteConnection::ReplayBinlogSqlite(dbFrom, slaveConn->dbHandle_, slaveConn->config_);
     if (errCode != E_OK) {
         LOG_WARN("async replay err:%{public}d", errCode);

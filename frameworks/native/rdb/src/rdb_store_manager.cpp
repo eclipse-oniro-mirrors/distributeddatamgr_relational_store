@@ -101,7 +101,9 @@ std::shared_ptr<RdbStoreImpl> RdbStoreManager::GetStoreFromCache(
         if (cachedConfig.HasVectorSecurityConflict(config) || cachedConfig.IsMemoryRdb() || config.IsMemoryRdb() ||
             config.GetVersion() >= ConfigVersion::INVALID_CONFIG_CHANGE_NOT_ALLOWED ||
             cachedConfig.GetVersion() >= ConfigVersion::INVALID_CONFIG_CHANGE_NOT_ALLOWED ||
-            (cachedConfig.GetReplicaPath() != config.GetReplicaPath() && config.GetHaMode() != HAMode::SINGLE)) {
+            ((cachedConfig.GetReplicaPath() != config.GetReplicaPath() ||
+            cachedConfig.GetBinlogFileSize() != config.GetBinlogFileSize()) &&
+            config.GetHaMode() != HAMode::SINGLE)) {
             errCode = E_CONFIG_INVALID_CHANGE;
             rdbStore = nullptr;
             return rdbStore;
@@ -305,6 +307,7 @@ DistributedRdb::RdbSyncerParam RdbStoreManager::GetSyncParam(const RdbStoreConfi
     syncerParam.subUser_ = config.GetSubUser();
     syncerParam.isLocalOnly_ = config.IsLocalOnly();
     syncerParam.replicaPath_ = config.GetReplicaPath();
+    syncerParam.binlogFileSize_ = config.GetBinlogFileSize();
     return syncerParam;
 }
 
@@ -473,6 +476,11 @@ int32_t RdbStoreManager::CheckConfig(const RdbStoreConfig &config, const std::st
             LOG_ERROR("not support!config:%{public}s", config.ToString().c_str());
             return E_NOT_SUPPORT;
         }
+    }
+    uint32_t binlogSize = config.GetBinlogFileSize();
+    if (binlogSize < RdbStoreConfig::BINLOG_FILE_SIZE_MIN || binlogSize > RdbStoreConfig::BINLOG_FILE_SIZE_MAX) {
+        LOG_ERROR("binlogFileSize invalid, size:%{public}u", binlogSize);
+        return E_NOT_SUPPORT;
     }
     return E_OK;
 }

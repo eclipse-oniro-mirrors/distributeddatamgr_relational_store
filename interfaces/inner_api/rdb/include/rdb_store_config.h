@@ -835,7 +835,7 @@ public:
             journalSize_ != config.journalSize_ || pageSize_ != config.pageSize_ || dbType_ != config.dbType_ ||
             customDir_ != config.customDir_ || pluginLibs_ != config.pluginLibs_ || haMode_ != config.haMode_ ||
             serverPath_ != config.serverPath_ || replicaPath_ != config.replicaPath_ ||
-            HasVectorSecurityConflict(config)) {
+            binlogFileSize_ != config.binlogFileSize_ || HasVectorSecurityConflict(config)) {
             return false;
         }
 
@@ -945,6 +945,21 @@ public:
 
     void SetWalLimitSize(ssize_t size);
 
+    static constexpr uint32_t BINLOG_FILE_SIZE_DEFAULT = 1024 * 1024 * 4; // 4MB, default value when SetBinlogFileSize not called
+    static constexpr uint32_t BINLOG_FILE_SIZE_MIN = 64 * 1024;            // 64KB
+    static constexpr uint32_t BINLOG_FILE_SIZE_MAX = 16 * 1024 * 1024;     // 16MB
+
+    /**
+     * @brief Sets the binlog file size in bytes. 0 is invalid and will be rejected by CheckConfig.
+     *        Value must be within [BINLOG_FILE_SIZE_MIN, BINLOG_FILE_SIZE_MAX].
+     */
+    void SetBinlogFileSize(uint32_t size);
+
+    /**
+     * @brief Obtains the binlog file size in bytes.
+     */
+    uint32_t GetBinlogFileSize() const;
+
     int32_t GetClearMemorySize() const;
 
     void SetClearMemorySize(int32_t size);
@@ -1046,7 +1061,6 @@ private:
     ssize_t checkpointSize_;
     ssize_t startCheckpointSize_;
     ssize_t startCheckpointSizeRaw_ = 0;
-    bool isStartCheckpointSizeUserSet_ = false;
     int32_t clearMemorySize_;
     mutable CollatorLocales collatorLocales_;
     // distributed rdb
@@ -1071,6 +1085,7 @@ private:
 
     std::string serverPath_ = "";
     std::string replicaPath_ = "";
+    uint32_t binlogFileSize_ = BINLOG_FILE_SIZE_DEFAULT;
 };
 } // namespace OHOS::NativeRdb
 #endif

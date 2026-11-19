@@ -101,6 +101,45 @@ HWTEST_F(RdbTypesUtilTest, MarshallingSyncerParamDumpStack_002, TestSize.Level1)
 }
 
 /**
+ * @tc.name: MarshallingSyncerParamBinlogFileSize_001
+ * @tc.desc: Test Marshalling and Unmarshalling for RdbSyncerParam binlogFileSize field
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbTypesUtilTest, MarshallingSyncerParamBinlogFileSize_001, TestSize.Level1)
+{
+    RdbSyncerParam param;
+    param.binlogFileSize_ = 64 * 1024;
+
+    MessageParcel data;
+    bool ret = ITypesUtil::Marshalling(param, data);
+    EXPECT_TRUE(ret);
+
+    RdbSyncerParam output;
+    ret = ITypesUtil::Unmarshalling(output, data);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(output.binlogFileSize_, param.binlogFileSize_);
+}
+
+/**
+ * @tc.name: MarshallingSyncerParamBinlogFileSize_002
+ * @tc.desc: Test default value of RdbSyncerParam binlogFileSize is 0
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbTypesUtilTest, MarshallingSyncerParamBinlogFileSize_002, TestSize.Level1)
+{
+    RdbSyncerParam param;
+
+    MessageParcel data;
+    bool ret = ITypesUtil::Marshalling(param, data);
+    EXPECT_TRUE(ret);
+
+    RdbSyncerParam output;
+    ret = ITypesUtil::Unmarshalling(output, data);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(output.binlogFileSize_, 0u);
+}
+
+/**
  * @tc.name: MarshallingValueObject_001
  * @tc.desc: Test Marshalling and Unmarshalling for ValueObject with int value
  * @tc.type: FUNC

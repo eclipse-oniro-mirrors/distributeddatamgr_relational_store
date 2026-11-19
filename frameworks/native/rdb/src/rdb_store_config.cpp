@@ -532,6 +532,16 @@ std::string RdbStoreConfig::GetReplicaPath() const
     return replicaPath_;
 }
 
+void RdbStoreConfig::SetBinlogFileSize(uint32_t size)
+{
+    binlogFileSize_ = size;
+}
+
+uint32_t RdbStoreConfig::GetBinlogFileSize() const
+{
+    return binlogFileSize_;
+}
+
 bool RdbStoreConfig::IsSearchable() const
 {
     return isSearchable_;
@@ -746,7 +756,7 @@ void RdbStoreConfig::SetWalLimitSize(ssize_t size)
     walLimitSize_ = size;
     // '(size >> 1) + (size >> 2)' Size of the WAL file that does not checkpoint within 5 minutes when sqlite_busy
     checkpointSize_ = (size >> 1) + (size >> 2);
-    if (isStartCheckpointSizeUserSet_) {
+    if (startCheckpointSizeRaw_ > 0) {
         ssize_t userStartCheckpointSize = startCheckpointSizeRaw_;
         if (userStartCheckpointSize > checkpointSize_) {
             LOG_WARN("startCheckpointSize exceeds checkpointSize, clamped: %{public}zd", userStartCheckpointSize);
@@ -912,6 +922,7 @@ std::string RdbStoreConfig::ToString() const
     oss << " area:" << area_ << ",";
     oss << " serverPath:" << SqliteUtils::Anonymous(serverPath_) << ",";
     oss << " replicaPath:" << SqliteUtils::Anonymous(replicaPath_) << ",";
+    oss << " binlogFileSize:" << binlogFileSize_ << ",";
     return oss.str();
 }
 
@@ -946,6 +957,7 @@ std::string RdbStoreConfig::FormatCfg(const RdbStoreConfig &first, const RdbStor
         << SqliteUtils::Anonymous(second.serverPath_) << ",";
     oss << " replicaPath:" << SqliteUtils::Anonymous(first.replicaPath_) << "->"
         << SqliteUtils::Anonymous(second.replicaPath_) << ",";
+    oss << " binlogFileSize:" << first.binlogFileSize_ << "->" << second.binlogFileSize_ << ",";
     return oss.str();
 }
 
@@ -971,7 +983,6 @@ void RdbStoreConfig::SetStartCheckpointSize(ssize_t size)
         size = GlobalExpr::DB_WAL_SIZE_LIMIT_MIN;
     }
     startCheckpointSizeRaw_ = size;
-    isStartCheckpointSizeUserSet_ = true;
     if (size > checkpointSize_) {
         LOG_WARN("startCheckpointSize exceeds checkpointSize, clamped: %{public}zd", size);
         size = checkpointSize_;
