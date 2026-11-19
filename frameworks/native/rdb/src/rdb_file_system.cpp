@@ -24,6 +24,7 @@
 
 namespace OHOS {
 namespace NativeRdb {
+using namespace OHOS::Rdb;
 std::vector<std::string> RdbFileSystem::GetEntries(const std::string &path)
 {
     std::vector<std::string> paths;
