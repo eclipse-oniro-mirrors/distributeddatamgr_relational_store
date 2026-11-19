@@ -13,11 +13,14 @@
  * limitations under the License.
  */
 
+#define LOG_TAG "RdbFileSystem"
 #include "rdb_file_system.h"
 
 #include <filesystem>
 #include <string>
 #include <vector>
+
+#include "logger.h"
 
 namespace OHOS {
 namespace NativeRdb {
@@ -25,14 +28,16 @@ std::vector<std::string> RdbFileSystem::GetEntries(const std::string &path)
 {
     std::vector<std::string> paths;
     std::error_code ec;
-    for (const auto &entry : std::filesystem::recursive_directory_iterator(path, ec)) {
+    constexpr auto opts = std::filesystem::directory_options::skip_permission_denied;
+    auto end = std::filesystem::recursive_directory_iterator();
+    for (auto it = std::filesystem::recursive_directory_iterator(path, opts, ec); it != end;) {
         if (ec) {
+            LOG_WARN("GetEntries skip entry, path: %{private}s, ec: %{public}d", path.c_str(), ec.value());
             ec.clear();
-            continue;
         }
-        paths.push_back(entry.path().string());
+        paths.push_back(it->path().string());
+        it.increment(ec);
     }
-
     return paths;
 }
 

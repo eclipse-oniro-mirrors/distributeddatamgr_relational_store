@@ -14,6 +14,7 @@
  */
 
 #include "sqlite_utils.h"
+#include "rdb_file_system.h"
 #include "rdb_sql_utils.h"
 
 #include <gtest/gtest.h>
@@ -926,4 +927,51 @@ HWTEST_F(SqliteUtilsTest, AllocateFileSpace004, TestSize.Level1)
     EXPECT_FALSE(f.good());
     f.close();
     std::remove(filePath.c_str());
+}
+
+/**
+ * @tc.name: RdbFileSystem_GetEntries_WithoutPermission_001
+ * @tc.desc: Verify GetEntries does not crash when encountering permission-denied subdirectory (SIGABRT regression)
+ * @tc.type: FUNC
+ */
+HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_WithoutPermission_001, TestSize.Level3)
+{
+    // Arrange: create directory tree with a permission-denied subdirectory
+    std::string baseDir = "/data/test/rdb_fs_noperm_test";
+    std::string subDir = baseDir + "/noperm";
+    std::string subFile = subDir + "/inner.db";
+    std::string topFile = baseDir + "/top.db";
+
+    ASSERT_EQ(MkDir(baseDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
+    ASSERT_EQ(MkDir(subDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
+
+    int fd = open(topFile.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    ASSERT_NE(fd, -1);
+    close(fd);
+
+    fd = open(subFile.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    ASSERT_NE(fd, -1);
+    close(fd);
+
+    // Remove read+execute permission from subDir to simulate permission-denied
+    EXPECT_EQ(chmod(subDir.c_str(), S_IWUSR), 0);
+
+    // Act: GetEntries previously threw filesystem_error via operator++() -> SIGABRT
+    auto entries = RdbFileSystem::GetEntries(baseDir);
+
+    // Assert: top.db is accessible; inner.db is in permission-denied subdir
+    bool hasTopFile = false;
+    for (const auto &entry : entries) {
+        if (entry == topFile) {
+            hasTopFile = true;
+        }
+    }
+    EXPECT_TRUE(hasTopFile) << "top.db should be accessible";
+
+    // Cleanup: restore permission before removing
+    chmod(subDir.c_str(), S_IRWXU);
+    std::remove(subFile.c_str());
+    std::remove(topFile.c_str());
+    std::remove(subDir.c_str());
+    std::remove(baseDir.c_str());
 }

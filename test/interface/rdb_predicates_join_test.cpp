@@ -483,3 +483,28 @@ HWTEST_F(RdbStorePredicateJoinTest, RdbStore_LeftOuterJoin_009, TestSize.Level1)
     EXPECT_NE(allDataTypes, nullptr);
     allDataTypes->Close();
 }
+
+/* *
+ * @tc.name: RdbStore_CrossJoin_WithoutCondition_010
+ * @tc.desc: Verify CrossJoin without On()/Using() does not crash in GetJoinClause/Query (SIGSEGV regression)
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbStorePredicateJoinTest, RdbStore_CrossJoin_WithoutCondition_010, TestSize.Level3)
+{
+    // Arrange: CrossJoin without On()/Using() — previously caused SIGSEGV in ProcessJoins
+    RdbPredicates predicates("user");
+    predicates.CrossJoin("book");
+
+    // Act: GetJoinClause previously triggered out-of-bounds access on empty joinConditions
+    std::string joinClause = predicates.GetJoinClause();
+
+    // Assert: clause is valid CROSS JOIN SQL without condition
+    EXPECT_EQ("CROSS JOIN book", joinClause) << "joinClause=" << joinClause;
+
+    // Verify query executes without crash; CROSS JOIN user(5) x book(3) = 15 rows
+    std::vector<std::string> columns;
+    std::shared_ptr<ResultSet> allDataTypes = RdbStorePredicateJoinTest::store->Query(predicates, columns);
+    EXPECT_NE(allDataTypes, nullptr) << "Query returned null for CrossJoin without condition";
+    EXPECT_EQ(15, ResultSize(allDataTypes)) << "CROSS JOIN should produce Cartesian product";
+    allDataTypes->Close();
+}

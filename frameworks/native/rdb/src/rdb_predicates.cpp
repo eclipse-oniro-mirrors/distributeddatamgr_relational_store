@@ -124,7 +124,7 @@ std::string RdbPredicates::ProcessJoins() const
             builder = builder + " ";
         }
         builder = builder + joinTypes[i] + " " + joinTableNames[i];
-        if (joinConditions[i] != "") {
+        if (i < joinConditions.size() && joinConditions[i] != "") {
             builder = builder + " " + joinConditions[i];
         }
     }
