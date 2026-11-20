@@ -42,7 +42,13 @@ public:
     static void SetUpTestCase(void);
     static void TearDownTestCase(void);
     void SetUp(void) {};
-    void TearDown(void) {};
+    void TearDown(void);
+
+protected:
+    void RegisterCleanup(const std::string &path) { cleanupPaths_.push_back(path); }
+
+private:
+    std::vector<std::string> cleanupPaths_;
 };
 
 void SqliteUtilsTest::SetUpTestCase(void)
@@ -51,6 +57,14 @@ void SqliteUtilsTest::SetUpTestCase(void)
 
 void SqliteUtilsTest::TearDownTestCase(void)
 {
+}
+
+void SqliteUtilsTest::TearDown(void)
+{
+    for (auto it = cleanupPaths_.rbegin(); it != cleanupPaths_.rend(); ++it) {
+        SqliteUtils::DeleteFolder(*it);
+    }
+    cleanupPaths_.clear();
 }
 
 HWTEST_F(SqliteUtilsTest, SqliteUtils_Test_001, TestSize.Level1)
@@ -219,10 +233,10 @@ HWTEST_F(SqliteUtilsTest, SqliteUtils_Test_0026, TestSize.Level1)
     EXPECT_EQ(0, SqliteUtils::GetFileCount("non_exist_folder"));
     std::string filePath = "/data/test/SqliteUtils_Test_0026";
     std::ofstream src(filePath.c_str(), std::ios::binary);
+    RegisterCleanup(filePath);
     ASSERT_TRUE(src.is_open());
     src.close();
     EXPECT_EQ(0, SqliteUtils::GetFileCount(filePath));
-    std::remove(filePath.c_str());
 }
 
 HWTEST_F(SqliteUtilsTest, SqliteUtils_Test_0027, TestSize.Level1)
@@ -230,6 +244,7 @@ HWTEST_F(SqliteUtilsTest, SqliteUtils_Test_0027, TestSize.Level1)
     std::string filePath = "/data/test/SqliteUtils_Test_0027";
     std::string subPath = filePath + "/bin001";
     RdbSqlUtils::CreateDirectory(filePath);
+    RegisterCleanup(filePath);
     std::ofstream src(subPath.c_str(), std::ios::binary);
     ASSERT_TRUE(src.is_open());
     src.close();
@@ -945,6 +960,7 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_NestedDirectory_002, TestSize
     std::string deepFile = subSubDir + "/deep.db";
 
     ASSERT_EQ(MkDir(baseDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
+    RegisterCleanup(baseDir);
     ASSERT_EQ(MkDir(subDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
     ASSERT_EQ(MkDir(subSubDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
 
@@ -970,14 +986,6 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_NestedDirectory_002, TestSize
     }
     EXPECT_TRUE(hasBaseFile && hasSubFile && hasDeepFile) << "all files should be found";
     EXPECT_TRUE(hasSubDir && hasSubSubDir) << "all directories should be found";
-
-    // Cleanup: deepest first
-    std::remove(deepFile.c_str());
-    std::remove(subFile.c_str());
-    std::remove(baseFile.c_str());
-    std::remove(subSubDir.c_str());
-    std::remove(subDir.c_str());
-    std::remove(baseDir.c_str());
 }
 
 /**
@@ -1008,6 +1016,7 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_SetDefaultGid_WithSubdir_004, TestSize.L
     std::string binlogFile = binlogDir + "/lock";
 
     ASSERT_EQ(MkDir(dbDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
+    RegisterCleanup(dbDir);
     ASSERT_EQ(MkDir(binlogDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
 
     for (const auto &f : { dbFile, binlogFile }) {
@@ -1021,10 +1030,4 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_SetDefaultGid_WithSubdir_004, TestSize.L
 
     // Assert: function completes without crash; result depends on ACL support
     EXPECT_TRUE(result) << "SetDefaultGid should succeed on accessible directory tree";
-
-    // Cleanup
-    std::remove(binlogFile.c_str());
-    std::remove(dbFile.c_str());
-    std::remove(binlogDir.c_str());
-    std::remove(dbDir.c_str());
 }

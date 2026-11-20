@@ -480,7 +480,7 @@ HWTEST_F(RdbStorePredicateJoinTest, RdbStore_LeftOuterJoin_009, TestSize.Level1)
 
     std::vector<std::string> columns;
     std::shared_ptr<ResultSet> allDataTypes = RdbStorePredicateJoinTest::store->Query(predicates, columns);
-    EXPECT_NE(allDataTypes, nullptr);
+    ASSERT_NE(allDataTypes, nullptr);
     allDataTypes->Close();
 }
 
@@ -504,7 +504,7 @@ HWTEST_F(RdbStorePredicateJoinTest, RdbStore_CrossJoin_WithoutCondition_010, Tes
     // Verify query executes without crash; CROSS JOIN user(5) x book(3) = 15 rows
     std::vector<std::string> columns;
     std::shared_ptr<ResultSet> allDataTypes = RdbStorePredicateJoinTest::store->Query(predicates, columns);
-    EXPECT_NE(allDataTypes, nullptr) << "Query returned null for CrossJoin without condition";
+    ASSERT_NE(allDataTypes, nullptr) << "Query returned null for CrossJoin without condition";
     EXPECT_EQ(15, ResultSize(allDataTypes)) << "CROSS JOIN should produce Cartesian product";
     allDataTypes->Close();
 }
