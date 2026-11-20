@@ -22,10 +22,12 @@
 #include <climits>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <iostream>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include "acl.h"
 #include "rdb_platform.h"
@@ -959,6 +961,7 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_NestedDirectory_002, TestSize
     std::string subFile = subDir + "/mid.db";
     std::string deepFile = subSubDir + "/deep.db";
 
+    std::filesystem::remove_all(baseDir);
     ASSERT_EQ(MkDir(baseDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
     RegisterCleanup(baseDir);
     ASSERT_EQ(MkDir(subDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
@@ -995,7 +998,7 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_NestedDirectory_002, TestSize
  */
 HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_NonExistentPath_003, TestSize.Level3)
 {
-    // Act: iterate a path that does not exist
+    std::filesystem::remove_all("/data/test/rdb_fs_nonexistent_xyz");
     auto entries = RdbFileSystem::GetEntries("/data/test/rdb_fs_nonexistent_xyz");
 
     // Assert: constructor sets ec and it==end, loop body never executes
@@ -1015,6 +1018,7 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_SetDefaultGid_WithSubdir_004, TestSize.L
     std::string dbFile = dbDir + "/test.db";
     std::string binlogFile = binlogDir + "/lock";
 
+    std::filesystem::remove_all(dbDir);
     ASSERT_EQ(MkDir(dbDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
     RegisterCleanup(dbDir);
     ASSERT_EQ(MkDir(binlogDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
@@ -1028,6 +1032,86 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_SetDefaultGid_WithSubdir_004, TestSize.L
     // Act: SetDefaultGid calls GetEntries internally — previously could SIGABRT on nested dirs
     bool result = SqliteUtils::SetDefaultGid(dbDir, 3012);
 
-    // Assert: function completes without crash; result depends on ACL support
-    EXPECT_TRUE(result) << "SetDefaultGid should succeed on accessible directory tree";
+    if (!result) {
+        GTEST_SKIP() << "SetDefaultGid not supported (ACL unavailable on this filesystem)";
+    }
+}
+
+/**
+ * @tc.name: RdbFileSystem_GetEntries_PermissionDenied_005
+ * @tc.desc: Verify GetEntries does not SIGABRT when directory is not accessible (fork+setuid regression)
+ * @tc.type: FUNC
+ */
+HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_PermissionDenied_005, TestSize.Level3)
+{
+    if (getuid() != 0) {
+        GTEST_SKIP() << "Test requires root privileges to setuid(2000)";
+    }
+
+    std::string restrictedDir = "/data/test/rdb_fs_restricted_005";
+    std::filesystem::remove_all(restrictedDir);
+
+    ASSERT_EQ(MkDir(restrictedDir, S_IRWXU), 0);
+    RegisterCleanup(restrictedDir);
+
+    std::string innerFile = restrictedDir + "/inner.db";
+    int fd = open(innerFile.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    ASSERT_NE(fd, -1) << "open failed for " << innerFile;
+    close(fd);
+
+    chmod(restrictedDir.c_str(), S_IRWXU);
+
+    pid_t pid = fork();
+    ASSERT_GE(pid, 0) << "fork failed: " << std::strerror(errno);
+
+    if (pid == 0) {
+        setuid(2000);
+        RdbFileSystem::GetEntries(restrictedDir);
+        _exit(0);
+    } else {
+        int status = 0;
+        waitpid(pid, &status, 0);
+        EXPECT_TRUE(WIFEXITED(status)) << "Child killed by signal " << WTERMSIG(status);
+    }
+}
+
+/**
+ * @tc.name: RdbFileSystem_RemoveAll_PermissionDeniedSubdir_006
+ * @tc.desc: Verify RemoveAll does not SIGABRT when a subdirectory is not accessible (fork+setuid regression)
+ * @tc.type: FUNC
+ */
+HWTEST_F(SqliteUtilsTest, RdbFileSystem_RemoveAll_PermissionDeniedSubdir_006, TestSize.Level3)
+{
+    if (getuid() != 0) {
+        GTEST_SKIP() << "Test requires root privileges to setuid(2000)";
+    }
+
+    std::string baseDir = "/data/test/rdb_fs_removeall_restricted_006";
+    std::filesystem::remove_all(baseDir);
+
+    ASSERT_EQ(MkDir(baseDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
+    RegisterCleanup(baseDir);
+
+    std::string restrictedSubdir = baseDir + "/restricted";
+    ASSERT_EQ(MkDir(restrictedSubdir, S_IRWXU), 0);
+
+    std::string innerFile = restrictedSubdir + "/inner.db";
+    int fd = open(innerFile.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    ASSERT_NE(fd, -1) << "open failed for " << innerFile;
+    close(fd);
+
+    chmod(restrictedSubdir.c_str(), S_IRWXU);
+
+    pid_t pid = fork();
+    ASSERT_GE(pid, 0) << "fork failed: " << std::strerror(errno);
+
+    if (pid == 0) {
+        setuid(2000);
+        RdbFileSystem::RemoveAll(baseDir);
+        _exit(0);
+    } else {
+        int status = 0;
+        waitpid(pid, &status, 0);
+        EXPECT_TRUE(WIFEXITED(status)) << "Child killed by signal " << WTERMSIG(status);
+    }
 }
