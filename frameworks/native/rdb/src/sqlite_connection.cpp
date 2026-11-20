@@ -543,11 +543,16 @@ int SqliteConnection::Configure(const RdbStoreConfig &config, std::string &dbPat
         ConfigLocale(config.GetCollatorLocales());
     }
 
+    auto errCode = SetPersistWal(config);
+    if (errCode != E_OK) {
+        return errCode;
+    }
+
     if (config.GetRoleType() == VISITOR) {
         return E_OK;
     }
 
-    auto errCode = RegDefaultFunctions(dbHandle_);
+    errCode = RegDefaultFunctions(dbHandle_);
     if (errCode != E_OK) {
         return errCode;
     }
@@ -557,10 +562,6 @@ int SqliteConnection::Configure(const RdbStoreConfig &config, std::string &dbPat
     LimitPermission(config, dbPath);
 
     SetDwrEnable(config);
-    errCode = SetPersistWal(config);
-    if (errCode != E_OK) {
-        return errCode;
-    }
 
     errCode = SetPageSize(config);
     if (errCode != E_OK) {
