@@ -1005,6 +1005,34 @@ public:
      */
     virtual int DeleteSyncedData(const std::string &table, const std::vector<std::vector<PRIKey>> &keys);
 
+    /**
+     * @brief Set the screen lock state to the vector database engine.
+     *
+     * @param state Indicates the screen lock state, for example, SCREEN_LOCKED.
+     */
+    virtual int SetScreenState(ScreenLockState state);
+
+    /**
+     * @brief Set the device healthy state to the vector database engine.
+     *
+     * @param state Indicates the device healthy state, for example, DEVICE_UNROOT.
+     */
+    virtual int SetDeviceHealthyState(DeviceHealthyState state);
+
+    /**
+     * @brief Add a fine-grained access control policy to the vector database engine.
+     *
+     * @param policy Indicates the policy description in JSON format.
+     */
+    virtual int AddPolicy(const std::string &policy);
+
+    /**
+     * @brief Remove a fine-grained access control policy from the vector database engine.
+     *
+     * @param policyName Indicates the name of the policy to be removed.
+     */
+    virtual int RemovePolicy(const std::string &policyName);
+
     virtual std::string GetLastErrorMsg() const { return ""; }
 
 protected:

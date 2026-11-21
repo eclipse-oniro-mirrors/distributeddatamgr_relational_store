@@ -54,6 +54,16 @@ enum ExchangeStrategy : uint32_t {
     RESTORE,
     PENDING_BACKUP,
 };
+
+enum ScreenLockState : uint32_t {
+    SCREEN_UNLOCK = 0,
+    SCREEN_LOCKED,
+};
+
+enum DeviceHealthyState : uint32_t {
+    DEVICE_ROOT = 0,
+    DEVICE_UNROOT,
+};
 } // namespace NativeRdb
 } // namespace OHOS
 

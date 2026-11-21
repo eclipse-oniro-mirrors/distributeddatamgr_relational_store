@@ -2151,7 +2151,7 @@ std::pair<int32_t, ValueObject> RdbStoreImpl::Execute(
         return { E_NOT_SUPPORT, object };
     }
 
-    int sqlType = SqliteUtils::GetSqlStatementType(sql);
+    int sqlType = SqliteUtils::GetSqlStatementType(sql, config_.GetDBType());
     if (!SqliteUtils::IsSupportSqlForExecute(sqlType)) {
         LOG_ERROR("Not support the sqlType: %{public}d, app self can check the SQL:%{public}s", sqlType,
             SqliteUtils::SqlAnonymous(sql).c_str());
@@ -3821,6 +3821,58 @@ int RdbStoreImpl::DeleteSyncedData(const std::string &table, const std::vector<s
         return errCode;
     }
     return conn->DeleteSyncedData(table, keys);
+}
+
+int RdbStoreImpl::SetScreenState(ScreenLockState state)
+{
+    if (config_.GetDBType() != DB_VECTOR) {
+        return E_NOT_SUPPORT;
+    }
+    auto [errCode, conn] = GetConn(false);
+    if (errCode != E_OK || conn == nullptr) {
+        LOG_ERROR("The database is busy or closed errCode:%{public}d", errCode);
+        return errCode;
+    }
+    return conn->SetScreenLockState(state);
+}
+
+int RdbStoreImpl::SetDeviceHealthyState(DeviceHealthyState state)
+{
+    if (config_.GetDBType() != DB_VECTOR) {
+        return E_NOT_SUPPORT;
+    }
+    auto [errCode, conn] = GetConn(false);
+    if (errCode != E_OK || conn == nullptr) {
+        LOG_ERROR("The database is busy or closed errCode:%{public}d", errCode);
+        return errCode;
+    }
+    return conn->SetDeviceHealthyState(state);
+}
+
+int RdbStoreImpl::AddPolicy(const std::string &policy)
+{
+    if (config_.GetDBType() != DB_VECTOR) {
+        return E_NOT_SUPPORT;
+    }
+    auto [errCode, conn] = GetConn(false);
+    if (errCode != E_OK || conn == nullptr) {
+        LOG_ERROR("The database is busy or closed errCode:%{public}d", errCode);
+        return errCode;
+    }
+    return conn->AddPolicy(policy);
+}
+
+int RdbStoreImpl::RemovePolicy(const std::string &policyName)
+{
+    if (config_.GetDBType() != DB_VECTOR) {
+        return E_NOT_SUPPORT;
+    }
+    auto [errCode, conn] = GetConn(false);
+    if (errCode != E_OK || conn == nullptr) {
+        LOG_ERROR("The database is busy or closed errCode:%{public}d", errCode);
+        return errCode;
+    }
+    return conn->RemovePolicy(policyName);
 }
 
 std::pair<int32_t, Results> RdbStoreImpl::GenerateResult(int32_t code, std::shared_ptr<Statement> statement,

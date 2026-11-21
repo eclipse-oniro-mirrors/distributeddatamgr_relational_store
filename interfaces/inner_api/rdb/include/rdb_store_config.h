@@ -201,6 +201,28 @@ enum EncryptAlgo : int32_t {
     PLAIN_TEXT
 };
 
+enum EncryptedConfig : int32_t {
+    /** The whole database is encrypted. */
+    DB_ENCRYPTED_CONFIG = 0,
+    /** The data is encrypted by table. */
+    TABLE_ENCRYPTED_CONFIG,
+    /** The data is encrypted by column. */
+    COLUMN_ENCRYPTED_CONFIG
+};
+
+/**
+ * Base security levels for GaussPD fine-grained encryption.
+ * Independent of the database file SecurityLevel; ignored by SQLite.
+ */
+enum BSecurityLevel : int32_t {
+    /** The base security level is EL1. */
+    EL1_SECURITY_LEVEL = 0,
+    /** The base security level is EL2. */
+    EL2_SECURITY_LEVEL,
+    /** The base security level is EL4. */
+    EL4_SECURITY_LEVEL
+};
+
 enum RegisterType : uint8_t { STORE_OBSERVER = 0, CLIENT_OBSERVER, OBSERVER_END };
 
 enum ConfigVersion : uint8_t {
@@ -622,6 +644,36 @@ public:
     API_EXPORT void SetEncryptStatus(const bool status) const;
 
     /**
+     * @brief Obtains the encryption granularity in this {@code StoreConfig} object.
+     */
+    int32_t GetEncryptionGranularity() const;
+
+    /**
+     * @brief Sets the encryption granularity for the object.
+     */
+    void SetEncryptionGranularity(EncryptedConfig encryptionGranularity);
+
+    /**
+     * @brief Obtains the base security level in this {@code StoreConfig} object.
+     */
+    int32_t GetBaseSecurityLevel() const;
+
+    /**
+     * @brief Sets the base security level for the object.
+     */
+    void SetBaseSecurityLevel(BSecurityLevel baseSecurityLevel);
+
+    /**
+     * @brief Checks whether the fine-grained access control is enabled.
+     */
+    bool IsAccessControl() const;
+
+    /**
+     * @brief Sets whether the fine-grained access control is enabled.
+     */
+    void SetAccessControl(bool accessControl);
+
+    /**
      * @brief Obtains the read connection size in this {@code StoreConfig} object.
      */
     API_EXPORT int GetReadConSize() const;
@@ -755,6 +807,13 @@ public:
      */
     API_EXPORT std::string GetReplicaPath() const;
 
+    bool HasVectorSecurityConflict(const RdbStoreConfig &config) const
+    {
+        return dbType_ == DB_VECTOR && config.dbType_ == DB_VECTOR &&
+            (encryptionGranularity_ != config.encryptionGranularity_ ||
+            baseSecurityLevel_ != config.baseSecurityLevel_ || accessControl_ != config.accessControl_);
+    }
+
     /**
      * @brief Overload the line number operator.
      */
@@ -775,7 +834,8 @@ public:
             syncMode_ != config.syncMode_ || databaseFileType != config.databaseFileType ||
             journalSize_ != config.journalSize_ || pageSize_ != config.pageSize_ || dbType_ != config.dbType_ ||
             customDir_ != config.customDir_ || pluginLibs_ != config.pluginLibs_ || haMode_ != config.haMode_ ||
-            serverPath_ != config.serverPath_ || replicaPath_ != config.replicaPath_) {
+            serverPath_ != config.serverPath_ || replicaPath_ != config.replicaPath_ ||
+            HasVectorSecurityConflict(config)) {
             return false;
         }
 
@@ -947,6 +1007,9 @@ private:
 
     bool readOnly_ = false;
     mutable bool isEncrypt_ = false;
+    int32_t encryptionGranularity_ = EncryptedConfig::DB_ENCRYPTED_CONFIG;
+    int32_t baseSecurityLevel_ = BSecurityLevel::EL2_SECURITY_LEVEL;
+    bool accessControl_ = false;
     bool isCreateNecessary_;
     bool isSearchable_ = false;
     std::optional<bool> isSilentAccessible_;

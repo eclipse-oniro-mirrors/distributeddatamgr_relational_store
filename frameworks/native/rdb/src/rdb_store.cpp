@@ -856,4 +856,28 @@ int RdbStore::DeleteSyncedData(const std::string &table, const std::vector<std::
     (void)keys;
     return E_NOT_SUPPORT;
 }
+
+int RdbStore::SetScreenState(ScreenLockState state)
+{
+    (void)state;
+    return E_NOT_SUPPORT;
+}
+
+int RdbStore::SetDeviceHealthyState(DeviceHealthyState state)
+{
+    (void)state;
+    return E_NOT_SUPPORT;
+}
+
+int RdbStore::AddPolicy(const std::string &policy)
+{
+    (void)policy;
+    return E_NOT_SUPPORT;
+}
+
+int RdbStore::RemovePolicy(const std::string &policyName)
+{
+    (void)policyName;
+    return E_NOT_SUPPORT;
+}
 } // namespace OHOS::NativeRdb

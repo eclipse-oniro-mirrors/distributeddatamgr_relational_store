@@ -95,6 +95,16 @@ typedef enum {
     GRD_CONFIG_BOTTOM,
 } GRD_ConfigTypeE;
 
+typedef enum {
+    GRD_SCREEN_UNLOCK = 0,
+    GRD_SCREEN_LOCKED,
+} GRD_ScreenLockState;
+
+typedef enum {
+    GRD_DEVICE_ROOT = 0,
+    GRD_DEVICE_UNROOT,
+} GRD_DeviceHealthyState;
+
 typedef struct GRD_DbValueT {
     GRD_DbDataTypeE type;
     union {

@@ -24,6 +24,7 @@
 
 #include "knowledge_types.h"
 #include "rdb_common.h"
+#include "rdb_errno.h"
 #include "rdb_store_config.h"
 #include "rdb_types.h"
 #include "statement.h"
@@ -115,6 +116,22 @@ public:
     virtual void ReplayBinlog(const RdbStoreConfig &config, bool chkBinlogCount) = 0;
     virtual int SetMatrixFileInfo(const DistributedRdb::MatrixFileInfo &fileInfo) = 0;
     virtual int UpdateTrackerMatrix(const DistributedRdb::RdbChangedData &rdbChangedData, bool isFull) = 0;
+    virtual int32_t SetScreenLockState([[gnu::unused]] ScreenLockState state)
+    {
+        return E_NOT_SUPPORT;
+    }
+    virtual int32_t SetDeviceHealthyState([[gnu::unused]] DeviceHealthyState state)
+    {
+        return E_NOT_SUPPORT;
+    }
+    virtual int32_t AddPolicy([[gnu::unused]] const std::string &policy)
+    {
+        return E_NOT_SUPPORT;
+    }
+    virtual int32_t RemovePolicy([[gnu::unused]] const std::string &policyName)
+    {
+        return E_NOT_SUPPORT;
+    }
 
     // Diagnostic: returns raw primary/replica file metadata without time summarization.
     // Default returns E_NOT_SUPPORT (defined in connection.cpp); SqliteConnection overrides.

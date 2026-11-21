@@ -334,7 +334,22 @@ bool IsMatchKeyword(const char *const *keyword, size_t size, const char *str)
 static_assert(IsLexSorted(SQL_KEYWORD, sizeof(SQL_KEYWORD) / sizeof(char*)));
 static_assert(IsLexSorted(WHILE_KEYWORDS, sizeof(WHILE_KEYWORDS) / sizeof(char*)));
 
-int SqliteUtils::GetSqlStatementType(const std::string &sql)
+static size_t SkipGaussPdAnnotation(const std::string &sql, size_t pos)
+{
+    if (sql[pos] != '[') {
+        return pos;
+    }
+    auto end = sql.find(']', pos + 1);
+    if (end == std::string::npos) {
+        return pos;
+    }
+    auto next = std::find_if(sql.begin() + end + 1, sql.end(), [](unsigned char ch) {
+        return !std::isspace(ch) && !std::iscntrl(ch);
+    });
+    return static_cast<size_t>(next - sql.begin());
+}
+
+int SqliteUtils::GetSqlStatementType(const std::string &sql, int32_t dbType)
 {
     /* the sql string length less than 3 can not be any type sql */
     auto alnum = std::find_if(sql.begin(), sql.end(), [](int ch) { return !std::isspace(ch) && !std::iscntrl(ch); });
@@ -342,6 +357,9 @@ int SqliteUtils::GetSqlStatementType(const std::string &sql)
         return STATEMENT_ERROR;
     }
     auto pos = static_cast<std::string::size_type>(alnum - sql.begin());
+    if (dbType == DB_VECTOR) {
+        pos = SkipGaussPdAnnotation(sql, pos);
+    }
     /* 3 represents the number of prefix characters that need to be extracted and checked */
     if (pos + 3 >= sql.length()) {
         return STATEMENT_ERROR;
