@@ -2500,7 +2500,7 @@ void SqliteConnection::CleanDonatedBinlogWithoutReplica(const std::string &dbPat
         return;
     }
     // Empty dir path keeps the default binlog location (main db sibling).
-    BinlogSetConfig(dbHandle, Sqlite3BinlogMode::ROW_FOR_SEARCH, "", config.GetBinlogFileSize());
+    BinlogSetConfig(dbHandle, Sqlite3BinlogMode::ROW_FOR_SEARCH, "", RdbStoreConfig::BINLOG_FILE_SIZE_DEFAULT);
     int err = sqlite3_clean_binlog(dbHandle, BinlogFileCleanModeE::BINLOG_FILE_CLEAN_DONATED_MODE);
     if (err != SQLITE_OK) {
         LOG_WARN("clean donated binlog[%{public}s] failed. err=%{public}d", SqliteUtils::Anonymous(dbPath).c_str(),
