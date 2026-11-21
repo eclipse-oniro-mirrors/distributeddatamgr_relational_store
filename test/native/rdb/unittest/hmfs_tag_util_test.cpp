@@ -15,6 +15,7 @@
 
 #include "hmfs_tag_util.h"
 
+#include <cerrno>
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <sys/stat.h>
@@ -73,9 +74,13 @@ HWTEST_F(HmfsTagUtilTest, HmfsTagUtil_Degrade_001, TestSize.Level1)
     ASSERT_GE(fd, 0);
     close(fd);
 
-    // On non-HMFS file systems (unit-test environments such as ext4/tmpfs), the ioctl
-    // is not supported and a negative value must be returned without crashing.
-    // Behavior on real HMFS devices (0 / FLAG_SET) is validated by device integration.
+    // On non-HMFS file systems (ext4/tmpfs), the ioctl is unsupported and must return a
+    // negative value without crashing. The exact value is kernel/errno-determined (probed:
+    // -ENOTTY on Linux for an unrecognized ioctl; CLEARFLAGS additionally passes through
+    // LOG_WARN which may touch errno), so it is NOT a code-guaranteed constant like -EINVAL.
+    // EXPECT_LT asserts the code contract (negative failure return) host-robustly; a precise
+    // -ENOTTY would couple the test to the host errno. Real HMFS behavior (0 / FLAG_SET) is
+    // validated by device integration.
     EXPECT_LT(HmfsTagUtil::GetKeyFileFlag(filePath), 0);
     EXPECT_LT(HmfsTagUtil::ClearKeyFileFlag(filePath), 0);
 
@@ -85,15 +90,23 @@ HWTEST_F(HmfsTagUtilTest, HmfsTagUtil_Degrade_001, TestSize.Level1)
 
 /**
  * @tc.name: HmfsTagUtil_InvalidPath_001
- * @tc.desc: test HmfsTagUtil rejects invalid paths before invoking ioctl
+ * @tc.desc: test HmfsTagUtil rejects invalid paths (empty/root/trailing-slash/no-separator) and a
+ *           well-formed path whose parent dir does not exist, before/at open() in ExecuteByPath
  * @tc.type: FUNC
  */
 HWTEST_F(HmfsTagUtilTest, HmfsTagUtil_InvalidPath_001, TestSize.Level1)
 {
-    EXPECT_LT(HmfsTagUtil::GetKeyFileFlag(""), 0);
-    EXPECT_LT(HmfsTagUtil::ClearKeyFileFlag(""), 0);
-    EXPECT_LT(HmfsTagUtil::GetKeyFileFlag("/"), 0);
-    EXPECT_LT(HmfsTagUtil::ClearKeyFileFlag("/trailingSlash/"), 0);
+    // Empty / root / trailing-slash paths are rejected at the ExecuteByPath path check (-EINVAL).
+    EXPECT_EQ(HmfsTagUtil::GetKeyFileFlag(""), -EINVAL);
+    EXPECT_EQ(HmfsTagUtil::ClearKeyFileFlag(""), -EINVAL);
+    EXPECT_EQ(HmfsTagUtil::GetKeyFileFlag("/"), -EINVAL);
+    EXPECT_EQ(HmfsTagUtil::ClearKeyFileFlag("/trailingSlash/"), -EINVAL);
+    // No separator: find_last_of('/') == npos -> rejected at the path check with -EINVAL.
+    EXPECT_EQ(HmfsTagUtil::GetKeyFileFlag("plainname"), -EINVAL);
+    EXPECT_EQ(HmfsTagUtil::ClearKeyFileFlag("plainname"), -EINVAL);
+    // Well-formed path whose parent dir does not exist: open() fails -> -ENOENT (dirFd < 0 arm).
+    EXPECT_EQ(HmfsTagUtil::GetKeyFileFlag("/nonexistent_hmfs_tag_util_001/file.db"), -ENOENT);
+    EXPECT_EQ(HmfsTagUtil::ClearKeyFileFlag("/nonexistent_hmfs_tag_util_001/file.db"), -ENOENT);
 }
 
 /**
@@ -107,11 +120,13 @@ HWTEST_F(HmfsTagUtilTest, HmfsTagUtil_DirFd_001, TestSize.Level1)
     int dirFd = open(TEST_DIR.c_str(), O_RDONLY | O_DIRECTORY);
     ASSERT_GE(dirFd, 0);
 
-    // Invalid file names must be rejected before ioctl.
-    EXPECT_LT(HmfsTagUtil::GetKeyFileFlag(dirFd, "../escape.db"), 0);
-    EXPECT_LT(HmfsTagUtil::ClearKeyFileFlag(dirFd, std::string(300, 'a')), 0);
+    // Invalid file names are rejected before ioctl with -EINVAL.
+    EXPECT_EQ(HmfsTagUtil::GetKeyFileFlag(dirFd, "../escape.db"), -EINVAL);
+    EXPECT_EQ(HmfsTagUtil::ClearKeyFileFlag(dirFd, std::string(300, 'a')), -EINVAL);
 
-    // Valid file name on a non-HMFS file system degrades with a negative return.
+    // Valid file name on a non-HMFS file system degrades with a negative return. The exact
+    // value is kernel/errno-determined (see Degrade_001; probed -ENOTTY), not code-guaranteed,
+    // so EXPECT_LT asserts the negative failure contract rather than a host-dependent value.
     EXPECT_LT(HmfsTagUtil::GetKeyFileFlag(dirFd, "valid.db"), 0);
     EXPECT_LT(HmfsTagUtil::ClearKeyFileFlag(dirFd, "valid.db"), 0);
 
