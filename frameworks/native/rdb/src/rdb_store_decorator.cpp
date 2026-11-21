@@ -52,7 +52,7 @@ int32_t RdbStoreDecorator::Init(int version, RdbOpenCallback &openCallback, bool
     // instances into the member. Init still runs outside the manager's
     // critical section (GetStoreFromCache's lock has been released by
     // then), so the config file read never happens inside it.
-    RDB_FAULT_INJECT_CREATE(injector_, createOnce_, dbPath_);
+    RDB_FAULT_INJECT_CREATE(createOnce_, dbPath_, injector_);
     return RdbStoreImpl::Init(version, openCallback, isNeedSetAcl, isSilentAccessible);
 }
 

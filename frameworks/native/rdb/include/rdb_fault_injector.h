@@ -75,7 +75,7 @@ public:
     // global lock): only concurrent opens of the same store block each
     // other, and calls after the first are a fast path. Reached only
     // through RDB_FAULT_INJECT_CREATE.
-    static void CreateOnce(std::once_flag &flag, std::shared_ptr<RdbFaultInjector> &holder, const std::string &dbPath);
+    static void CreateOnce(std::once_flag &flag, const std::string &dbPath, std::shared_ptr<RdbFaultInjector> &holder);
 
     // Combined verdict for hook sites: the per-method entry first, then the
     // operation family. Returns true when the call site should inject.
@@ -154,8 +154,8 @@ private:
 // no mock behavior at all. New injection points must use these macros -
 // never call the injector verdict methods directly.
 #ifdef RDB_FAULT_INJECTION_ENABLE
-#define RDB_FAULT_INJECT_CREATE(inj, flag, dbPath) \
-    RdbFaultInjector::CreateOnce(flag, inj, dbPath)
+#define RDB_FAULT_INJECT_CREATE(flag, dbPath, inj) \
+    RdbFaultInjector::CreateOnce(flag, dbPath, inj)
 #define RDB_FAULT_INJECT_HIT(inj, op, name, ...) \
     if ((inj) != nullptr && (inj)->Hit(name, RdbFaultOp::op)) { \
         return __VA_ARGS__; \
@@ -169,7 +169,7 @@ private:
         (resultSet) = std::make_shared<RdbResultSetDecorator<Inner>>((resultSet), (inj)); \
     }
 #else
-#define RDB_FAULT_INJECT_CREATE(inj, flag, dbPath)
+#define RDB_FAULT_INJECT_CREATE(flag, dbPath, inj)
 #define RDB_FAULT_INJECT_HIT(inj, op, name, ...)
 #define RDB_FAULT_INJECT_METHOD(inj, name, ret)
 #define RDB_FAULT_INJECT_WRAP(resultSet, inj, Inner)
