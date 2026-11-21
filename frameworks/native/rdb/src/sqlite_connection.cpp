@@ -752,18 +752,6 @@ bool SqliteConnection::IsSlaveAvailable() const
     return slaveConnection_ != nullptr && !SqliteUtils::IsSlaveInvalid(config_.GetPath());
 }
 
-void SqliteConnection::MigrateReplica(const std::string &staleSlavePath, bool isResetBinlog)
-{
-    LOG_INFO("migrate replica, delete stale default slave:%{public}s",
-        SqliteUtils::Anonymous(staleSlavePath).c_str());
-    Delete(staleSlavePath);
-    if (SqliteUtils::IsSupportBinlog(config_) && config_.GetHaMode() != HAMode::SINGLE && isResetBinlog) {
-        bool isNeedSetAcl = SqliteUtils::HasAccessAcl(config_.GetPath(), SERVICE_GID) ||
-                            SqliteUtils::HasAccessAcl(SqliteUtils::GetSlavePath(config_), SERVICE_GID);
-        (void)ResetBinlog(isNeedSetAcl);
-    }
-}
-
 int SqliteConnection::SubscribeTableChanges(const Connection::Notifier &notifier)
 {
 #if !defined(WINDOWS_PLATFORM) && !defined(MAC_PLATFORM) && !defined(ANDROID_PLATFORM) && !defined(IOS_PLATFORM)
@@ -1567,9 +1555,6 @@ int32_t SqliteConnection::Backup(const std::string &databasePath, const std::vec
                 return errCode;
             }
             slaveConnection_ = conn;
-            if (config_.GetHaMode() == HAMode::MANUAL_TRIGGER) {
-                (void)SqliteUtils::MigrateBinlogFolder(config_);
-            }
         }
         return ExchangeSlaverToMaster(false, verifyDb, slaveStatus);
     }
@@ -2131,6 +2116,117 @@ static bool IsReplicaOptional(const RdbStoreConfig &config)
         SqliteUtils::IsSupportBinlog(config);
 }
 
+bool SqliteConnection::MigrateBinlogFolder(const RdbStoreConfig &config)
+{
+    if (!SqliteUtils::NeedMigrateBinlog(config)) {
+        return true;
+    }
+    std::string src = SqliteUtils::GetBinlogFolderPath(config.GetPath());
+    std::string dst = SqliteUtils::GetBinlogFolderPath(config);
+    if (access(dst.c_str(), F_OK) == 0) {
+        size_t num = SqliteUtils::DeleteFolder(dst);
+        LOG_WARN("migrate binlog, dst residue removed:%{public}zu", num);
+    }
+    if (rename(src.c_str(), dst.c_str()) == 0) {
+        LOG_INFO("migrate binlog by rename, [%{public}s]->[%{public}s]", SqliteUtils::Anonymous(src).c_str(),
+            SqliteUtils::Anonymous(dst).c_str());
+        return true;
+    }
+    // The scene is kept on failure: the default-path binlog stays where it is, so the retry
+    // condition survives and the failure remains diagnosable on disk.
+    LOG_ERROR("migrate binlog rename failed, errno:%{public}d, [%{public}s]->[%{public}s]", errno,
+        SqliteUtils::Anonymous(src).c_str(), SqliteUtils::Anonymous(dst).c_str());
+    return false;
+}
+
+bool SqliteConnection::MigrateReplicaFiles(const RdbStoreConfig &config)
+{
+    if (!SqliteUtils::NeedMigrateReplica(config)) {
+        return true;
+    }
+    std::string srcPath = SqliteUtils::GetSlavePath(config.GetPath());
+    std::string dstPath = SqliteUtils::GetSlavePath(config);
+    CheckpointReplicaBeforeMigration(config, srcPath);
+    // Sidecars first and the db main file last: the db file is the idempotency key of the
+    // retry decision, so any interruption or failure before its rename keeps the whole unit
+    // re-drivable on the next open (an already-migrated sidecar is simply skipped then).
+    for (const auto &suffix : FILE_SUFFIXES) {
+        if (suffix.suffix_[0] == '\0') {
+            continue;
+        }
+        std::string srcFile = srcPath + suffix.suffix_;
+        std::string dstFile = dstPath + suffix.suffix_;
+        if (access(srcFile.c_str(), F_OK) != 0) {
+            continue;
+        }
+        if (!SqliteUtils::RenameFile(srcFile, dstFile)) {
+            LOG_WARN("migrate replica sidecar failed, [%{public}s]->[%{public}s]",
+                SqliteUtils::Anonymous(srcFile).c_str(), SqliteUtils::Anonymous(dstFile).c_str());
+        }
+    }
+    if (!SqliteUtils::RenameFile(srcPath, dstPath)) {
+        LOG_ERROR("migrate replica main file failed, [%{public}s]->[%{public}s]",
+            SqliteUtils::Anonymous(srcPath).c_str(), SqliteUtils::Anonymous(dstPath).c_str());
+        return false;
+    }
+    LOG_INFO("migrate replica main file, [%{public}s]->[%{public}s]", SqliteUtils::Anonymous(srcPath).c_str(),
+        SqliteUtils::Anonymous(dstPath).c_str());
+    return true;
+}
+
+void SqliteConnection::CheckpointReplicaBeforeMigration(const RdbStoreConfig &config, const std::string &replicaPath)
+{
+    const char *option = SqliteUtils::IsSupportBinlog(config) ? "compressvfs" : nullptr;
+    sqlite3 *db = nullptr;
+    int err = sqlite3_open_v2(replicaPath.c_str(), &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, option);
+    if (err != SQLITE_OK) {
+        LOG_ERROR("migrate replica, checkpoint pre-open failed err:%{public}d, errno:%{public}d, [%{public}s]", err,
+            errno, SqliteUtils::Anonymous(replicaPath).c_str());
+        sqlite3_close_v2(db);
+        return;
+    }
+    (void)sqlite3_busy_timeout(db, CHECKPOINT_TIME);
+    err = sqlite3_wal_checkpoint_v2(db, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
+    if (err != SQLITE_OK) {
+        LOG_WARN("migrate replica, checkpoint failed err:%{public}d, [%{public}s]", err,
+            SqliteUtils::Anonymous(replicaPath).c_str());
+    }
+    sqlite3_close_v2(db);
+}
+
+// A rename keeps the file ACLs, but the default-ACL grant of the source dir stays behind; the
+// replica dir needs the same access + default grant as SetFileGid applies in the normal open
+// path, so the fresh sidecars created right after by the slave connection inherit the service
+// gid and the service can traverse to the migrated binlog. Probed per the existing pattern:
+// stores that never enabled distributed are not granted. Failure is non-fatal: the next
+// SetDistributedTables re-grants via SetFileGid.
+void SqliteConnection::GrantReplicaDirAcl(const RdbStoreConfig &config, const std::string &customReplica)
+{
+    if (!SqliteUtils::HasAccessAcl(config.GetPath(), SERVICE_GID) &&
+        !SqliteUtils::HasAccessAcl(customReplica, SERVICE_GID)) {
+        return;
+    }
+    std::string replicaDir = StringUtils::ExtractFilePath(customReplica);
+    if (!SqliteUtils::SetDbDirGid(replicaDir, SERVICE_GID, true)) {
+        LOG_WARN("migrate replica, grant replica dir acl failed, [%{public}s]",
+            SqliteUtils::Anonymous(replicaDir).c_str());
+    }
+}
+
+void SqliteConnection::MigrateDefaultReplica(const RdbStoreConfig &config)
+{
+    if (!SqliteUtils::NeedMigrateDefaultReplica(config)) {
+        return;
+    }
+    if (!MigrateBinlogFolder(config)) {
+        return;
+    }
+    if (!MigrateReplicaFiles(config)) {
+        return;
+    }
+    GrantReplicaDirAcl(config, SqliteUtils::GetSlavePath(config));
+}
+
 std::pair<int32_t, std::shared_ptr<SqliteConnection>> SqliteConnection::InnerCreate(
     const RdbStoreConfig &config, bool isWrite, bool isReusableReplica)
 {
@@ -2148,6 +2244,7 @@ std::pair<int32_t, std::shared_ptr<SqliteConnection>> SqliteConnection::InnerCre
     }
     conn = connection;
     if (isWrite && config.GetHaMode() != HAMode::SINGLE) {
+        MigrateDefaultReplica(config);
         RdbStoreConfig slaveCfg = connection->GetSlaveRdbStoreConfig(config);
         auto [err, slaveConn] = connection->CreateSlaveConnection(slaveCfg, SlaveOpenPolicy::OPEN_IF_DB_VALID);
         if (err != E_OK) {
@@ -2157,7 +2254,6 @@ std::pair<int32_t, std::shared_ptr<SqliteConnection>> SqliteConnection::InnerCre
         } else {
             conn->slaveConnection_ = slaveConn;
         }
-        (void)SqliteUtils::MigrateBinlogFolder(config);
         conn->SetBinlog();
         if (!SqliteUtils::IsSupportBinlog(config)) {
             auto binlogFolder = SqliteUtils::GetBinlogFolderPath(config);

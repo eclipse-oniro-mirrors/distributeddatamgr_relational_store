@@ -779,34 +779,31 @@ bool SqliteUtils::IsValidReplicaPath(const std::string &replicaPath)
     return true;
 }
 
-bool SqliteUtils::MigrateBinlogFolder(const RdbStoreConfig &config)
+bool SqliteUtils::IsMigrationAllowed(const RdbStoreConfig &config)
 {
-    if (!IsSupportBinlog(config) || config.GetHaMode() == HAMode::SINGLE ||
-        config.GetReplicaPath().empty()) {
-        return true;
-    }
-    std::string src = GetBinlogFolderPath(config.GetPath());
-    std::string dst = GetBinlogFolderPath(config);
-    if (src == dst || access(src.c_str(), F_OK) != 0) {
-        return true;
-    }
-    if (access(dst.c_str(), F_OK) == 0) {
-        size_t num = DeleteFolder(dst);
-        LOG_WARN("migrate binlog, dst residue removed:%{public}zu", num);
-    }
-    if (rename(src.c_str(), dst.c_str()) == 0) {
-        LOG_INFO("migrate binlog by rename, %{public}s", Anonymous(dst).c_str());
-        return true;
-    }
-    int renameErr = errno;
-    if (renameErr != EXDEV) {
-        LOG_ERROR("migrate binlog rename failed, errno:%{public}d", renameErr);
-        DeleteFolder(src);
+    return config.GetHaMode() != HAMode::SINGLE && !config.IsReadOnly() && !config.IsMemoryRdb() &&
+        !config.GetReplicaPath().empty() && IsValidReplicaPath(config.GetReplicaPath());
+}
+
+bool SqliteUtils::NeedMigrateReplica(const RdbStoreConfig &config)
+{
+    std::string defaultReplica = GetSlavePath(config.GetPath());
+    return defaultReplica != GetSlavePath(config) && access(defaultReplica.c_str(), F_OK) == 0 &&
+        access(GetSlavePath(config).c_str(), F_OK) != 0;
+}
+
+bool SqliteUtils::NeedMigrateBinlog(const RdbStoreConfig &config)
+{
+    if (!IsSupportBinlog(config)) {
         return false;
     }
-    size_t num = DeleteFolder(src);
-    LOG_INFO("migrate binlog cross-fs, copied and removed:%{public}zu", num);
-    return true;
+    std::string defaultBinlog = GetBinlogFolderPath(config.GetPath());
+    return defaultBinlog != GetBinlogFolderPath(config) && access(defaultBinlog.c_str(), F_OK) == 0;
+}
+
+bool SqliteUtils::NeedMigrateDefaultReplica(const RdbStoreConfig &config)
+{
+    return IsMigrationAllowed(config) && (NeedMigrateReplica(config) || NeedMigrateBinlog(config));
 }
 
 std::string SqliteUtils::GetMasterBackupPath(const std::string &name)

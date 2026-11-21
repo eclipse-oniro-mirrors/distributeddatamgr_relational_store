@@ -15,6 +15,7 @@
 
 #define LOG_TAG "RdbReplicaPathTest"
 #include <gtest/gtest.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <filesystem>
@@ -39,7 +40,6 @@ using namespace OHOS::Rdb;
 static const int CHECKAGE = 18;
 static const double CHECKCOLUMN = 100.5;
 static const int BINLOG_DELETE_PER_WAIT_TIME = 100000; // 100000us = 100ms
-static const int BINLOG_REPLAY_WAIT_TIME = 2; // 2s
 
 class ReplicaPathTestOpenCallback : public RdbOpenCallback {
 public:
@@ -75,10 +75,10 @@ public:
     void RemoveFolder(const std::string &path);
     static void DeleteDbFiles(const std::string &dbPath);
     static void Insert(int64_t start, int count, bool isSlave = false, int dataSize = 0);
-    static void WaitForBackupFinish(int32_t expectStatus, int maxTimes = 4000);
     static void WaitForBinlogDelete(int maxTimes = 1000);
-    static void WaitForBinlogReplayFinish();
+    static void WaitForAsyncExchange();
     void InitDb(HAMode mode = HAMode::MAIN_REPLICA, bool isOpenSlave = true, bool isSearchable = false);
+    void ReOpenStore(const RdbStoreConfig &config);
 
     static const std::string databaseName;
     static const std::string slaveDatabaseName;
@@ -179,18 +179,6 @@ void RdbReplicaPathTest::Insert(int64_t start, int count, bool isSlave, int data
     }
 }
 
-void RdbReplicaPathTest::WaitForBackupFinish(int32_t expectStatus, int maxTimes)
-{
-    int32_t curStatus = store->GetBackupStatus();
-    int tryTimes = 0;
-    while (curStatus != expectStatus && (++tryTimes <= maxTimes)) {
-        usleep(50000); // 50000 delay
-        curStatus = store->GetBackupStatus();
-    }
-    LOG_INFO("----------cur backup Status:%{public}d---------", curStatus);
-    ASSERT_EQ(curStatus, expectStatus);
-}
-
 void RdbReplicaPathTest::WaitForBinlogDelete(int maxTimes)
 {
     int waitTimes = 0;
@@ -203,9 +191,9 @@ void RdbReplicaPathTest::WaitForBinlogDelete(int maxTimes)
     EXPECT_FALSE(CheckFolderExist(RdbReplicaPathTest::binlogDatabaseName));
 }
 
-void RdbReplicaPathTest::WaitForBinlogReplayFinish()
+void RdbReplicaPathTest::WaitForAsyncExchange()
 {
-    sleep(BINLOG_REPLAY_WAIT_TIME);
+    usleep(BINLOG_DELETE_PER_WAIT_TIME);
 }
 
 void RdbReplicaPathTest::CheckNumber(
@@ -249,6 +237,16 @@ void RdbReplicaPathTest::DeleteDbFiles(const std::string &dbPath)
     }
 }
 
+void RdbReplicaPathTest::ReOpenStore(const RdbStoreConfig &config)
+{
+    int errCode = E_OK;
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    EXPECT_NE(store, nullptr);
+    EXPECT_EQ(errCode, E_OK);
+    WaitForAsyncExchange();
+}
+
 /**
  * @tc.name: RdbStore_ReplicaPath_001
  * @tc.desc: Test in REPLICA mode, reopen the database with ReplicaPath as path A
@@ -266,8 +264,7 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_001, TestSize.Level0)
     RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
     EXPECT_NE(store, nullptr);
     store = nullptr;
-    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
-    EXPECT_NE(store, nullptr);
+    ReOpenStore(config);
     EXPECT_TRUE(store->IsSlaveAvailable());
 }
 
@@ -304,9 +301,7 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_002, TestSize.Level0)
 
     LOG_INFO("---- reopen and verify slave generated at the custom dir");
     store = nullptr;
-    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
-    EXPECT_NE(store, nullptr);
-    EXPECT_EQ(errCode, E_OK);
+    ReOpenStore(config);
     EXPECT_EQ(access(expectedSlaveFile.c_str(), F_OK), 0);
     EXPECT_TRUE(store->IsSlaveAvailable());
     std::string binlogNewPath = customSlaveDir + "/dual_write_binlog_test.db_binlog";
@@ -347,9 +342,7 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_003, TestSize.Level0)
 
     LOG_INFO("---- step2 reopen MAIN_REPLICA with a custom slave dir;");
     config.SetReplicaPath(customSlaveDir);
-    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
-    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
-    WaitForBackupFinish(BACKUP_FINISHED);
+    ReOpenStore(config);
     ASSERT_FALSE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName));
     ASSERT_TRUE(OHOS::FileExists(expectedSlaveFile));
     EXPECT_TRUE(store->IsSlaveAvailable());
@@ -404,9 +397,7 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_004, TestSize.Level0)
     RdbStoreConfig configB(RdbReplicaPathTest::databaseName);
     configB.SetHaMode(HAMode::MAIN_REPLICA);
     configB.SetReplicaPath(dirB);
-    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(configB, 1, helper, errCode);
-    ASSERT_NE(store, nullptr);
-    EXPECT_EQ(errCode, E_OK);
+    ReOpenStore(configB);
 
     ASSERT_TRUE(OHOS::FileExists(expectedSlaveA));
     ASSERT_TRUE(OHOS::FileExists(expectedSlaveB));
@@ -456,9 +447,7 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_005, TestSize.Level0)
     store = nullptr;
     RdbStoreConfig config2(RdbReplicaPathTest::databaseName);
     config2.SetHaMode(HAMode::MAIN_REPLICA);
-    ReplicaPathTestOpenCallback helper2;
-    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config2, 1, helper2, errCode);
-    ASSERT_NE(store, nullptr);
+    ReOpenStore(config2);
 
     EXPECT_TRUE(OHOS::FileExists(expectedSlaveA));
     ASSERT_TRUE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName));
@@ -533,7 +522,8 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_007, TestSize.Level0)
 
 /**
  * @tc.name: RdbStore_ReplicaPath_008
- * @tc.desc: Test trigger mode, replicate Path from empty to path A
+ * @tc.desc: Test trigger mode, ReplicaPath from empty to path A, default replica and binlog migrate to dir A
+ *           after master open, manual backup keeps working on the migrated replica
  * @tc.type: FUNC
  */
 HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_008, TestSize.Level0)
@@ -559,15 +549,17 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_008, TestSize.Level0)
     RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
     ASSERT_NE(store, nullptr);
 
-    LOG_INFO("---- step3 assert slave file exists and slave is available");
-    ASSERT_TRUE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName));
-    ASSERT_FALSE(OHOS::FileExists(expectedSlaveA));
-    ASSERT_FALSE(store->IsSlaveAvailable());
-    EXPECT_TRUE(store->IsSlaveDiffFromMaster());
-    ASSERT_TRUE(CheckFolderExist(binlogDatabaseName));
+    LOG_INFO("---- step3 assert the default replica and binlog migrated to dir A after master open");
+    ASSERT_FALSE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName))
+        << "default replica should have been migrated to dir A at open";
+    ASSERT_TRUE(OHOS::FileExists(expectedSlaveA));
+    ASSERT_TRUE(store->IsSlaveAvailable());
+    EXPECT_FALSE(store->IsSlaveDiffFromMaster());
+    ASSERT_FALSE(CheckFolderExist(binlogDatabaseName));
     std::string binlogNewPath = customSlaveDirA + "/dual_write_binlog_test.db_binlog";
-    ASSERT_FALSE(CheckFolderExist(binlogNewPath));
+    ASSERT_TRUE(CheckFolderExist(binlogNewPath));
 
+    LOG_INFO("---- step4 manual backup keeps working on the migrated replica");
     EXPECT_EQ(store->Backup(std::string(""), {}), E_OK);
     ASSERT_FALSE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName));
     ASSERT_TRUE(OHOS::FileExists(expectedSlaveA));
@@ -610,9 +602,7 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_009, TestSize.Level0)
 
     LOG_INFO("---- step2 switch ReplicaPath from empty to custom slave dir A");
     config.SetReplicaPath(customSlaveDirA);
-    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
-    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
-    WaitForBackupFinish(BACKUP_FINISHED);
+    ReOpenStore(config);
     store = nullptr;
 
     LOG_INFO("---- step3 delete all db files except the replica path A");
@@ -623,9 +613,7 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_009, TestSize.Level0)
     ASSERT_TRUE(OHOS::FileExists(expectedSlaveA));
 
     LOG_INFO("---- step4 reopen and restore data from the replica path A");
-    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
-    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
-    EXPECT_EQ(errCode, E_OK);
+    ReOpenStore(config);
     EXPECT_TRUE(OHOS::FileExists(RdbReplicaPathTest::databaseName));
     EXPECT_TRUE(store->IsSlaveAvailable());
     EXPECT_FALSE(SqliteUtils::IsSlaveInvalid(RdbReplicaPathTest::databaseName));
@@ -865,9 +853,7 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_015, TestSize.Level1)
 
     LOG_INFO("---- step3 switch ReplicaPath to A and reopen, repair should use the default replica first");
     config.SetReplicaPath(customSlaveDirA);
-    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
-    ASSERT_NE(RdbReplicaPathTest::store, nullptr) << "reopen after corrupt should succeed";
-    EXPECT_EQ(errCode, E_OK) << "errCode=" << errCode;
+    ReOpenStore(config);
     RdbReplicaPathTest::CheckNumber(store, count);
 
     store = nullptr;
@@ -896,8 +882,7 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_016, TestSize.Level1)
     config.SetAllowRebuild(true);
     int errCode = E_OK;
     ReplicaPathTestOpenCallback helper;
-    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
-    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    ReOpenStore(config);
     store->ExecuteSql("DELETE FROM test");
     int64_t id = 1;
     int count = 10;
@@ -911,8 +896,9 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_016, TestSize.Level1)
     ASSERT_NE(RdbReplicaPathTest::store, nullptr);
     Insert(id, 2); // incremental rows only exist in the replica at dir A
     count += 2;
-    WaitForBackupFinish(BACKUP_FINISHED);
     ASSERT_TRUE(OHOS::FileExists(expectedSlaveA));
+    ASSERT_FALSE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName))
+        << "default replica should have been migrated to dir A";
     store = nullptr;
 
     LOG_INFO("---- step3 corrupt the master db file");
@@ -927,8 +913,7 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_016, TestSize.Level1)
     SqliteUtils::DeleteFile(expectedSlaveA + "-dwr");
 
     LOG_INFO("---- step4 reopen, repair should use the replica at dir A");
-    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
-    ASSERT_NE(RdbReplicaPathTest::store, nullptr) << "reopen after corrupt should succeed";
+    ReOpenStore(config);
     RdbReplicaPathTest::CheckNumber(store, count);
 
     store = nullptr;
@@ -1025,5 +1010,157 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_018, TestSize.Level1)
         usleep(100000); // 100ms
         waitTimes++;
     }
+}
+
+/**
+ * @tc.name: RdbStore_ReplicaPath_019
+ * @tc.desc: Test ReplicaPath from empty to path A, master db lost while the default replica remains and dir A is
+ *           empty, reopen restores master from the migrated replica
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_019, TestSize.Level1)
+{
+    std::string customSlaveDirA = RDB_TEST_PATH + "custom_slave_dir_a_019";
+    std::string expectedSlaveA = customSlaveDirA + "/dual_write_binlog_test_slave.db";
+    if (CheckFolderExist(customSlaveDirA)) {
+        RemoveFolder(customSlaveDirA);
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(customSlaveDirA, ec);
+
+    LOG_INFO("---- step1 open MAIN_REPLICA with the legacy default slave path and insert rows");
+    RdbStoreConfig config(RdbReplicaPathTest::databaseName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    int errCode = E_OK;
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    store->ExecuteSql("DELETE FROM test");
+    int64_t id = 1;
+    int count = 10;
+    Insert(id, count);
+    ASSERT_TRUE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName));
+    store = nullptr;
+
+    LOG_INFO("---- step2 remove the master db files, keep the default replica and dir A empty");
+    DeleteDbFiles(RdbReplicaPathTest::databaseName);
+    ASSERT_FALSE(OHOS::FileExists(RdbReplicaPathTest::databaseName));
+    ASSERT_TRUE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName));
+    ASSERT_FALSE(OHOS::FileExists(expectedSlaveA));
+
+    LOG_INFO("---- step3 switch ReplicaPath to A and reopen, master restored from the migrated replica");
+    config.SetReplicaPath(customSlaveDirA);
+    ReOpenStore(config);
+    EXPECT_TRUE(OHOS::FileExists(RdbReplicaPathTest::databaseName)) << "master should be restored";
+    EXPECT_TRUE(OHOS::FileExists(expectedSlaveA)) << "default replica should have been migrated to dir A";
+    EXPECT_FALSE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName))
+        << "no replica should remain at the default path";
+    EXPECT_TRUE(store->IsSlaveAvailable());
+    RdbReplicaPathTest::CheckNumber(store, count);
+
+    store = nullptr;
+    RemoveFolder(customSlaveDirA);
+}
+
+/**
+ * @tc.name: RdbStore_ReplicaPath_020
+ * @tc.desc: Test ReplicaPath switch migration grants the replica dir the service access + default ACL and the
+ *           migrated replica keeps its file ACL
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_020, TestSize.Level1)
+{
+    std::string customSlaveDirA = RDB_TEST_PATH + "custom_slave_dir_a_020";
+    std::string expectedSlaveA = customSlaveDirA + "/dual_write_binlog_test_slave.db";
+    constexpr int32_t serviceGid = 3012; // SERVICE_GID, same as rdb_store_impl.cpp
+    if (CheckFolderExist(customSlaveDirA)) {
+        RemoveFolder(customSlaveDirA);
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(customSlaveDirA, ec);
+
+    LOG_INFO("---- step1 open MAIN_REPLICA with the legacy default slave path and preset service ACL");
+    RdbStoreConfig config(RdbReplicaPathTest::databaseName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    int errCode = E_OK;
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    Insert(1, 10); // 10 rows
+    ASSERT_TRUE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName));
+    ASSERT_TRUE(SqliteUtils::SetDbFileGid(RdbReplicaPathTest::databaseName,
+        { RdbReplicaPathTest::databaseName, RdbReplicaPathTest::slaveDatabaseName }, serviceGid));
+    ASSERT_TRUE(SqliteUtils::HasAccessAcl(RdbReplicaPathTest::databaseName, serviceGid));
+    ASSERT_TRUE(SqliteUtils::HasAccessAcl(RdbReplicaPathTest::slaveDatabaseName, serviceGid));
+    store = nullptr;
+
+    LOG_INFO("---- step2 switch ReplicaPath to dir A, the replica dir gets access + default ACL");
+    config.SetReplicaPath(customSlaveDirA);
+    ReOpenStore(config);
+    ASSERT_TRUE(OHOS::FileExists(expectedSlaveA)) << "default replica should have been migrated to dir A";
+    EXPECT_TRUE(SqliteUtils::HasAccessAcl(expectedSlaveA, serviceGid))
+        << "migrated replica should keep its service ACL";
+    EXPECT_TRUE(SqliteUtils::HasAccessAcl(customSlaveDirA, serviceGid))
+        << "replica dir should get the service access ACL";
+    EXPECT_TRUE(SqliteUtils::HasDefaultAcl(customSlaveDirA, serviceGid))
+        << "replica dir should get the service default ACL so fresh sidecars inherit it";
+    RdbReplicaPathTest::CheckNumber(store, 10);
+
+    store = nullptr;
+    RemoveFolder(customSlaveDirA);
+}
+
+/**
+ * @tc.name: RdbStore_ReplicaPath_021
+ * @tc.desc: Test ReplicaPath switch migration with a dangling-symlink residue at the binlog dst; the binlog
+ *           rename fails (ENOTDIR) and the migration unit keeps the scene: the default replica and binlog
+ *           stay in place for diagnosis and retry, the slave branch rebuilds an empty replica at dir A,
+ *           and the master data stays intact
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_021, TestSize.Level1)
+{
+    std::string customSlaveDirA = RDB_TEST_PATH + "custom_slave_dir_a_021";
+    std::string expectedSlaveA = customSlaveDirA + "/dual_write_binlog_test_slave.db";
+    std::string binlogNewPath = customSlaveDirA + "/dual_write_binlog_test.db_binlog";
+    if (CheckFolderExist(customSlaveDirA)) {
+        RemoveFolder(customSlaveDirA);
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(customSlaveDirA, ec);
+
+    LOG_INFO("---- step1 open MAIN_REPLICA with the legacy default slave path and insert rows");
+    RdbStoreConfig config(RdbReplicaPathTest::databaseName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    int errCode = E_OK;
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    Insert(1, 10); // 10 rows
+    ASSERT_TRUE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName));
+    ASSERT_TRUE(CheckFolderExist(RdbReplicaPathTest::binlogDatabaseName));
+    store = nullptr;
+
+    LOG_INFO("---- step2 plant a dangling symlink at the binlog dst so the binlog rename fails");
+    // access() on a dangling symlink returns ENOENT, so the residue survives the dst pre-clean, while
+    // rename(dir, symlink-entry) fails with ENOTDIR because newpath is not followed.
+    ASSERT_EQ(::symlink((customSlaveDirA + "/binlog_dangling_target").c_str(), binlogNewPath.c_str()), 0);
+
+    LOG_INFO("---- step3 switch ReplicaPath to dir A; the migration fails and keeps the scene");
+    config.SetReplicaPath(customSlaveDirA);
+    ReOpenStore(config);
+    EXPECT_TRUE(OHOS::FileExists(RdbReplicaPathTest::slaveDatabaseName))
+        << "a failed binlog rename must keep the default replica for retry and diagnosis";
+    EXPECT_TRUE(CheckFolderExist(RdbReplicaPathTest::binlogDatabaseName))
+        << "a failed binlog rename must keep the default binlog";
+    struct stat st = {};
+    ASSERT_EQ(::lstat(binlogNewPath.c_str(), &st), 0);
+    EXPECT_TRUE(S_ISLNK(st.st_mode)) << "the residue must survive the pre-clean and block the rename";
+    EXPECT_TRUE(OHOS::FileExists(RdbReplicaPathTest::databaseName)) << "master must stay intact";
+    EXPECT_TRUE(OHOS::FileExists(expectedSlaveA)) << "the slave branch must rebuild the replica at dir A";
+    RdbReplicaPathTest::CheckNumber(store, 10);
+
+    store = nullptr;
+    RemoveFolder(customSlaveDirA);
 }
 
