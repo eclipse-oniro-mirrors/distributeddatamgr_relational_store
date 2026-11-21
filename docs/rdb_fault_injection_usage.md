@@ -155,7 +155,7 @@ ret = store->Insert(rowId, "test", row);     // ret == E_OK，预算耗尽，真
 }
 ```
 
-效果：按**最终调用点的方法名**定向单个接口，命中**优先于**其所属操作族（同名时方法条目先判定）。适合只注入某一个调用而放过同族其他接口的场景，也可以点名不属于任何操作族的方法（如结果集的 `Close`）。注意点名的是最终调用点（sink）方法名而非全部公开重载名——例如 `InsertWithConflictResolution` 内部汇入 `Insert`，应写 `"Insert"`；有效名单即"注入效果"映射表中的接口名，点名当前没有调用点覆盖的名字（如示例配置中的 `"Backup"`）语法合法但不会命中。
+效果：按**最终调用点的方法名**定向单个接口，命中**优先于**其所属操作族（同名时方法条目先判定）。适合只注入某一个调用而放过同族其他接口的场景，也可以点名不属于任何操作族的方法（如结果集的 `Close`，以及文件级的 `Backup` / `Restore` / `ForceRestore`——它们没有所属操作族，`methods` 点名是唯一的注入方式）。注意点名的是最终调用点（sink）方法名而非全部公开重载名——例如 `InsertWithConflictResolution` 内部汇入 `Insert`，应写 `"Insert"`；有效名单即"注入效果"映射表中的接口名，点名当前没有调用点覆盖的名字（如 `InterruptBackup` / `GetBackupStatus`）语法合法但不会命中。
 
 ## 注入效果
 
@@ -170,6 +170,7 @@ ret = store->Insert(rowId, "test", row);     // ret == E_OK，预算耗尽，真
 | `query` | `Query`、`QuerySql`、`QueryByStep`、`Count` | `Query` / `QuerySql` / `QueryByStep` 返回 `nullptr`；`Count` 返回 `E_SQLITE_CORRUPT` |
 | `executeSql` | `ExecuteSql`、`Execute`、`ExecuteExt`、`ExecuteAndGetLong`、`ExecuteAndGetString`、`ExecuteForLastInsertedRowId`、`ExecuteForChangedRowCount` | 返回 `E_SQLITE_CORRUPT`，SQL 不执行 |
 | `transaction` | store 上：`CreateTransaction`、`BeginTransaction`、`Commit`、`RollBack`；事务对象上：`Commit`、`Rollback`、`Close` | `CreateTransaction` 返回 `{E_SQLITE_CORRUPT, nullptr}`；其余返回 `E_SQLITE_CORRUPT` |
+| `methods` 点名（文件级） | `Backup` / `Restore` / `ForceRestore` | 返回 `E_SQLITE_CORRUPT`，不触碰数据库与备份文件；无所属操作族，仅可经 `methods` 点名 |
 | `resultSetRead` | `QuerySql` / `QueryByStep`（含事务内查询）返回的结果集的读取方法：`GoTo` / `GoToRow` / `GoToFirstRow` / `GoToNextRow` / `GoToPreviousRow` / `GoToLastRow`、`GetRowCount`、`GetInt` / `GetLong` / `GetDouble` / `GetString` / `GetBlob`、`GetColumnCount` / `GetColumnName` / `GetColumnIndex` / `GetColumnType`、`IsEnded` / `IsStarted` / `IsAtFirstRow` / `IsAtLastRow` / `IsColumnNull` / `IsClosed` 等 | 读取方法返回 `E_SQLITE_CORRUPT`，游标不前进；`Close` 不在读取族内（保证资源可释放），但可经 `methods` 点名 |
 
 补充说明：
@@ -266,8 +267,9 @@ ret = store->Insert(rowId, "test", row);     // ret == E_OK，预算耗尽，真
 
 ## 注意事项
 
-- **构建开关**：能力由根构建 gn 参数 `rdb_fault_injection_enable`（`relational_store.gni`，缺省 `false`）控制。`true`（root/调试版）注入可用；`false`（user 版）编入 no-op 实现，**零行为**——不读配置、不打日志、所有判定恒为未命中。应用侧无需任何代码改动，user 版上的行为与未提供该能力时完全一致。
-- **配置文件读取时机**：store 构造时读取一次并持有快照（操作族/方法预算随之定档）。运行中修改配置：`open` 条目下一次打开即生效；`operations` / `methods` 条目需**重建 store** 后生效——释放全部 store 引用（必要时调用 `RdbHelper::ClearCache()`），再重新 `GetRdbStore`。重复 `GetRdbStore` 返回的是缓存中的同一对象，不会重读配置。
+- **构建开关**：能力由根构建 gn 参数 `rdb_fault_injection_enable`（`relational_store.gni`，缺省 `false`）控制。`true`（root/调试版）注入可用——注入实现随 rdb 源码一并编入 `libnative_rdb.z.so`；`false`（user 版）经**编译期裁剪**：守卫宏空展开、不创建注入器对象（判定恒为未命中），**零行为零代码**——不读配置、不打日志，不编入任何注入实现。应用侧无需任何代码改动，user 版上的行为与未提供该能力时完全一致。
+- **新增注入点约束（维护者）**：为注入面新增接口时，必须使用 `rdb_fault_injector.h` 中的 `RDB_FAULT_INJECT_HIT` / `RDB_FAULT_INJECT_METHOD` 宏（user 版自动空展开），不得在守卫之外直接调用注入器判定方法——违反时 user 版构建在链接期即报错暴露。
+- **配置文件读取时机**：store 打开（`Init`）开始时读取一次并持有快照（操作族/方法预算随之定档，`OnCreate` / `OnUpgrade` 回调期内已生效）。运行中修改配置：`open` 条目下一次打开即生效；`operations` / `methods` 条目需**重建 store** 后生效——释放全部 store 引用（必要时调用 `RdbHelper::ClearCache()`），再重新 `GetRdbStore`。重复 `GetRdbStore` 返回的是缓存中的同一对象，不会重读配置。
 - **userId 隐私**：数据库目录路径形如 `/data/app/el1~el5/<userId>/database/<bundleName>/`（路径模式已有文档涉及，见 [`../DatabaseCheckPlugin/Doc/Rule7_数据库目录文件权限检测.md`](../DatabaseCheckPlugin/Doc/Rule7_数据库目录文件权限检测.md)），其中 `userId` 属隐私信息。注入日志中的库路径已做匿名化输出，但在工单、群聊中共享配置路径、`hdc` 命令或排查截图时，注意不要泄露完整路径中的 `userId`。
 - **日志 TAG**：`RDB_FAULT_INJECT`，限频输出（每 100 次命中一条，首条必出）。注入 `Commit` / `Rollback` / `Close` 等收敛类方法时会额外输出告警：事务与结果集的收敛依赖调用方回滚或析构——请确保应用在这些调用失败时仍能正确收尾，不要泄漏资源。
 - **失败安全**：命中只改返回值，无任何副作用；配置文件缺失或非法一律视为未配置；同目录未列名的数据库不受影响。
@@ -298,4 +300,4 @@ ret = store->Insert(rowId, "test", row);     // ret == E_OK，预算耗尽，真
 
 **Q5：用 `methods` 点名 `InsertWithConflictResolution` 为什么不生效？**
 
-`methods` 点名的是**最终调用点（sink）方法名**，公开重载都会汇入 sink：`InsertWithConflictResolution` 应写 `"Insert"`，事务提交应写 `"Commit"`，结果集翻行应写 `"GoToNextRow"`。有效名单就是"注入效果"映射表中列出的接口名；点名当前没有调用点覆盖的名字（如 `"Backup"`）不会命中。
+`methods` 点名的是**最终调用点（sink）方法名**，公开重载都会汇入 sink：`InsertWithConflictResolution` 应写 `"Insert"`，事务提交应写 `"Commit"`，结果集翻行应写 `"GoToNextRow"`。有效名单就是"注入效果"映射表中列出的接口名；点名当前没有调用点覆盖的名字（如 `InterruptBackup` / `GetBackupStatus`）不会命中。

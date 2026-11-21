@@ -42,28 +42,24 @@ RdbStoreDecorator::RdbStoreDecorator(const RdbStoreConfig &config) : RdbStoreImp
 int32_t RdbStoreDecorator::Init(int version, RdbOpenCallback &openCallback, bool isNeedSetAcl,
     bool isSilentAccessible)
 {
-    // Create the injector before the base Init: the transaction and
-    // result-set decorators bind the holder by reference at construction
-    // (innerHolder_/inner_ convention), so the holder must already be
-    // non-null when the OnCreate/OnUpgrade callbacks run - a callback may
-    // create a transaction or query on its own store, and their operations
-    // are part of the injection budget too. Init still runs outside the
-    // manager's critical section (GetStoreFromCache's lock has been
-    // released by then).
-    injectorHolder_ = std::make_shared<RdbFaultInjector>(dbPath_);
-    injector_ = injectorHolder_.get();
+    // Create the per-store fault injector before the base Init: the
+    // OnCreate/OnUpgrade callbacks may create transactions or queries on
+    // this store, and their operations are part of the injection budget
+    // too. Creation is idempotent and serialized - the manager can serve
+    // this cache entry to a concurrent second opener while the first open
+    // is still running, and both Init calls must end up sharing the one
+    // injector (one config snapshot, one budget) instead of racing two
+    // instances into the member. Init still runs outside the manager's
+    // critical section (GetStoreFromCache's lock has been released by
+    // then), so the config file read never happens inside it.
+    RDB_FAULT_INJECT_CREATE(injector_, dbPath_);
     return RdbStoreImpl::Init(version, openCallback, isNeedSetAcl, isSilentAccessible);
-}
-
-bool RdbStoreDecorator::ShouldInject(RdbFaultOp op, const std::string &methodName) const
-{
-    return injector_ != nullptr && injector_->Hit(methodName, op);
 }
 
 std::pair<int, int64_t> RdbStoreDecorator::Insert(const std::string &table, const Row &row, const InsertConfig &config)
 {
     // Fault-injection mock: return the corruption error without touching the database.
-    RDB_INJECT_GUARD(INSERT, "Insert", { E_SQLITE_CORRUPT, -1 })
+    RDB_FAULT_INJECT_HIT(injector_, INSERT, "Insert", { E_SQLITE_CORRUPT, -1 })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     RdbStatReporter reportStat(RDB_PERF, INSERT, GetConfig(), GetReportFunc());
     SqlStatistic sqlStatistic("", SqlStatistic::Step::STEP_TOTAL);
@@ -73,7 +69,7 @@ std::pair<int, int64_t> RdbStoreDecorator::Insert(const std::string &table, cons
 
 std::pair<int, int64_t> RdbStoreDecorator::BatchInsert(const std::string &table, const ValuesBuckets &rows)
 {
-    RDB_INJECT_GUARD(INSERT, "BatchInsert", { E_SQLITE_CORRUPT, -1 })
+    RDB_FAULT_INJECT_HIT(injector_, INSERT, "BatchInsert", { E_SQLITE_CORRUPT, -1 })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     RdbStatReporter reportStat(RDB_PERF, BATCHINSERT, GetConfig(), GetReportFunc());
     SqlStatistic sqlStatistic("", SqlStatistic::Step::STEP_TOTAL);
@@ -84,7 +80,7 @@ std::pair<int, int64_t> RdbStoreDecorator::BatchInsert(const std::string &table,
 std::pair<int32_t, Results> RdbStoreDecorator::BatchInsert(
     const std::string &table, const RefRows &rows, const BatchInsertConfig &config)
 {
-    RDB_INJECT_GUARD(INSERT, "BatchInsert", { E_SQLITE_CORRUPT, -1 })
+    RDB_FAULT_INJECT_HIT(injector_, INSERT, "BatchInsert", { E_SQLITE_CORRUPT, -1 })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     RdbStatReporter reportStat(RDB_PERF, BATCHINSERT, GetConfig(), GetReportFunc());
     SqlStatistic sqlStatistic("", SqlStatistic::Step::STEP_TOTAL);
@@ -95,7 +91,7 @@ std::pair<int32_t, Results> RdbStoreDecorator::BatchInsert(
 std::pair<int32_t, Results> RdbStoreDecorator::Update(
     const Row &row, const AbsRdbPredicates &predicates, const UpdateConfig &config)
 {
-    RDB_INJECT_GUARD(UPDATE, "Update", { E_SQLITE_CORRUPT, -1 })
+    RDB_FAULT_INJECT_HIT(injector_, UPDATE, "Update", { E_SQLITE_CORRUPT, -1 })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     RdbStatReporter reportStat(RDB_PERF, UPDATE, GetConfig(), GetReportFunc());
     SqlStatistic sqlStatistic("", SqlStatistic::Step::STEP_TOTAL);
@@ -105,7 +101,7 @@ std::pair<int32_t, Results> RdbStoreDecorator::Update(
 
 std::pair<int32_t, Results> RdbStoreDecorator::Delete(const AbsRdbPredicates &predicates, const DeleteConfig &config)
 {
-    RDB_INJECT_GUARD(DELETE, "Delete", { E_SQLITE_CORRUPT, -1 })
+    RDB_FAULT_INJECT_HIT(injector_, DELETE, "Delete", { E_SQLITE_CORRUPT, -1 })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     RdbStatReporter reportStat(RDB_PERF, DELETE, GetConfig(), GetReportFunc());
     SqlStatistic sqlStatistic("", SqlStatistic::Step::STEP_TOTAL);
@@ -116,39 +112,30 @@ std::pair<int32_t, Results> RdbStoreDecorator::Delete(const AbsRdbPredicates &pr
 std::shared_ptr<AbsSharedResultSet> RdbStoreDecorator::QuerySql(
     const std::string &sql, const Values &args, const QueryConfig &config)
 {
-    RDB_INJECT_GUARD(QUERY, "QuerySql", nullptr)
+    RDB_FAULT_INJECT_HIT(injector_, QUERY, "QuerySql", nullptr)
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     SqlStatistic sqlStatistic("", SqlStatistic::Step::STEP_TOTAL);
     PerfStat perfStat(dbPath_, "", PerfStat::Step::STEP_TOTAL);
     auto resultSet = RdbStoreImpl::QuerySql(sql, args, config);
-    // The AbsSharedResultSet family follows the parent's CROSS_PLATFORM
-    // boundary; on the SDK variants the parent returns nullptr anyway,
-    // so the wrap never fires there.
-#if !defined(CROSS_PLATFORM)
-    if (resultSet != nullptr && injector_ != nullptr && injector_->HasEntry()) {
-        return std::make_shared<RdbResultSetDecorator<AbsSharedResultSet>>(resultSet, injectorHolder_);
-    }
-#endif
+    RDB_FAULT_INJECT_WRAP(resultSet, injector_, AbsSharedResultSet)
     return resultSet;
 }
 
 std::shared_ptr<ResultSet> RdbStoreDecorator::QueryByStep(
     const std::string &sql, const Values &args, const QueryOptions &options, const QueryConfig &config)
 {
-    RDB_INJECT_GUARD(QUERY, "QueryByStep", nullptr)
+    RDB_FAULT_INJECT_HIT(injector_, QUERY, "QueryByStep", nullptr)
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     SqlStatistic sqlStatistic("", SqlStatistic::Step::STEP_TOTAL);
     PerfStat perfStat(dbPath_, "", PerfStat::Step::STEP_TOTAL);
     auto resultSet = RdbStoreImpl::QueryByStep(sql, args, options, config);
-    if (resultSet != nullptr && injector_ != nullptr && injector_->HasEntry()) {
-        return std::make_shared<RdbResultSetDecorator<ResultSet>>(resultSet, injectorHolder_);
-    }
+    RDB_FAULT_INJECT_WRAP(resultSet, injector_, ResultSet)
     return resultSet;
 }
 
 int RdbStoreDecorator::ExecuteSql(const std::string &sql, const Values &args)
 {
-    RDB_INJECT_GUARD(EXECUTE_SQL, "ExecuteSql", E_SQLITE_CORRUPT)
+    RDB_FAULT_INJECT_HIT(injector_, EXECUTE_SQL, "ExecuteSql", E_SQLITE_CORRUPT)
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     RdbStatReporter reportStat(RDB_PERF, EXECUTESQL, GetConfig(), GetReportFunc());
     SqlStatistic sqlStatistic("", SqlStatistic::Step::STEP_TOTAL);
@@ -159,7 +146,7 @@ int RdbStoreDecorator::ExecuteSql(const std::string &sql, const Values &args)
 std::pair<int32_t, ValueObject> RdbStoreDecorator::Execute(
     const std::string &sql, const Values &args, int64_t trxId, const ExecuteConfig &config)
 {
-    RDB_INJECT_GUARD(EXECUTE_SQL, "Execute", { E_SQLITE_CORRUPT, ValueObject() })
+    RDB_FAULT_INJECT_HIT(injector_, EXECUTE_SQL, "Execute", { E_SQLITE_CORRUPT, ValueObject() })
     RdbStatReporter reportStat(RDB_PERF, EXECUTE, GetConfig(), GetReportFunc());
     SqlStatistic sqlStatistic("", SqlStatistic::Step::STEP_TOTAL);
     PerfStat perfStat(dbPath_, "", PerfStat::Step::STEP_TOTAL);
@@ -168,7 +155,7 @@ std::pair<int32_t, ValueObject> RdbStoreDecorator::Execute(
 
 std::pair<int32_t, Results> RdbStoreDecorator::ExecuteExt(const std::string &sql, const Values &args)
 {
-    RDB_INJECT_GUARD(EXECUTE_SQL, "ExecuteExt", { E_SQLITE_CORRUPT, -1 })
+    RDB_FAULT_INJECT_HIT(injector_, EXECUTE_SQL, "ExecuteExt", { E_SQLITE_CORRUPT, -1 })
     RdbStatReporter reportStat(RDB_PERF, EXECUTE, GetConfig(), GetReportFunc());
     SqlStatistic sqlStatistic("", SqlStatistic::Step::STEP_TOTAL);
     return RdbStoreImpl::ExecuteExt(sql, args);
@@ -176,37 +163,37 @@ std::pair<int32_t, Results> RdbStoreDecorator::ExecuteExt(const std::string &sql
 
 int RdbStoreDecorator::ExecuteAndGetLong(int64_t &outValue, const std::string &sql, const Values &args)
 {
-    RDB_INJECT_GUARD(EXECUTE_SQL, "ExecuteAndGetLong", E_SQLITE_CORRUPT)
+    RDB_FAULT_INJECT_HIT(injector_, EXECUTE_SQL, "ExecuteAndGetLong", E_SQLITE_CORRUPT)
     return RdbStoreImpl::ExecuteAndGetLong(outValue, sql, args);
 }
 
 int RdbStoreDecorator::ExecuteAndGetString(std::string &outValue, const std::string &sql, const Values &args)
 {
-    RDB_INJECT_GUARD(EXECUTE_SQL, "ExecuteAndGetString", E_SQLITE_CORRUPT)
+    RDB_FAULT_INJECT_HIT(injector_, EXECUTE_SQL, "ExecuteAndGetString", E_SQLITE_CORRUPT)
     return RdbStoreImpl::ExecuteAndGetString(outValue, sql, args);
 }
 
 int RdbStoreDecorator::ExecuteForLastInsertedRowId(int64_t &outValue, const std::string &sql, const Values &args)
 {
-    RDB_INJECT_GUARD(EXECUTE_SQL, "ExecuteForLastInsertedRowId", E_SQLITE_CORRUPT)
+    RDB_FAULT_INJECT_HIT(injector_, EXECUTE_SQL, "ExecuteForLastInsertedRowId", E_SQLITE_CORRUPT)
     return RdbStoreImpl::ExecuteForLastInsertedRowId(outValue, sql, args);
 }
 
 int RdbStoreDecorator::ExecuteForChangedRowCount(int64_t &outValue, const std::string &sql, const Values &args)
 {
-    RDB_INJECT_GUARD(EXECUTE_SQL, "ExecuteForChangedRowCount", E_SQLITE_CORRUPT)
+    RDB_FAULT_INJECT_HIT(injector_, EXECUTE_SQL, "ExecuteForChangedRowCount", E_SQLITE_CORRUPT)
     return RdbStoreImpl::ExecuteForChangedRowCount(outValue, sql, args);
 }
 
 int RdbStoreDecorator::Count(int64_t &outValue, const AbsRdbPredicates &predicates)
 {
-    RDB_INJECT_GUARD(QUERY, "Count", E_SQLITE_CORRUPT)
+    RDB_FAULT_INJECT_HIT(injector_, QUERY, "Count", E_SQLITE_CORRUPT)
     return RdbStoreImpl::Count(outValue, predicates);
 }
 
 std::pair<int32_t, std::shared_ptr<Transaction>> RdbStoreDecorator::CreateTransaction(int32_t type)
 {
-    RDB_INJECT_GUARD(TRANSACTION, "CreateTransaction", { E_SQLITE_CORRUPT, nullptr })
+    RDB_FAULT_INJECT_HIT(injector_, TRANSACTION, "CreateTransaction", { E_SQLITE_CORRUPT, nullptr })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     PerfStat perfStat(dbPath_, "", PerfStat::Step::STEP_TOTAL);
     return RdbStoreImpl::CreateTransaction(type);
@@ -216,14 +203,14 @@ std::pair<int32_t, std::shared_ptr<Transaction>> RdbStoreDecorator::CreateTransa
     int32_t type, std::shared_ptr<Connection> conn)
 {
     // Fault-injection mock: construct the decorated transaction with the
-    // store's injector so the budget state is shared with the store.
+    // store's fault-injection state so the budget is shared with the store.
     return TransactionImplDecorator::Create(
-        type, std::move(conn), dbPath_, GetConfig().IsAuditEnabled(), injectorHolder_);
+        type, std::move(conn), dbPath_, GetConfig().IsAuditEnabled(), injector_);
 }
 
 int RdbStoreDecorator::BeginTransaction()
 {
-    RDB_INJECT_GUARD(TRANSACTION, "BeginTransaction", E_SQLITE_CORRUPT)
+    RDB_FAULT_INJECT_HIT(injector_, TRANSACTION, "BeginTransaction", E_SQLITE_CORRUPT)
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     RdbStatReporter reportStat(RDB_PERF, BEGINTRANSACTION, GetConfig(), GetReportFunc());
     return RdbStoreImpl::BeginTransaction();
@@ -231,14 +218,14 @@ int RdbStoreDecorator::BeginTransaction()
 
 std::pair<int, int64_t> RdbStoreDecorator::BeginTrans()
 {
-    RDB_INJECT_GUARD(TRANSACTION, "BeginTrans", { E_SQLITE_CORRUPT, 0 })
+    RDB_FAULT_INJECT_HIT(injector_, TRANSACTION, "BeginTrans", { E_SQLITE_CORRUPT, 0 })
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return RdbStoreImpl::BeginTrans();
 }
 
 int RdbStoreDecorator::RollBack()
 {
-    RDB_INJECT_GUARD(TRANSACTION, "RollBack", E_SQLITE_CORRUPT)
+    RDB_FAULT_INJECT_HIT(injector_, TRANSACTION, "RollBack", E_SQLITE_CORRUPT)
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     RdbStatReporter reportStat(RDB_PERF, ROLLBACK, GetConfig(), GetReportFunc());
     return RdbStoreImpl::RollBack();
@@ -246,14 +233,14 @@ int RdbStoreDecorator::RollBack()
 
 int RdbStoreDecorator::RollBack(int64_t trxId)
 {
-    RDB_INJECT_GUARD(TRANSACTION, "RollBack", E_SQLITE_CORRUPT)
+    RDB_FAULT_INJECT_HIT(injector_, TRANSACTION, "RollBack", E_SQLITE_CORRUPT)
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return RdbStoreImpl::RollBack(trxId);
 }
 
 int RdbStoreDecorator::Commit()
 {
-    RDB_INJECT_GUARD(TRANSACTION, "Commit", E_SQLITE_CORRUPT)
+    RDB_FAULT_INJECT_HIT(injector_, TRANSACTION, "Commit", E_SQLITE_CORRUPT)
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     RdbStatReporter reportStat(RDB_PERF, COMMIT, GetConfig(), GetReportFunc());
     return RdbStoreImpl::Commit();
@@ -261,9 +248,30 @@ int RdbStoreDecorator::Commit()
 
 int RdbStoreDecorator::Commit(int64_t trxId)
 {
-    RDB_INJECT_GUARD(TRANSACTION, "Commit", E_SQLITE_CORRUPT)
+    RDB_FAULT_INJECT_HIT(injector_, TRANSACTION, "Commit", E_SQLITE_CORRUPT)
     DISTRIBUTED_DATA_HITRACE(std::string(__FUNCTION__));
     return RdbStoreImpl::Commit(trxId);
+}
+
+int RdbStoreDecorator::Backup(
+    const std::string &databasePath, const std::vector<uint8_t> &encryptKey, bool verifyDb)
+{
+    // Fault-injection mock: return the corruption error without touching the
+    // database or backup files.
+    RDB_FAULT_INJECT_METHOD(injector_, "Backup", E_SQLITE_CORRUPT)
+    return RdbStoreImpl::Backup(databasePath, encryptKey, verifyDb);
+}
+
+int RdbStoreDecorator::Restore(const std::string &backupPath, const std::vector<uint8_t> &newKey)
+{
+    RDB_FAULT_INJECT_METHOD(injector_, "Restore", E_SQLITE_CORRUPT)
+    return RdbStoreImpl::Restore(backupPath, newKey);
+}
+
+int RdbStoreDecorator::ForceRestore(const std::string &backupPath, const std::vector<uint8_t> &newKey)
+{
+    RDB_FAULT_INJECT_METHOD(injector_, "ForceRestore", E_SQLITE_CORRUPT)
+    return RdbStoreImpl::ForceRestore(backupPath, newKey);
 }
 
 } // namespace NativeRdb

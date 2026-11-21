@@ -33,7 +33,10 @@ config("module_private_config") {
     "${relational_store_base_path}/test/interface",
   ]
 
-  defines = [ "RELATIONAL_STORE" ]
+  # The mock-inject suites construct RdbFaultInjector directly: their
+  # verdict calls must resolve to the real implementation, not the inline
+  # misses the header carries when the define is absent.
+  defines = [ "RELATIONAL_STORE" ] + rdb_fault_injection_defines
 }
 
 ###############################################################################

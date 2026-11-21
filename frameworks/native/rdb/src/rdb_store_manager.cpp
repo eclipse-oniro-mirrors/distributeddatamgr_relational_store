@@ -51,8 +51,12 @@ using RdbMgr = DistributedRdb::RdbManager;
         __VA_ARGS__; \
         return nullptr; \
     }
+// One open decision on a short-lived injector (see ShouldInjectOpenError):
+// the verdict and its budget naturally reset per open cycle.
+#define RDB_MANAGER_OPEN_INJECT_VERDICT(path) RdbFaultInjector(path).ConsumeOpen()
 #else
 #define RDB_MANAGER_OPEN_INJECT_GUARD(...)
+#define RDB_MANAGER_OPEN_INJECT_VERDICT(path) false
 #endif
 __attribute__((used))
 const bool RdbStoreManager::regCollector_ = RdbFaultHiViewReporter::RegCollector(RdbStoreManager::Collector);
@@ -115,12 +119,12 @@ std::shared_ptr<RdbStoreImpl> RdbStoreManager::GetStoreFromCache(
 // Fault-injection mock, open path in default error mode: return the
 // corruption error directly without opening, repairing or rebuilding;
 // the code flows through the existing corruption callback and fault
-// reporting chain. A short-lived injector for the open decision: its
-// snapshot (and the open budget) is naturally per open cycle.
+// reporting chain. The verdict macro runs a short-lived injector so the
+// decision (and the open budget) is naturally per open cycle, and folds
+// to an inline miss in user builds.
 bool RdbStoreManager::ShouldInjectOpenError(const std::string &path)
 {
-    RdbFaultInjector injector(path);
-    return injector.ConsumeOpen();
+    return RDB_MANAGER_OPEN_INJECT_VERDICT(path);
 }
 
 bool RdbStoreManager::IsSilentAccessibleDb(const RdbStoreConfig &config)

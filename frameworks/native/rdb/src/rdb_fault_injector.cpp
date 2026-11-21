@@ -218,6 +218,19 @@ RdbFaultInjector::RdbFaultInjector(const std::string &dbPath) : dbPath_(Normaliz
     enabled_ = entry_ != nullptr && !entry_->IsEmpty();
 }
 
+void RdbFaultInjector::CreateOnce(std::shared_ptr<RdbFaultInjector> &holder, const std::string &dbPath)
+{
+    // Creation reads the config file, so it stays serialized (it runs from
+    // the store's Init, outside the store manager's critical section) and
+    // idempotent per holder: concurrent opens of one store share the single
+    // injector behind the member instead of racing two instances into it.
+    static std::mutex createMutex;
+    std::lock_guard<std::mutex> lock(createMutex);
+    if (holder == nullptr) {
+        holder = std::make_shared<RdbFaultInjector>(dbPath);
+    }
+}
+
 bool RdbFaultInjector::Hit(const std::string &methodName, RdbFaultOp op)
 {
     return CheckMethod(methodName) || Check(op);

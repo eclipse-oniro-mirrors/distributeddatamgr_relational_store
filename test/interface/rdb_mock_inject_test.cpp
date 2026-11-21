@@ -1279,3 +1279,79 @@ HWTEST_F(RdbMockInjectTest, RdbFaultInject_StoreQueryNoEntryPassthrough_049, Tes
     EXPECT_EQ(stepRs->Close(), E_OK);
 }
 
+/**
+ * @tc.name: RdbFaultInject_BackupRestoreMethodLevel_050
+ * @tc.desc: Verify method-name-only injection on the file-level sinks:
+ *           Backup/Restore/ForceRestore return E_SQLITE_CORRUPT without
+ *           touching the database files, and converge after exhaustion.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectTest, RdbFaultInject_BackupRestoreMethodLevel_050, TestSize.Level1)
+{
+    WriteConfig(R"({"databases": {"mock_inject_store.db": {"methods": {
+        "Backup": {"count": 1}, "Restore": {"count": 1}, "ForceRestore": {"count": 1}}}}})");
+    int errCode = E_ERROR;
+    auto store = OpenMockStore(errCode);
+    ASSERT_NE(store, nullptr);
+    ValuesBucket bucket;
+    bucket.PutString("name", "alice");
+    int64_t outRowId = 0;
+    ASSERT_EQ(store->Insert(outRowId, "mock_test", bucket), E_OK);
+
+    const std::string backupPath = RDB_TEST_PATH + "mock_inject_backup.db";
+    EXPECT_EQ(store->Backup(backupPath), E_SQLITE_CORRUPT) << "Backup hit";
+    EXPECT_NE(access(backupPath.c_str(), F_OK), 0) << "the injected backup must not touch files";
+    EXPECT_EQ(store->Restore(backupPath), E_SQLITE_CORRUPT) << "Restore hit";
+    EXPECT_EQ(store->ForceRestore(backupPath), E_SQLITE_CORRUPT) << "ForceRestore hit";
+
+    // Budget exhausted: the backup runs for real and produces the file.
+    EXPECT_EQ(store->Backup(backupPath), E_OK) << "converges after exhaustion";
+    EXPECT_EQ(access(backupPath.c_str(), F_OK), 0) << "real backup produced";
+    EXPECT_EQ(remove(backupPath.c_str()), 0);
+}
+
+/**
+ * @tc.name: RdbFaultInject_PerDbBudgetIsolation_051
+ * @tc.desc: Verify that different database paths never share an injector:
+ *           with both DBs listed in one config, direct instances keep
+ *           independent budgets, and so do the per-store instances handed
+ *           out by the creation helper.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbMockInjectTest, RdbFaultInject_PerDbBudgetIsolation_051, TestSize.Level1)
+{
+    WriteConfig(R"({"databases": {
+        "mock_inject_a.db": {"operations": {"insert": {"count": 2}}},
+        "mock_inject_b.db": {"operations": {"insert": {"count": 1}}}}})");
+    RdbFaultInjector injectorA(TEST_DB_A);
+    RdbFaultInjector injectorB(TEST_DB_B);
+    EXPECT_EQ(CountHits(injectorA, RdbFaultOp::INSERT, 3), 2) << "A's own budget";
+    EXPECT_EQ(CountHits(injectorB, RdbFaultOp::INSERT, 3), 1) << "A's consumption never bleeds into B";
+
+    // Store level: the per-store creation helper (RdbFaultInjector::CreateOnce)
+    // hands each path its own instance as well - exhausting one store's
+    // budget leaves the other's untouched.
+    RdbStoreConfig configA(TEST_DB_A);
+    RdbStoreConfig configB(TEST_DB_B);
+    MockInjectOpenCallback callback;
+    int errCode = E_ERROR;
+    auto storeA = RdbHelper::GetRdbStore(configA, 1, callback, errCode);
+    ASSERT_NE(storeA, nullptr);
+    EXPECT_EQ(errCode, E_OK);
+    auto storeB = RdbHelper::GetRdbStore(configB, 1, callback, errCode);
+    ASSERT_NE(storeB, nullptr);
+    EXPECT_EQ(errCode, E_OK);
+    ValuesBucket bucket;
+    bucket.PutString("name", "alice");
+    int64_t outRowId = 0;
+    EXPECT_EQ(storeA->Insert(outRowId, "mock_test", bucket), E_SQLITE_CORRUPT);
+    EXPECT_EQ(storeA->Insert(outRowId, "mock_test", bucket), E_SQLITE_CORRUPT);
+    EXPECT_EQ(storeA->Insert(outRowId, "mock_test", bucket), E_OK) << "A exhausted";
+
+    EXPECT_EQ(storeB->Insert(outRowId, "mock_test", bucket), E_SQLITE_CORRUPT) << "B's budget intact";
+    EXPECT_EQ(storeB->Insert(outRowId, "mock_test", bucket), E_OK) << "B exhausts on its own count";
+
+    RdbHelper::DeleteRdbStore(TEST_DB_A);
+    RdbHelper::DeleteRdbStore(TEST_DB_B);
+}
+
