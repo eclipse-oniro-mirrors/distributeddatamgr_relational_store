@@ -100,6 +100,9 @@ private:
     // the database. Consumed only through the RDB_FAULT_INJECT_* macros; a
     // null injector reads as a miss.
     std::shared_ptr<RdbFaultInjector> injector_;
+    // Per-store once_flag serializing injector creation (replaces a process-global
+    // mutex): only concurrent opens of the same store block each other.
+    std::once_flag createOnce_;
 };
 
 } // namespace NativeRdb

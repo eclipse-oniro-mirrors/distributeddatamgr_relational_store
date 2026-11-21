@@ -71,10 +71,11 @@ public:
     // racing two instances into the member. The scope of that sharing is
     // the member alone: creation is never keyed by path and never cached
     // across holders - every store (every database path) gets its own
-    // instance, and the static mutex in the definition only serializes the
-    // creation, it shares nothing. Reached only through
-    // RDB_FAULT_INJECT_CREATE.
-    static void CreateOnce(std::shared_ptr<RdbFaultInjector> &holder, const std::string &dbPath);
+    // instance. Serialization is per-store via the caller's once_flag (no
+    // global lock): only concurrent opens of the same store block each
+    // other, and calls after the first are a fast path. Reached only
+    // through RDB_FAULT_INJECT_CREATE.
+    static void CreateOnce(std::once_flag &flag, std::shared_ptr<RdbFaultInjector> &holder, const std::string &dbPath);
 
     // Combined verdict for hook sites: the per-method entry first, then the
     // operation family. Returns true when the call site should inject.
@@ -153,8 +154,8 @@ private:
 // no mock behavior at all. New injection points must use these macros -
 // never call the injector verdict methods directly.
 #ifdef RDB_FAULT_INJECTION_ENABLE
-#define RDB_FAULT_INJECT_CREATE(inj, dbPath) \
-    RdbFaultInjector::CreateOnce(inj, dbPath)
+#define RDB_FAULT_INJECT_CREATE(inj, flag, dbPath) \
+    RdbFaultInjector::CreateOnce(flag, inj, dbPath)
 #define RDB_FAULT_INJECT_HIT(inj, op, name, ...) \
     if ((inj) != nullptr && (inj)->Hit(name, RdbFaultOp::op)) { \
         return __VA_ARGS__; \
@@ -168,7 +169,7 @@ private:
         (resultSet) = std::make_shared<RdbResultSetDecorator<Inner>>((resultSet), (inj)); \
     }
 #else
-#define RDB_FAULT_INJECT_CREATE(inj, dbPath)
+#define RDB_FAULT_INJECT_CREATE(inj, flag, dbPath)
 #define RDB_FAULT_INJECT_HIT(inj, op, name, ...)
 #define RDB_FAULT_INJECT_METHOD(inj, name, ret)
 #define RDB_FAULT_INJECT_WRAP(resultSet, inj, Inner)
