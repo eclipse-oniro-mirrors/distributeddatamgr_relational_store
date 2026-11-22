@@ -30,6 +30,7 @@
 #include "rdb_helper.h"
 #include "rdb_open_callback.h"
 #include "rdb_platform.h"
+#include "rdb_store_impl.h"
 #include "sqlite_utils.h"
 #include "task_executor.h"
 
@@ -40,6 +41,8 @@ using namespace OHOS::Rdb;
 static const int CHECKAGE = 18;
 static const double CHECKCOLUMN = 100.5;
 static const int BINLOG_DELETE_PER_WAIT_TIME = 100000; // 100000us = 100ms
+static const int BINLOG_REPLAY_WAIT_TIME = 2; // 2s
+static const int SIZE_MB = 1024 * 1024; // 1MB
 
 class ReplicaPathTestOpenCallback : public RdbOpenCallback {
 public:
@@ -76,6 +79,7 @@ public:
     static void DeleteDbFiles(const std::string &dbPath);
     static void Insert(int64_t start, int count, bool isSlave = false, int dataSize = 0);
     static void WaitForBinlogDelete(int maxTimes = 1000);
+    static void WaitForBinlogReplayFinish();
     static void WaitForAsyncExchange();
     void InitDb(HAMode mode = HAMode::MAIN_REPLICA, bool isOpenSlave = true, bool isSearchable = false);
     void ReOpenStore(const RdbStoreConfig &config);
@@ -83,6 +87,8 @@ public:
     static const std::string databaseName;
     static const std::string slaveDatabaseName;
     static const std::string binlogDatabaseName;
+    static const std::string binlogFirstFile;
+    static const std::string binlogSecondFile;
     static std::shared_ptr<RdbStore> store;
     static std::shared_ptr<RdbStore> slaveStore;
 };
@@ -90,6 +96,10 @@ public:
 const std::string RdbReplicaPathTest::databaseName = RDB_TEST_PATH + "dual_write_binlog_test.db";
 const std::string RdbReplicaPathTest::slaveDatabaseName = RDB_TEST_PATH + "dual_write_binlog_test_slave.db";
 const std::string RdbReplicaPathTest::binlogDatabaseName = RDB_TEST_PATH + "dual_write_binlog_test.db_binlog";
+const std::string RdbReplicaPathTest::binlogFirstFile =
+    RdbReplicaPathTest::binlogDatabaseName + "/binlog_default.00000";
+const std::string RdbReplicaPathTest::binlogSecondFile =
+    RdbReplicaPathTest::binlogDatabaseName + "/binlog_default.00001";
 std::shared_ptr<RdbStore> RdbReplicaPathTest::store = nullptr;
 std::shared_ptr<RdbStore> RdbReplicaPathTest::slaveStore = nullptr;
 
@@ -194,6 +204,11 @@ void RdbReplicaPathTest::WaitForBinlogDelete(int maxTimes)
 void RdbReplicaPathTest::WaitForAsyncExchange()
 {
     usleep(BINLOG_DELETE_PER_WAIT_TIME);
+}
+
+void RdbReplicaPathTest::WaitForBinlogReplayFinish()
+{
+    sleep(BINLOG_REPLAY_WAIT_TIME);
 }
 
 void RdbReplicaPathTest::CheckNumber(
@@ -1162,5 +1177,244 @@ HWTEST_F(RdbReplicaPathTest, RdbStore_ReplicaPath_021, TestSize.Level1)
 
     store = nullptr;
     RemoveFolder(customSlaveDirA);
+}
+
+/**
+ * @tc.name: Rdb_BinlogFileSize_ThresholdTakesEffect_001
+ * @tc.desc: test configured binlog file size threshold takes effect (split at 1MB instead of default 4MB)
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, Rdb_BinlogFileSize_ThresholdTakesEffect_001, TestSize.Level0)
+{
+    ASSERT_FALSE(CheckFolderExist(binlogDatabaseName));
+    int errCode = E_OK;
+    RdbStoreConfig config(databaseName);
+    config.SetBinlogFileSize(1024 * 1024); // 1MB
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    store->ExecuteSql("DELETE FROM test");
+    store = nullptr;
+    ASSERT_TRUE(CheckFolderExist(binlogDatabaseName));
+    ASSERT_TRUE(CheckFolderExist(binlogFirstFile));
+
+    store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    WaitForBinlogReplayFinish();
+    int64_t id = 1;
+    int count = 2;
+    Insert(id, count, false, SIZE_MB);
+    store = nullptr;
+    WaitForBinlogReplayFinish();
+    ASSERT_FALSE(CheckFolderExist(binlogFirstFile)) << "binlog should split at 1MB and be replayed/cleaned";
+}
+
+/**
+ * @tc.name: Rdb_BinlogFileSize_DefaultThreshold_001
+ * @tc.desc: test default binlog file size threshold stays 4MB when not configured
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, Rdb_BinlogFileSize_DefaultThreshold_001, TestSize.Level0)
+{
+    ASSERT_FALSE(CheckFolderExist(binlogDatabaseName));
+    int errCode = E_OK;
+    RdbStoreConfig config(databaseName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    store->ExecuteSql("DELETE FROM test");
+    store = nullptr;
+    ASSERT_TRUE(CheckFolderExist(binlogDatabaseName));
+    ASSERT_TRUE(CheckFolderExist(binlogFirstFile));
+
+    store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    WaitForBinlogReplayFinish();
+    int64_t id = 1;
+    int count = 2;
+    Insert(id, count, false, SIZE_MB);
+    store = nullptr;
+    WaitForBinlogReplayFinish();
+    ASSERT_TRUE(CheckFolderExist(binlogFirstFile)) << "default 4MB threshold keeps 2MB in a single binlog file";
+}
+
+/**
+ * @tc.name: Rdb_BinlogFileSize_ReopenChangeRejected_001
+ * @tc.desc: test changing binlog file size on reopen returns E_CONFIG_INVALID_CHANGE
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, Rdb_BinlogFileSize_ReopenChangeRejected_001, TestSize.Level1)
+{
+    int errCode = E_OK;
+    RdbStoreConfig config(databaseName);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    store->ExecuteSql("DELETE FROM test");
+
+    RdbStoreConfig newConfig(databaseName);
+    newConfig.SetBinlogFileSize(1024 * 1024);
+    newConfig.SetHaMode(HAMode::MAIN_REPLICA);
+    std::shared_ptr<RdbStore> newStore = RdbHelper::GetRdbStore(newConfig, 1, helper, errCode);
+    EXPECT_EQ(errCode, E_CONFIG_INVALID_CHANGE);
+    EXPECT_EQ(newStore, nullptr);
+    EXPECT_NE(RdbReplicaPathTest::store, nullptr) << "already opened store is not affected";
+}
+
+/**
+ * @tc.name: Rdb_BinlogFileSize_OutOfRangeRejected_001
+ * @tc.desc: test out-of-range binlog file size fails open, boundary values succeed
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, Rdb_BinlogFileSize_OutOfRangeRejected_001, TestSize.Level1)
+{
+    int errCode = E_OK;
+    RdbStoreConfig config(databaseName);
+    config.SetBinlogFileSize(32 * 1024);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    ReplicaPathTestOpenCallback helper;
+    std::shared_ptr<RdbStore> invalidStore = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    EXPECT_EQ(errCode, E_NOT_SUPPORT);
+    EXPECT_EQ(invalidStore, nullptr);
+
+    RdbStoreConfig configTooLarge(databaseName);
+    configTooLarge.SetBinlogFileSize(32 * 1024 * 1024);
+    configTooLarge.SetHaMode(HAMode::MAIN_REPLICA);
+    invalidStore = RdbHelper::GetRdbStore(configTooLarge, 1, helper, errCode);
+    EXPECT_EQ(errCode, E_NOT_SUPPORT);
+    EXPECT_EQ(invalidStore, nullptr);
+
+    RdbStoreConfig configMin(databaseName);
+    configMin.SetBinlogFileSize(64 * 1024);
+    configMin.SetHaMode(HAMode::MAIN_REPLICA);
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(configMin, 1, helper, errCode);
+    EXPECT_EQ(errCode, E_OK);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    store->ExecuteSql("DELETE FROM test");
+    store = nullptr;
+
+    RdbStoreConfig configMax(databaseName);
+    configMax.SetBinlogFileSize(16 * 1024 * 1024);
+    configMax.SetHaMode(HAMode::MAIN_REPLICA);
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(configMax, 1, helper, errCode);
+    EXPECT_EQ(errCode, E_OK);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    store->ExecuteSql("DELETE FROM test");
+}
+
+/**
+ * @tc.name: Rdb_BinlogFileSize_ZeroRejected_001
+ * @tc.desc: test SetBinlogFileSize(0) is rejected by CheckConfig
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, Rdb_BinlogFileSize_ZeroRejected_001, TestSize.Level1)
+{
+    int errCode = E_OK;
+    RdbStoreConfig config(databaseName);
+    config.SetBinlogFileSize(0);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    ReplicaPathTestOpenCallback helper;
+    std::shared_ptr<RdbStore> invalidStore = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    EXPECT_EQ(errCode, E_NOT_SUPPORT) << "binlogFileSize=0 should be rejected";
+    EXPECT_EQ(invalidStore, nullptr);
+}
+
+/**
+ * @tc.name: Rdb_BinlogFileSize_SingleModeAllowed_001
+ * @tc.desc: test binlogFileSize change with HAMode::SINGLE does not trigger E_CONFIG_INVALID_CHANGE
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, Rdb_BinlogFileSize_SingleModeAllowed_001, TestSize.Level1)
+{
+    int errCode = E_OK;
+    RdbStoreConfig config(databaseName);
+    config.SetHaMode(HAMode::SINGLE);
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr) << "first open failed";
+    store->ExecuteSql("DELETE FROM test");
+
+    RdbStoreConfig newConfig(databaseName);
+    newConfig.SetBinlogFileSize(1024 * 1024);
+    newConfig.SetHaMode(HAMode::SINGLE);
+    std::shared_ptr<RdbStore> newStore = RdbHelper::GetRdbStore(newConfig, 1, helper, errCode);
+    EXPECT_EQ(errCode, E_OK) << "SINGLE mode should allow binlogFileSize change";
+    EXPECT_NE(newStore, nullptr) << "reopen should succeed with different binlogFileSize in SINGLE mode";
+}
+
+/**
+ * @tc.name: Rdb_BinlogFileSize_SameValueReopen_001
+ * @tc.desc: test reopen with same binlogFileSize does not trigger E_CONFIG_INVALID_CHANGE
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, Rdb_BinlogFileSize_SameValueReopen_001, TestSize.Level1)
+{
+    int errCode = E_OK;
+    RdbStoreConfig config(databaseName);
+    config.SetBinlogFileSize(1024 * 1024);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr) << "first open failed";
+    store->ExecuteSql("DELETE FROM test");
+
+    RdbStoreConfig newConfig(databaseName);
+    newConfig.SetBinlogFileSize(1024 * 1024);
+    newConfig.SetHaMode(HAMode::MAIN_REPLICA);
+    std::shared_ptr<RdbStore> newStore = RdbHelper::GetRdbStore(newConfig, 1, helper, errCode);
+    EXPECT_EQ(errCode, E_OK) << "same binlogFileSize should not trigger config change";
+    EXPECT_NE(newStore, nullptr) << "reopen should succeed with same binlogFileSize";
+}
+
+/**
+ * @tc.name: Rdb_BinlogFileSize_CloseReopenChange_001
+ * @tc.desc: test closing then reopening dual-write db with a different valid binlogFileSize succeeds
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, Rdb_BinlogFileSize_CloseReopenChange_001, TestSize.Level1)
+{
+    ASSERT_FALSE(CheckFolderExist(binlogDatabaseName));
+    int errCode = E_OK;
+    RdbStoreConfig config(databaseName);
+    config.SetBinlogFileSize(1024 * 1024);
+    config.SetHaMode(HAMode::MAIN_REPLICA);
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr);
+    store->ExecuteSql("DELETE FROM test");
+    store = nullptr;
+
+    RdbStoreConfig newConfig(databaseName);
+    newConfig.SetBinlogFileSize(2 * 1024 * 1024);
+    newConfig.SetHaMode(HAMode::MAIN_REPLICA);
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(newConfig, 1, helper, errCode);
+    WaitForBinlogReplayFinish();
+    EXPECT_EQ(errCode, E_OK) << "reopen after close should accept a different valid binlogFileSize";
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr) << "new store should be created with the new threshold";
+}
+
+/**
+ * @tc.name: Rdb_BinlogFileSize_HaModeOnlyChange_001
+ * @tc.desc: test reopening a single-mode db as dual-write (HaMode-only change, binlogFileSize unchanged) succeeds
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbReplicaPathTest, Rdb_BinlogFileSize_HaModeOnlyChange_001, TestSize.Level1)
+{
+    int errCode = E_OK;
+    RdbStoreConfig config(databaseName);
+    config.SetHaMode(HAMode::SINGLE);
+    ReplicaPathTestOpenCallback helper;
+    RdbReplicaPathTest::store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
+    ASSERT_NE(RdbReplicaPathTest::store, nullptr) << "first SINGLE open failed";
+    store->ExecuteSql("DELETE FROM test");
+
+    RdbStoreConfig newConfig(databaseName);
+    newConfig.SetHaMode(HAMode::MAIN_REPLICA);
+    std::shared_ptr<RdbStore> newStore = RdbHelper::GetRdbStore(newConfig, 1, helper, errCode);
+    EXPECT_EQ(errCode, E_OK) << "HaMode-only change should be allowed when binlogFileSize is unchanged";
+    EXPECT_NE(newStore, nullptr) << "reopen should succeed with MAIN_REPLICA config";
 }
 
