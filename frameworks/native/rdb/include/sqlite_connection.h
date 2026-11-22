@@ -203,7 +203,8 @@ private:
     static void BinlogCloseHandle(sqlite3 *dbHandle);
     static int CheckPathExist(const std::string &dbPath);
     static int BinlogOpenHandle(const std::string &dbPath, sqlite3 *&dbHandle, bool isMemoryRdb);
-    static void BinlogSetConfig(sqlite3 *dbHandle, Sqlite3BinlogMode binlogMode, const std::string &binlogDirPath);
+    static void BinlogSetConfig(sqlite3 *dbHandle, Sqlite3BinlogMode binlogMode, const std::string &binlogDirPath,
+        uint32_t maxFileSize);
     static void BinlogOnFullFunc(void *pCtx, unsigned short currentCount, const char *dbPath);
     static int ReplayBinlogSqlite(sqlite3 *dbFrom, sqlite3 *slaveDb, const RdbStoreConfig &config);
     static void ReplayBinlog(const std::string &dbPath, std::shared_ptr<SqliteConnection> slaveConn, bool isNeedClean);
@@ -234,7 +235,6 @@ private:
     static constexpr ssize_t SLAVE_WAL_SIZE_LIMIT = 2147483647;       // 2147483647 = 2g - 1
     static constexpr ssize_t SLAVE_INTEGRITY_CHECK_LIMIT = 524288000; // 524288000 == 1024 * 1024 * 500
     static constexpr unsigned short BINLOG_FILE_NUMS_LIMIT = 2;
-    static constexpr uint32_t BINLOG_FILE_SIZE_LIMIT = 1024 * 1024 * 4; // 4194304 == 1024 * 1024 * 4
     static constexpr uint32_t NO_ITER = 0;
     static constexpr uint32_t DB_INDEX = 0;
     static constexpr uint32_t WAL_INDEX = 2;

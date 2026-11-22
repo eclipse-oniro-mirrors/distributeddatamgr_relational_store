@@ -156,6 +156,7 @@ struct RdbSyncerParam {
     bool isLocalOnly_ = false;
     std::string replicaPath_ = "";
     bool dumpStackOnFileDeletion_ = false;
+    uint32_t binlogFileSize_ = 0;
     ~RdbSyncerParam()
     {
         password_.assign(password_.size(), 0);

@@ -164,6 +164,7 @@ void RdbStoreImpl::InitSyncerParam(const RdbStoreConfig &config, bool created)
     syncerParam_.isLocalOnly_ = config.IsLocalOnly();
     syncerParam_.replicaPath_ = config.GetReplicaPath();
     syncerParam_.dumpStackOnFileDeletion_ = config.IsDumpStackOnFileDeletionEnabled();
+    syncerParam_.binlogFileSize_ = config.GetBinlogFileSize();
     syncerParam_.dfxInfo_.lastOpenTime_ = RdbTimeUtils::GetCurSysTimeWithMs();
     std::string serverPath = config.GetServerPath();
     if (!serverPath.empty() && (serverPath.find(syncerParam_.bundleName_) != std::string::npos) &&
