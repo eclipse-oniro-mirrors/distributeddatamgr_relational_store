@@ -116,7 +116,7 @@ static const int BINLOG_DELETE_PER_WAIT_TIME = 100000; // 100000us = 100ms
 static const int BINLOG_REPLAY_WAIT_TIME = 2; // 2s
 static const int BINLOG_FILE_SIZE = 4 * 1024 * 1024; // 4MB
 static const int SIZE_MB = 1024 * 1024; // 1MB
-static const int BINLOG_MAX_FILE_COUNT = 50;
+static const int BINLOG_MAX_FILE_COUNT = 128;
 
 class DoubleWriteBinlogTestOpenCallback : public RdbOpenCallback {
 public:
