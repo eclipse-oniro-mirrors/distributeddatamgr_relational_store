@@ -1044,7 +1044,8 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_SetDefaultGid_WithSubdir_004, TestSize.L
 
 /**
  * @tc.name: RdbFileSystem_GetEntries_PermissionDenied_005
- * @tc.desc: Verify GetEntries traverses a readable root with a restricted subdir: child verifies permission denial, entry set correctness, and normal exit
+ * @tc.desc: Verify GetEntries traverses a readable root with a restricted subdir: child verifies permission denial,
+ * entry set correctness, and normal exit
  * @tc.type: FUNC
  */
 HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_PermissionDenied_005, TestSize.Level3)
@@ -1092,7 +1093,8 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_PermissionDenied_005, TestSiz
 
 /**
  * @tc.name: RdbFileSystem_RemoveAll_PermissionDeniedSubdir_006
- * @tc.desc: Verify RemoveAll(path, false) deletes accessible entries, skips restricted subdir, preserves root dir without crash
+ * @tc.desc: Verify RemoveAll(path, false) deletes accessible entries, skips restricted subdir,
+ * preserves root dir without crash
  * @tc.type: FUNC
  */
 HWTEST_F(SqliteUtilsTest, RdbFileSystem_RemoveAll_PermissionDeniedSubdir_006, TestSize.Level3)
