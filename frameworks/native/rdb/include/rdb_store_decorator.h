@@ -34,21 +34,16 @@ namespace NativeRdb {
 // The role is twofold: each override carries the per-call instrumentation
 // (HITRACE, stat reporting, SQL statistics, perf statistics - moved here
 // from rdb_store_impl.cpp so the implementation keeps only the functional
-// core), and it applies the fault-injection verdict carried by the
-// per-store injector member: a hit returns E_SQLITE_CORRUPT without
-// touching the database (still fully observable, since the instrumentation
-// has already run), otherwise the call goes to the parent. Result sets
-// returned by the query sinks are wrapped so resultSetRead faults surface
-// on the read interface callers use, and transactions are constructed
-// decorated with the same injector. When the injector is inactive (user
-// builds link the no-op implementation) the decorator behaves exactly like
-// the plain implementation.
-// Inject-and-return guard for decorated sinks: if the injector hits, return
-// the caller-supplied corruption value without executing the parent.
-#define RDB_INJECT_GUARD(op, name, ...) \
-    if (ShouldInject(RdbFaultOp::op, name)) { \
-        return __VA_ARGS__; \
-    }
+// core), and it applies the fault-injection verdict carried by the per-store
+// injector through the RDB_FAULT_INJECT_* guards: a hit
+// returns E_SQLITE_CORRUPT without touching the database (still fully
+// observable, since the instrumentation has already run), otherwise the
+// call goes to the parent. Result sets returned by the query sinks are
+// wrapped so resultSetRead faults surface on the read interface callers
+// use, and transactions are constructed decorated with the same injector.
+// When the mock is compiled out (user builds, RDB_FAULT_INJECTION_ENABLE
+// unset) the guards expand to nothing and the decorator behaves exactly
+// like the plain implementation.
 
 class RdbStoreDecorator final : public RdbStoreImpl {
 public:
@@ -82,28 +77,32 @@ public:
     int Commit() override;
     int Commit(int64_t trxId) override;
 
+    // File-level sinks: they belong to no operation family, so an explicit
+    // per-method entry (the "methods" list) is the only way to inject them.
+    int Backup(const std::string &databasePath, const std::vector<uint8_t> &encryptKey, bool verifyDb) override;
+    int Restore(const std::string &backupPath, const std::vector<uint8_t> &newKey) override;
+    int ForceRestore(const std::string &backupPath, const std::vector<uint8_t> &newKey) override;
+
     int32_t Init(int version, RdbOpenCallback &openCallback, bool isNeedSetAcl = false,
         bool isSilentAccessible = false) override;
 
 private:
-    // Injection verdict for a hooked sink: the injector is created before
-    // the base Init, so operations issued from the OnCreate/OnUpgrade
-    // callbacks are covered by the budget as well.
-    bool ShouldInject(RdbFaultOp op, const std::string &methodName) const;
-
     std::pair<int32_t, std::shared_ptr<Transaction>> CreateTransactionObj(
         int32_t type, std::shared_ptr<Connection> conn) override;
 
     std::string dbPath_;
-    // Per-store injector: created at the start of Init (outside the manager
-    // lock) so the config file read never happens inside a critical section,
-    // and ready before the open callbacks run. Passed to the transaction and
-    // result-set decorators this store creates, so the budget state is shared
-    // by everything serving the database. Holder plus reference, following
-    // the
-    // configHolder_/config_ convention in rdb_store_impl.h.
-    std::shared_ptr<RdbFaultInjector> injectorHolder_;
-    RdbFaultInjector *injector_ = nullptr;
+    // Per-store fault injector (see rdb_fault_injector.h): created
+    // idempotently at the start of Init - outside the manager lock so the
+    // config file read never happens inside a critical section, and before
+    // the base call so the open callbacks' operations are covered by the
+    // budget too. Passed to the transaction and result-set decorators this
+    // store creates, so the budget state is shared by everything serving
+    // the database. Consumed only through the RDB_FAULT_INJECT_* macros; a
+    // null injector reads as a miss.
+    std::shared_ptr<RdbFaultInjector> injector_;
+    // Per-store once_flag serializing injector creation (replaces a process-global
+    // mutex): only concurrent opens of the same store block each other.
+    std::once_flag createOnce_;
 };
 
 } // namespace NativeRdb

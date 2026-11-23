@@ -218,6 +218,21 @@ RdbFaultInjector::RdbFaultInjector(const std::string &dbPath) : dbPath_(Normaliz
     enabled_ = entry_ != nullptr && !entry_->IsEmpty();
 }
 
+void RdbFaultInjector::CreateOnce(std::once_flag &flag, const std::string &dbPath,
+                                  std::shared_ptr<RdbFaultInjector> &holder)
+{
+    // Per-store once_flag (no global lock): concurrent opens of one store share the
+    // single injector behind the member instead of racing two instances into it.
+    // Only same-store opens serialize - unrelated stores never block each other.
+    // Creation runs from the store's Init, outside the store manager's critical
+    // section, so the config file read never happens inside it.
+    std::call_once(flag, [&]() {
+        if (holder == nullptr) {
+            holder = std::make_shared<RdbFaultInjector>(dbPath);
+        }
+    });
+}
+
 bool RdbFaultInjector::Hit(const std::string &methodName, RdbFaultOp op)
 {
     return CheckMethod(methodName) || Check(op);

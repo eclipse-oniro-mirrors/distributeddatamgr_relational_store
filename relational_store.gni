@@ -180,16 +180,15 @@ base_sources = [
 # RDB fault-injection mock layer. The store and transaction decorators
 # derive from classes every platform compiles, so they build on all
 # platforms (the cross-platform SDK variants keep the same decorator
-# behavior; the no-op injector contributes nothing there). The result-set
-# decorator is a header-only template instantiated at its guarded use
-# sites. Each decorator delegates to the parent when the injector is
-# inactive, so user builds keep the exact same behavior. Only the injector
-# itself switches: the real implementation in root/debug builds, the no-op
-# implementation in user builds.
+# behavior; with the mock off their guards compile out and the verdicts
+# inline to misses). The result-set decorator is a header-only template
+# instantiated at its guarded use sites. Each decorator delegates to the
+# parent when no injection hits, so user builds keep the exact same
+# behavior. The injector implementation compiles into the rdb sources
+# themselves, and only for root builds.
 # The fault-injection mock layer follows the build variant (dsoftbus pattern):
-# root version builds compile the real injector, user (release) builds compile
-# the no-op implementation instead, so the shipped artifact carries no mock
-# behavior at all - and only OHOS builds enable it at all, so the
+# root version builds compile the real injector, user (release) builds carry
+# no mock behavior at all - and only OHOS builds enable it at all, so the
 # cross-platform (SDK) variants never do. build/common.gni (imported above)
 # provides build_variant.
 rdb_fault_injection_enable = (is_ohos && build_variant == "root")
@@ -201,8 +200,6 @@ rdb_fault_mock_sources = [
 
 if (rdb_fault_injection_enable) {
   rdb_fault_mock_sources += [ "${relational_store_native_path}/rdb/src/rdb_fault_injector.cpp" ]
-} else {
-  rdb_fault_mock_sources += [ "${relational_store_native_path}/rdb/src/rdb_fault_injector_noop.cpp" ]
 }
 
 # rdb_store_manager.cpp references these symbols, so every target
@@ -210,10 +207,12 @@ if (rdb_fault_injection_enable) {
 # that do not reuse base_sources) appends this list too.
 base_sources += rdb_fault_mock_sources
 
-# Compile-time switch for the manager open-injection guard macros (see
-# rdb_store_manager.h): root builds expand the guards, user builds compile
-# them out entirely, so the shipped artifact carries no open-failure mock
-# behavior at all.
+# Compile-time switch for the injection guard macros and the injector
+# verdict surface (see rdb_fault_injector.h): root builds define
+# RDB_FAULT_INJECTION_ENABLE so the guards expand and the real injector is
+# compiled in (above), user builds leave it undefined so the guards compile
+# out, nothing creates an injector object and no injector implementation
+# is built at all.
 rdb_fault_injection_defines = []
 if (rdb_fault_injection_enable) {
   rdb_fault_injection_defines = [ "RDB_FAULT_INJECTION_ENABLE" ]

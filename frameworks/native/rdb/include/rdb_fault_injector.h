@@ -42,16 +42,17 @@ enum class RdbFaultOp {
 
 // Per-database verdict object deciding "inject or not" for the RDB
 // fault-injection mock layer. It never fabricates error codes itself: a hit
-// only tells the call site to return E_SQLITE_CORRUPT. RdbStoreDecorator
-// owns one instance per store - constructed with the store's database path,
-// which reads rdb_fault_inject_config.json once - and passes the instance to
-// the transaction and result-set decorators it creates, so the budget state
-// is shared by everything serving one database. The open path (store
-// manager, sqlite connection) uses short-lived instances whose verdicts
-// naturally reset per open cycle. The build wiring selects between the real
-// implementation (rdb_fault_injector.cpp, root/debug builds) and the no-op
-// implementation (rdb_fault_injector_noop.cpp, user builds), so user builds
-// carry no behavior at all. The config file is parsed only through
+// only tells the call site to return E_SQLITE_CORRUPT. One instance is
+// bound to one database path and reads rdb_fault_inject_config.json once at
+// construction. Root/debug builds compile the implementation
+// (rdb_fault_injector.cpp) together with the rdb sources into
+// libnative_rdb.z.so; this class is that implementation's plain interface
+// and carries no build-variant shape of its own - the decorators hold it as
+// a shared_ptr but reach every verdict only through the RDB_FAULT_INJECT_*
+// macros below (plus CreateOnce for the per-store instance), and user
+// builds reference it nowhere (the macros expand to nothing there, so no
+// injector implementation is compiled and no injector object is ever
+// created). The config file is parsed only through
 // Serializable::Unmarshal (see rdb_fault_injector.cpp), and budget
 // consumption happens under the per-entry lock so a missed probability
 // sample does not consume budget.
@@ -62,6 +63,19 @@ public:
     // invalid content leaves the injector unconfigured (verdicts all miss).
     explicit RdbFaultInjector(const std::string &dbPath);
     ~RdbFaultInjector() = default;
+
+    // Serialized idempotent creation for one caller-held member. The store
+    // manager serves a cache entry to a concurrent second opener while the
+    // first open may still be running, and both Init calls must end up
+    // sharing one injector (one config snapshot, one budget) instead of
+    // racing two instances into the member. The scope of that sharing is
+    // the member alone: creation is never keyed by path and never cached
+    // across holders - every store (every database path) gets its own
+    // instance. Serialization is per-store via the caller's once_flag (no
+    // global lock): only concurrent opens of the same store block each
+    // other, and calls after the first are a fast path. Reached only
+    // through RDB_FAULT_INJECT_CREATE.
+    static void CreateOnce(std::once_flag &flag, const std::string &dbPath, std::shared_ptr<RdbFaultInjector> &holder);
 
     // Combined verdict for hook sites: the per-method entry first, then the
     // operation family. Returns true when the call site should inject.
@@ -121,6 +135,45 @@ private:
     std::shared_ptr<PathEntry> entry_;
     bool enabled_ = false;
 };
+
+
+// The decorator-facing fault-injection surface; inj is the caller's
+// std::shared_ptr<RdbFaultInjector>. RDB_FAULT_INJECT_CREATE brings the
+// per-store instance to life at the start of the store's Init (idempotent
+// and serialized, see RdbFaultInjector::CreateOnce);
+// RDB_FAULT_INJECT_HIT decides by the per-method entry first, then the
+// operation family; RDB_FAULT_INJECT_METHOD decides by the per-method entry
+// only, for cleanup or file-level methods that belong to no operation
+// family; RDB_FAULT_INJECT_WRAP re-seats a query result set with its
+// decorated counterpart when the database has an injection entry (the
+// expansion uses RdbResultSetDecorator, so the expansion site must include
+// rdb_result_set_decorator.h). A null injector reads as a miss, never an
+// error. Root builds expand the verdicts; user builds compile everything
+// out, so call sites reference no injector symbols, the result-set
+// decorator template is never instantiated and the shipped artifact carries
+// no mock behavior at all. New injection points must use these macros -
+// never call the injector verdict methods directly.
+#ifdef RDB_FAULT_INJECTION_ENABLE
+#define RDB_FAULT_INJECT_CREATE(flag, dbPath, inj) \
+    RdbFaultInjector::CreateOnce(flag, dbPath, inj)
+#define RDB_FAULT_INJECT_HIT(inj, op, name, ...) \
+    if ((inj) != nullptr && (inj)->Hit(name, RdbFaultOp::op)) { \
+        return __VA_ARGS__; \
+    }
+#define RDB_FAULT_INJECT_METHOD(inj, name, ret) \
+    if ((inj) != nullptr && (inj)->CheckMethod(name)) { \
+        return ret; \
+    }
+#define RDB_FAULT_INJECT_WRAP(resultSet, inj, Inner) \
+    if ((resultSet) != nullptr && (inj) != nullptr && (inj)->HasEntry()) { \
+        (resultSet) = std::make_shared<RdbResultSetDecorator<Inner>>((resultSet), (inj)); \
+    }
+#else
+#define RDB_FAULT_INJECT_CREATE(flag, dbPath, inj)
+#define RDB_FAULT_INJECT_HIT(inj, op, name, ...)
+#define RDB_FAULT_INJECT_METHOD(inj, name, ret)
+#define RDB_FAULT_INJECT_WRAP(resultSet, inj, Inner)
+#endif
 
 } // namespace NativeRdb
 } // namespace OHOS

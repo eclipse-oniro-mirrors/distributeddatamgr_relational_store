@@ -28,19 +28,20 @@ namespace NativeRdb {
 
 // Fault-injection decorator of the transaction implementation - the
 // transaction object constructed by RdbStoreDecorator, which passes its
-// injector member in at construction (see TransactionImplDecorator::Create).
-// Each override applies the injection verdict (returning E_SQLITE_CORRUPT
-// without touching the database) and otherwise delegates to the parent,
-// which keeps the per-call instrumentation and the internal TransDB facade.
-// The query sinks wrap the result sets they return so resultSetRead faults
-// surface on the read interface callers use.
+// fault injector in at construction (see
+// TransactionImplDecorator::Create). Each override applies the injection
+// verdict (returning E_SQLITE_CORRUPT without touching the database) and
+// otherwise delegates to the parent, which keeps the per-call
+// instrumentation and the internal TransDB facade. The query sinks wrap
+// the result sets they return so resultSetRead faults surface on the read
+// interface callers use.
 class TransactionImplDecorator final : public TransactionImpl {
 public:
     TransactionImplDecorator(std::shared_ptr<Connection> connection, const std::string &path, bool auditEnabled,
         std::shared_ptr<RdbFaultInjector> injector);
 
     // Mirrors TransactionImpl::Create, but constructs this decorator with
-    // the store's injector so budget state is shared with the store.
+    // the store's fault injector so budget state is shared with the store.
     static std::pair<int32_t, std::shared_ptr<Transaction>> Create(int32_t type,
         std::shared_ptr<Connection> connection, const std::string &path, bool auditEnabled,
         std::shared_ptr<RdbFaultInjector> injector);
@@ -72,10 +73,11 @@ private:
     // Wraps a step result set when the database has an injection entry.
     std::shared_ptr<ResultSet> WrapIfConfigured(std::shared_ptr<ResultSet> resultSet) const;
 
-    // Holder plus reference, following the configHolder_/config_ convention
-    // in rdb_store_impl.h; the class only uses the reference.
-    std::shared_ptr<RdbFaultInjector> injectorHolder_;
-    RdbFaultInjector &injector_;
+    // The store's fault injector (see rdb_fault_injector.h), consumed only
+    // through the RDB_FAULT_INJECT_* macros. [[maybe_unused]]: user builds
+    // compile the macros out, so the injector is only written there, never
+    // read.
+    [[maybe_unused]] std::shared_ptr<RdbFaultInjector> injector_;
 };
 
 } // namespace NativeRdb
