@@ -729,7 +729,9 @@ std::pair<int, std::shared_ptr<Statement>> SqliteConnection::CreateStatementInne
         errCode = slaveStmt->Prepare(slaveConnection_->dbHandle_, sql);
         if (errCode != E_OK) {
             LOG_WARN("prepare slave stmt failed:%{public}d, app self can check the SQL", errCode);
-            Reportor::ReportSlaveInconsistent(config_, "slave prepare stmt failed");
+            std::string msg = "slave prepare stmt failed, errCode:" + std::to_string(errCode) +
+                ", errno:" + std::to_string(errno);
+            Reportor::ReportSlaveInconsistent(config_, msg);
             SqliteUtils::SetSlaveInvalid(config_.GetPath(), SqliteUtils::SlaveInvalidReason::EXCHANGE_FAILED);
             return { E_OK, statement };
         }
@@ -1679,9 +1681,11 @@ int SqliteConnection::ExchangeSlaverToMaster(bool isRestore, bool verifyDb, std:
     if (err != E_OK) {
         if (isRestore) {
             RdbStoreConfig slaveCfg(SqliteUtils::GetSlavePath(config_));
-            auto event = Reportor::Create(slaveCfg, E_DFX_SLAVE_CORRUPT,
-                "slave corrupt on restore", false, true);
+            std::string appendix = "slave corrupt on restore, errCode:" + std::to_string(err) +
+                ", errno:" + std::to_string(errno);
+            auto event = Reportor::Create(slaveCfg, E_DFX_SLAVE_CORRUPT, appendix, false, true);
             event.subCaseDesc = RdbSubCase::BOTH_FAIL;
+            event.systemErrorNo = err;
             Reportor::ReportSlaveCorruptWithMasterCheck(event, config_,
                 "master and slave both corrupt on restore");
         }
@@ -1728,7 +1732,9 @@ int SqliteConnection::ResetBinlog(bool isNeedSetAcl)
         if (err != SQLITE_OK) {
             LOG_ERROR("clean all data failed:%{public}d", err);
             sqlite3_db_config(dbHandle_, SQLITE_DBCONFIG_ENABLE_BINLOG, nullptr);
-            Reportor::ReportSlaveInconsistent(config_, "slave backup verify failed");
+            std::string msg = "slave backup verify failed, errCode:" + std::to_string(err) +
+                ", errno:" + std::to_string(errno);
+            Reportor::ReportSlaveInconsistent(config_, msg);
             SqliteUtils::SetSlaveInvalid(config_.GetPath(), SqliteUtils::SlaveInvalidReason::BACKUP_VERIFY_FAILED);
         }
     }
@@ -2312,9 +2318,12 @@ int SqliteConnection::VerifySlaveIntegrity(const bool isForceRestore)
 
     std::tie(err, obj) = slaveConnection_->ExecuteForValue(INTEGRITIES[2]); // 2 is integrity_check
     if (err == E_OK && (static_cast<std::string>(obj) != "ok")) {
-        LOG_ERROR("slave corrupt, ret:%{public}s, cRet:%{public}d, %{public}d", static_cast<std::string>(obj).c_str(),
+        std::string integrityRet = static_cast<std::string>(obj);
+        LOG_ERROR("slave corrupt, ret:%{public}s, cRet:%{public}d, %{public}d", integrityRet.c_str(),
             err, errno);
-        auto event = Reportor::Create(slaveCfg, E_DFX_SLAVE_CORRUPT, "Slave Check", false, true);
+        std::string appendix = "Slave Check, integrityCheck:" + integrityRet +
+            ", errCode:" + std::to_string(err) + ", errno:" + std::to_string(errno);
+        auto event = Reportor::Create(slaveCfg, E_DFX_SLAVE_CORRUPT, appendix, false, true);
         event.subCaseDesc = RdbSubCase::BOTH_FAIL;
         Reportor::ReportSlaveCorruptWithMasterCheck(event, config_, "master and slave both corrupt");
         SqliteUtils::SetSlaveInvalid(config_.GetPath(), SqliteUtils::SlaveInvalidReason::VERIFY_FAILED);
