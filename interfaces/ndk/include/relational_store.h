@@ -511,6 +511,9 @@ OH_Rdb_Store *OH_Rdb_CreateOrOpen(const OH_Rdb_ConfigV2 *config, int *errCode);
 /**
  * @brief Close the {@link OH_Rdb_Store} object and reclaim the memory occupied by the object.
  *
+ * @note The caller must ensure that no other API is using {@link store} concurrently.
+ *     After this function returns, the handle becomes invalid and must not be used again.
+ *
  * @param store Represents a pointer to an {@link OH_Rdb_Store} instance.
  * @return Returns the status code of the execution. Successful execution returns RDB_OK,
  *     {@link RDB_OK} - success.

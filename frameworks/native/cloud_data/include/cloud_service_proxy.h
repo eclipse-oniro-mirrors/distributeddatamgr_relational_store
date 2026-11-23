@@ -91,6 +91,7 @@ private:
     int32_t DoSubscribe(CloudSubscribeType type, const std::vector<BundleInfo> &bundleInfos);
     void OnSyncComplete(uint32_t seqNum, Details &&result);
     CloudSyncTriggerObservers cloudSyncTriggerObservers_;
+    std::mutex cloudSyncTriggerObserversMutex_;
     void OnSyncInfoNotify(const BatchQueryLastResults &data);
     void CollectObserverData(const std::string &bundleName, const std::map<std::string, CloudSyncInfo> &storeResults,
         const std::map<std::string, std::list<SubObserverParam>> &storeMap,

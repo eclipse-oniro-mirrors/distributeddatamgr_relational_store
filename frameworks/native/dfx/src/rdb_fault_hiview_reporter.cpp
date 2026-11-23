@@ -98,7 +98,7 @@ RdbFaultCode RdbFaultHiViewReporter::faultCounters_[] = {
 
 RdbFaultEvent::~RdbFaultEvent() = default;
 
-bool RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
+std::atomic<bool> RdbFaultHiViewReporter::memCorruptReportedFlg_ = false;
 
 void RdbFaultHiViewReporter::ReportCorruptedOnce(const RdbCorruptedEvent &eventInfo)
 {

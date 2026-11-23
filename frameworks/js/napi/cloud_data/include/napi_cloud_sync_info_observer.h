@@ -16,6 +16,8 @@
 #ifndef NAPI_CLOUD_SYNC_INFO_OBSERVER_H
 #define NAPI_CLOUD_SYNC_INFO_OBSERVER_H
 
+#include <mutex>
+
 #include "cloud_types.h"
 #include "js_uv_queue.h"
 #include "napi/native_api.h"
@@ -40,6 +42,7 @@ private:
     napi_env env_;
     std::shared_ptr<UvQueue> uvQueue_;
     napi_ref callback_;
+    std::mutex mutex_;
 };
 } // namespace OHOS::CloudData
 #endif // NAPI_CLOUD_SYNC_INFO_OBSERVER_H

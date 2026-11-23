@@ -27,8 +27,8 @@ using namespace OHOS::NativeRdb;
 namespace OHOS::RdbNdk {
 static constexpr const char *TRUSTS_CONF_PATH = "/system/etc/trusts/conf/";
 static constexpr const char *TRUSTS_CONFIG_JSON_PATH = "trusts_config.json";
-bool Utils::isInited_ = false;
-bool Utils::flag_ = false;
+std::atomic<bool> Utils::isInited_ = false;
+std::atomic<bool> Utils::flag_ = false;
 std::mutex Utils::mutex_;
 NativeRdb::ConflictResolution Utils::ConvertConflictResolution(Rdb_ConflictResolution resolution)
 {

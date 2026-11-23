@@ -974,6 +974,11 @@ namespace cloudExtension {
           let exitBundleName = data.readString();
           let exitTableName = data.readString();
           let exitResult: Result<void> = await this.shareCenter.exit(exitUserId, exitBundleName, exitTableName);
+          if (exitResult === undefined) {
+            reply.writeInt(INVALID_STATE);
+            reply.writeString(INVALID_STR);
+            return true;
+          }
           reply.writeInt(exitResult.code);
           if (exitResult.description) {
             reply.writeString(exitResult?.description as string);
@@ -1013,6 +1018,12 @@ namespace cloudExtension {
           let confirmStatus: cloudData.sharing.State = this.toState(data.readInt());
           let confirmResult: Result<string> =
             await this.shareCenter.confirmInvitation(confirmUserId, confirmBundleName, confirmTableName, confirmStatus);
+          if (confirmResult === undefined) {
+            reply.writeInt(INVALID_STATE);
+            reply.writeString(INVALID_STR);
+            reply.writeString(INVALID_STR);
+            return true;
+          }
           reply.writeInt(confirmResult.code);
           if (confirmResult.description) {
             reply.writeString(confirmResult?.description as string);
@@ -1033,6 +1044,11 @@ namespace cloudExtension {
           let changeConfirmResult: Result<void> =
             await this.shareCenter.changeConfirmation(changeConfirmUserId, changeConfirmBundleName,
               changeConfirmTableName, changeConfirmStatus);
+          if (changeConfirmResult === undefined) {
+            reply.writeInt(INVALID_STATE);
+            reply.writeString(INVALID_STR);
+            return true;
+          }
           reply.writeInt(changeConfirmResult.code);
           if (changeConfirmResult.description) {
             reply.writeString(changeConfirmResult?.description as string);
@@ -1114,6 +1130,11 @@ namespace cloudExtension {
     }
 
     marshallingResultsArray(reply: rpc.MessageSequence, result: Result<Array<Participant>>): void {
+      if (result === undefined) {
+        reply.writeInt(INVALID_STATE);
+        reply.writeString(INVALID_STR);
+        return;
+      }
       reply.writeInt(result.code);
       if (result.description) {
         reply.writeString(result?.description as string);
@@ -1129,6 +1150,11 @@ namespace cloudExtension {
     }
 
     marshallingResults(reply: rpc.MessageSequence, result: Result<Array<Result<Participant>>>): void {
+      if (result === undefined) {
+        reply.writeInt(INVALID_STATE);
+        reply.writeString(INVALID_STR);
+        return;
+      }
       reply.writeInt(result.code);
       if (result.description) {
         reply.writeString(result?.description as string);

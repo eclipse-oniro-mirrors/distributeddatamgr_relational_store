@@ -139,6 +139,9 @@ void CloudManager::OnRemoteDied()
     {
         std::lock_guard<decltype(mutex_)> lg(mutex_);
         serviceHandle = cloudService_;
+        // Clear the dead handle in the same critical section, so concurrent GetCloudService
+        // cannot observe a dead proxy after OnRemoteDied starts.
+        cloudService_ = nullptr;
     }
     
     if (serviceHandle == nullptr) {
