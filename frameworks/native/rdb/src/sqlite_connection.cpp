@@ -80,7 +80,7 @@ constexpr unsigned short SqliteConnection::BINLOG_FILE_NUMS_LIMIT;
 constexpr uint32_t SqliteConnection::DB_INDEX;
 constexpr uint32_t SqliteConnection::WAL_INDEX;
 constexpr int32_t SERVICE_GID = 3012;
-constexpr int32_t BINLOG_FILE_REPLAY_LIMIT = 50;
+constexpr int32_t BINLOG_FILE_REPLAY_LIMIT = 128;
 constexpr int32_t BINLOG_FILE_NOTIFY_LIMIT = 30;
 constexpr int64_t BINLOG_REPLAY_REPORT_TIME = 15 * 60 * 1000; // ms
 ConcurrentMap<uint64_t, Connection::ReplayCallBack> SqliteConnection::replayCallback_ = {};
