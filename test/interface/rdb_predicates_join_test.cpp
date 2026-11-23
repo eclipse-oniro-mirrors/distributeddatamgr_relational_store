@@ -509,25 +509,19 @@ HWTEST_F(RdbStorePredicateJoinTest, RdbStore_CrossJoin_WithoutCondition_010, Tes
     allDataTypes->Close();
 }
 
-/* *
+/**
  * @tc.name: RdbStore_JoinTypesSizeMismatch_011
- * @tc.desc: Verify GetJoinClause does not crash when joinTypes is shorter than joinTableNames (SIGSEGV regression)
+ * @tc.desc: Keep the first join and its ON clause when only one join type remains for two tables.
  * @tc.type: FUNC
  */
 HWTEST_F(RdbStorePredicateJoinTest, RdbStore_JoinTypesSizeMismatch_011, TestSize.Level3)
 {
-    // Arrange: CrossJoin sets both joinTypes and joinTableNames to size 1
     RdbPredicates predicates("user");
-    predicates.CrossJoin("book");
+    predicates.InnerJoin("book")->On({ "user.userId = book.userId" });
+    predicates.CrossJoin("publisher");
+    predicates.SetJoinTypes({ "INNER JOIN" });
 
-    // Set joinTypes to empty (simulates NAPI SetJoinTypes with wrong size)
-    predicates.SetJoinTypes({});
-
-    // Act: GetJoinClause previously crashed on joinTypes[0] out of bounds
-    std::string joinClause = predicates.GetJoinClause();
-
-    // Assert: no crash, empty result (loop skipped due to size mismatch guard)
-    EXPECT_EQ("", joinClause) << "joinClause should be empty when joinTypes is empty";
+    EXPECT_EQ("INNER JOIN book ON(user.userId = book.userId)", predicates.GetJoinClause());
 }
 
 /* *
