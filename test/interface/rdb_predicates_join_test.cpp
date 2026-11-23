@@ -551,7 +551,7 @@ HWTEST_F(RdbStorePredicateJoinTest, RdbStore_JoinConditionsShortBySetter_012, Te
     // Act: GetJoinClause previously crashed at joinConditions[1] out of bounds
     std::string joinClause = predicates.GetJoinClause();
 
-    // Assert: no crash; first join has condition, second join skipped (i=1, 1 < 1 = false)
+    // The second CROSS JOIN is preserved without an ON clause.
     EXPECT_EQ("CROSS JOIN book ON(user.userId = book.userId) CROSS JOIN book", joinClause)
         << "joinClause=" << joinClause;
 }

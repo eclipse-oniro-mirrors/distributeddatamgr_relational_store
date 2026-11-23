@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "logger.h"
+#include "sqlite_utils.h"
 
 namespace OHOS {
 namespace NativeRdb {
@@ -29,15 +30,22 @@ std::vector<std::string> RdbFileSystem::GetEntries(const std::string &path)
 {
     std::vector<std::string> paths;
     std::error_code ec;
-    constexpr auto opts = std::filesystem::directory_options::skip_permission_denied;
     auto end = std::filesystem::recursive_directory_iterator();
-    for (auto it = std::filesystem::recursive_directory_iterator(path, opts, ec); it != end;) {
+    auto it = std::filesystem::recursive_directory_iterator(path, ec);
+    if (ec) {
+        LOG_WARN("GetEntries open directory failed, dir: %{public}s, ec: %{public}d",
+                 SqliteUtils::Anonymous(path).c_str(), ec.value());
+        return paths;
+    }
+    for (; it != end;) {
+        std::string currentPath = it->path().string();
+        paths.push_back(currentPath);
+        it.increment(ec);
         if (ec) {
-            LOG_WARN("GetEntries skip entry, path: %{private}s, ec: %{public}d", path.c_str(), ec.value());
+            LOG_WARN("GetEntries traverse entry failed, dir: %{public}s, ec: %{public}d",
+                     SqliteUtils::Anonymous(currentPath).c_str(), ec.value());
             ec.clear();
         }
-        paths.push_back(it->path().string());
-        it.increment(ec);
     }
     return paths;
 }
@@ -49,11 +57,17 @@ std::pair<size_t, int32_t> RdbFileSystem::RemoveAll(const std::string &path, boo
 
     if (removeSelf) {
         count = std::filesystem::remove_all(path, ec);
+        if (ec) {
+            LOG_WARN("RemoveAll failed, dir: %{public}s, ec: %{public}d",
+                     SqliteUtils::Anonymous(path).c_str(), ec.value());
+        }
         return std::make_pair(count, ec.value());
     }
     for (const auto &subPath : RdbFileSystem::GetEntries(path)) {
         auto res = std::filesystem::remove_all(subPath, ec);
         if (ec) {
+            LOG_WARN("RemoveAll remove entry failed, dir: %{public}s, ec: %{public}d",
+                     SqliteUtils::Anonymous(subPath).c_str(), ec.value());
             ec.clear();
             continue;
         }
