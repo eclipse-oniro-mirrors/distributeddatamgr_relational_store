@@ -18,6 +18,8 @@
 
 #include <filesystem>
 #include <string>
+#include <unistd.h>
+#include <utility>
 #include <vector>
 
 #include "logger.h"
@@ -28,23 +30,48 @@ namespace NativeRdb {
 using namespace OHOS::Rdb;
 std::vector<std::string> RdbFileSystem::GetEntries(const std::string &path)
 {
+    namespace fs = std::filesystem;
     std::vector<std::string> paths;
-    std::error_code ec;
-    auto end = std::filesystem::recursive_directory_iterator();
-    auto it = std::filesystem::recursive_directory_iterator(path, ec);
-    if (ec) {
-        LOG_WARN("GetEntries open directory failed, dir: %{public}s, ec: %{public}d",
-                 SqliteUtils::Anonymous(path).c_str(), ec.value());
-        return paths;
-    }
-    for (; it != end;) {
-        std::string currentPath = it->path().string();
-        paths.push_back(currentPath);
-        it.increment(ec);
+    std::vector<fs::directory_iterator> directories;
+    const fs::directory_iterator end;
+
+    auto openDirectory = [&directories](const fs::path &directory) {
+        std::error_code ec;
+        fs::directory_iterator entries(directory, ec);
         if (ec) {
-            LOG_WARN("GetEntries traverse entry failed, dir: %{public}s, ec: %{public}d",
-                     SqliteUtils::Anonymous(currentPath).c_str(), ec.value());
-            ec.clear();
+            const bool readable = access(directory.c_str(), R_OK) == 0;
+            const bool searchable = access(directory.c_str(), X_OK) == 0;
+            LOG_WARN("GetEntries open directory failed, path=%{public}s, ec=%{public}d, "
+                "realUidCanRead=%{public}d, realUidCanSearch=%{public}d",
+                SqliteUtils::Anonymous(directory.string()).c_str(), ec.value(), readable, searchable);
+            return;
+        }
+        directories.push_back(std::move(entries));
+    };
+
+    openDirectory(path);
+    while (!directories.empty()) {
+        auto &current = directories.back();
+        if (current == end) {
+            directories.pop_back();
+            continue;
+        }
+        const fs::directory_entry entry = *current;
+        paths.push_back(entry.path().string());
+
+        std::error_code ec;
+        current.increment(ec);
+        if (ec) {
+            LOG_WARN("GetEntries read directory failed, path=%{public}s, ec=%{public}d",
+                SqliteUtils::Anonymous(entry.path().parent_path().string()).c_str(), ec.value());
+            directories.pop_back();
+        }
+        const auto status = entry.symlink_status(ec);
+        if (ec) {
+            LOG_WARN("GetEntries stat entry failed, path=%{public}s, ec=%{public}d",
+                SqliteUtils::Anonymous(entry.path().string()).c_str(), ec.value());
+        } else if (fs::is_directory(status)) {
+            openDirectory(entry.path());
         }
     }
     return paths;
