@@ -195,7 +195,7 @@ private:
         const std::pair<int, ValueObject> &sCountRes, const std::pair<int, ValueObject> &sIdxCountRes);
     ExchangeStrategy ExchangeCompareInTrigger(bool isReplayed);
     ExchangeStrategy ExchangeCompareWithMainEmpty(bool isReplayed, const std::pair<int, ValueObject> &sCountRes);
-    void DeleteCorruptSlave(const std::string &path);
+    void DeleteCorruptSlave(const std::string &path, int errCode, const std::string &callerFunc);
     static std::pair<int32_t, std::shared_ptr<SqliteConnection>> InnerCreate(
         const RdbStoreConfig &config, bool isWrite, bool isReusableReplica = false);
     static int32_t InnerRepair(const RdbStoreConfig &config);
