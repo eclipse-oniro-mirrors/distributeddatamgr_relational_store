@@ -13,26 +13,67 @@
  * limitations under the License.
  */
 
+#define LOG_TAG "RdbFileSystem"
 #include "rdb_file_system.h"
 
 #include <filesystem>
 #include <string>
+#include <unistd.h>
+#include <utility>
 #include <vector>
+
+#include "logger.h"
+#include "sqlite_utils.h"
 
 namespace OHOS {
 namespace NativeRdb {
+using namespace OHOS::Rdb;
 std::vector<std::string> RdbFileSystem::GetEntries(const std::string &path)
 {
+    namespace fs = std::filesystem;
     std::vector<std::string> paths;
-    std::error_code ec;
-    for (const auto &entry : std::filesystem::recursive_directory_iterator(path, ec)) {
+    std::vector<fs::directory_iterator> directories;
+    const fs::directory_iterator end;
+
+    auto openDirectory = [&directories](const fs::path &directory) {
+        std::error_code ec;
+        fs::directory_iterator entries(directory, ec);
         if (ec) {
-            ec.clear();
+            const bool readable = access(directory.c_str(), R_OK) == 0;
+            const bool searchable = access(directory.c_str(), X_OK) == 0;
+            LOG_WARN("GetEntries open directory failed, path=%{public}s, ec=%{public}d, "
+                "realUidCanRead=%{public}d, realUidCanSearch=%{public}d",
+                SqliteUtils::Anonymous(directory.string()).c_str(), ec.value(), readable, searchable);
+            return;
+        }
+        directories.push_back(std::move(entries));
+    };
+
+    openDirectory(path);
+    while (!directories.empty()) {
+        auto &current = directories.back();
+        if (current == end) {
+            directories.pop_back();
             continue;
         }
+        const fs::directory_entry entry = *current;
         paths.push_back(entry.path().string());
-    }
 
+        std::error_code ec;
+        current.increment(ec);
+        if (ec) {
+            LOG_WARN("GetEntries read directory failed, path=%{public}s, ec=%{public}d",
+                SqliteUtils::Anonymous(entry.path().parent_path().string()).c_str(), ec.value());
+            directories.pop_back();
+        }
+        const auto status = entry.symlink_status(ec);
+        if (ec) {
+            LOG_WARN("GetEntries stat entry failed, path=%{public}s, ec=%{public}d",
+                SqliteUtils::Anonymous(entry.path().string()).c_str(), ec.value());
+        } else if (fs::is_directory(status)) {
+            openDirectory(entry.path());
+        }
+    }
     return paths;
 }
 
@@ -43,11 +84,17 @@ std::pair<size_t, int32_t> RdbFileSystem::RemoveAll(const std::string &path, boo
 
     if (removeSelf) {
         count = std::filesystem::remove_all(path, ec);
+        if (ec) {
+            LOG_WARN("RemoveAll failed, dir: %{public}s, ec: %{public}d",
+                     SqliteUtils::Anonymous(path).c_str(), ec.value());
+        }
         return std::make_pair(count, ec.value());
     }
     for (const auto &subPath : RdbFileSystem::GetEntries(path)) {
         auto res = std::filesystem::remove_all(subPath, ec);
         if (ec) {
+            LOG_WARN("RemoveAll remove entry failed, dir: %{public}s, ec: %{public}d",
+                     SqliteUtils::Anonymous(subPath).c_str(), ec.value());
             ec.clear();
             continue;
         }

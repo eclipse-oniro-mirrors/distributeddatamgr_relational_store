@@ -14,17 +14,24 @@
  */
 
 #include "sqlite_utils.h"
+#include "rdb_file_system.h"
 #include "rdb_sql_utils.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cerrno>
 #include <climits>
+#include <cstdlib>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <iostream>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 #include "acl.h"
 #include "rdb_platform.h"
@@ -41,7 +48,13 @@ public:
     static void SetUpTestCase(void);
     static void TearDownTestCase(void);
     void SetUp(void) {};
-    void TearDown(void) {};
+    void TearDown(void);
+
+protected:
+    void RegisterCleanup(const std::string &path) { cleanupPaths_.push_back(path); }
+
+private:
+    std::vector<std::string> cleanupPaths_;
 };
 
 void SqliteUtilsTest::SetUpTestCase(void)
@@ -50,6 +63,14 @@ void SqliteUtilsTest::SetUpTestCase(void)
 
 void SqliteUtilsTest::TearDownTestCase(void)
 {
+}
+
+void SqliteUtilsTest::TearDown(void)
+{
+    for (auto it = cleanupPaths_.rbegin(); it != cleanupPaths_.rend(); ++it) {
+        SqliteUtils::DeleteFolder(*it);
+    }
+    cleanupPaths_.clear();
 }
 
 HWTEST_F(SqliteUtilsTest, SqliteUtils_Test_001, TestSize.Level1)
@@ -218,10 +239,10 @@ HWTEST_F(SqliteUtilsTest, SqliteUtils_Test_0026, TestSize.Level1)
     EXPECT_EQ(0, SqliteUtils::GetFileCount("non_exist_folder"));
     std::string filePath = "/data/test/SqliteUtils_Test_0026";
     std::ofstream src(filePath.c_str(), std::ios::binary);
+    RegisterCleanup(filePath);
     ASSERT_TRUE(src.is_open());
     src.close();
     EXPECT_EQ(0, SqliteUtils::GetFileCount(filePath));
-    std::remove(filePath.c_str());
 }
 
 HWTEST_F(SqliteUtilsTest, SqliteUtils_Test_0027, TestSize.Level1)
@@ -229,6 +250,7 @@ HWTEST_F(SqliteUtilsTest, SqliteUtils_Test_0027, TestSize.Level1)
     std::string filePath = "/data/test/SqliteUtils_Test_0027";
     std::string subPath = filePath + "/bin001";
     RdbSqlUtils::CreateDirectory(filePath);
+    RegisterCleanup(filePath);
     std::ofstream src(subPath.c_str(), std::ios::binary);
     ASSERT_TRUE(src.is_open());
     src.close();
@@ -926,4 +948,192 @@ HWTEST_F(SqliteUtilsTest, AllocateFileSpace004, TestSize.Level1)
     EXPECT_FALSE(f.good());
     f.close();
     std::remove(filePath.c_str());
+}
+
+/**
+ * @tc.name: RdbFileSystem_GetEntries_NestedDirectory_002
+ * @tc.desc: Verify GetEntries returns all entries in a nested directory tree (no regression from loop structure change)
+ * @tc.type: FUNC
+ */
+HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_NestedDirectory_002, TestSize.Level2)
+{
+    // Arrange: create 3-level nested directory tree with files at each level
+    std::string baseDir = "/data/test/rdb_fs_nested_test";
+    std::string subDir = baseDir + "/sub";
+    std::string subSubDir = subDir + "/deep";
+    std::string baseFile = baseDir + "/top.db";
+    std::string subFile = subDir + "/mid.db";
+    std::string deepFile = subSubDir + "/deep.db";
+
+    std::filesystem::remove_all(baseDir);
+    ASSERT_EQ(MkDir(baseDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
+    RegisterCleanup(baseDir);
+    ASSERT_EQ(MkDir(subDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
+    ASSERT_EQ(MkDir(subSubDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
+
+    for (const auto &f : { baseFile, subFile, deepFile }) {
+        int fd = open(f.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+        ASSERT_NE(fd, -1) << "open failed for " << f;
+        close(fd);
+    }
+
+    // Act: GetEntries must traverse all levels — range-for to increment(ec) change must not drop entries
+    auto entries = RdbFileSystem::GetEntries(baseDir);
+
+    // Assert: all 5 entries (2 subdirs + 3 files) are present
+    std::vector<std::string> expected = { baseFile, subDir, subFile, subSubDir, deepFile };
+    std::sort(expected.begin(), expected.end());
+    std::sort(entries.begin(), entries.end());
+    EXPECT_EQ(expected, entries);
+}
+
+/**
+ * @tc.name: RdbFileSystem_GetEntries_NonExistentPath_003
+ * @tc.desc: Verify GetEntries returns empty for a non-existent path without crash
+ * @tc.type: FUNC
+ */
+HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_NonExistentPath_003, TestSize.Level3)
+{
+    std::filesystem::remove_all("/data/test/rdb_fs_nonexistent_xyz");
+    auto entries = RdbFileSystem::GetEntries("/data/test/rdb_fs_nonexistent_xyz");
+
+    // Assert: constructor sets ec and it==end, loop body never executes
+    EXPECT_EQ(entries.size(), static_cast<size_t>(0)) << "non-existent path should return empty";
+}
+
+/**
+ * @tc.name: RdbFileSystem_SetDefaultGid_WithSubdir_004
+ * @tc.desc: Verify SetDefaultGid does not crash when directory tree has nested subdirectories (integration path)
+ * @tc.type: FUNC
+ */
+HWTEST_F(SqliteUtilsTest, RdbFileSystem_SetDefaultGid_WithSubdir_004, TestSize.Level2)
+{
+    // Arrange: create directory tree simulating real RDB layout (db dir + binlog subdir)
+    std::string dbDir = "/data/test/rdb_fs_setgid_test";
+    std::string binlogDir = dbDir + "/binlog";
+    std::string dbFile = dbDir + "/test.db";
+    std::string binlogFile = binlogDir + "/lock";
+
+    std::filesystem::remove_all(dbDir);
+    ASSERT_EQ(MkDir(dbDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
+    RegisterCleanup(dbDir);
+    ASSERT_EQ(MkDir(binlogDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH), 0);
+
+    for (const auto &f : { dbFile, binlogFile }) {
+        int fd = open(f.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+        ASSERT_NE(fd, -1) << "open failed for " << f;
+        close(fd);
+    }
+
+    errno = 0;
+    const auto size = getxattr(dbDir.c_str(), Acl::ACL_XATTR_DEFAULT, nullptr, 0);
+    if (size < 0 && errno == ENOTSUP) {
+        GTEST_SKIP() << "Default ACL is unsupported on this filesystem";
+    }
+    if (size < 0) {
+        ASSERT_EQ(ENODATA, errno) << "Cannot query the default ACL of the test directory";
+    }
+
+    constexpr int32_t groupId = 3012;
+    ASSERT_TRUE(SqliteUtils::SetDbDirGid(dbDir, groupId, true));
+    EXPECT_TRUE(SqliteUtils::HasDefaultAcl(dbDir, groupId));
+    EXPECT_TRUE(SqliteUtils::HasAccessAcl(dbFile, groupId));
+    EXPECT_TRUE(SqliteUtils::HasAccessAcl(binlogDir, groupId));
+    EXPECT_TRUE(SqliteUtils::HasAccessAcl(binlogFile, groupId));
+}
+
+/**
+ * @tc.name: RdbFileSystem_GetEntries_PermissionDenied_005
+ * @tc.desc: Verify GetEntries traverses a readable root with a restricted subdir: child verifies permission denial,
+ * entry set correctness, and normal exit
+ * @tc.type: FUNC
+ */
+HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_PermissionDenied_005, TestSize.Level3)
+{
+    if (geteuid() != 0) {
+        GTEST_SKIP() << "Requires root to prepare a directory for a different UID";
+    }
+    constexpr uid_t testUid = 2000;
+    char baseDir[] = "/data/test/rdb_entries_XXXXXX";
+    ASSERT_NE(nullptr, mkdtemp(baseDir));
+    RegisterCleanup(baseDir);
+    const std::string restricted = std::string(baseDir) + "/restricted";
+    const std::string visible = std::string(baseDir) + "/visible.db";
+    ASSERT_EQ(0, mkdir(restricted.c_str(), S_IRWXU));
+    ASSERT_TRUE(std::ofstream(restricted + "/inner.db").is_open());
+    ASSERT_TRUE(std::ofstream(visible).is_open());
+    ASSERT_EQ(0, chown(baseDir, testUid, static_cast<gid_t>(-1)));
+
+    const pid_t child = fork();
+    ASSERT_GE(child, 0);
+    if (child == 0) {
+        if (chdir(baseDir) != 0 || setuid(testUid) != 0) {
+            _exit(EXIT_FAILURE);
+        }
+        std::error_code ec;
+        std::filesystem::directory_iterator probe("restricted", ec);
+        if (ec != std::errc::permission_denied) {
+            _exit(EXIT_FAILURE);
+        }
+        auto entries = RdbFileSystem::GetEntries(".");
+        std::sort(entries.begin(), entries.end());
+        const std::vector<std::string> expected = { "./restricted", "./visible.db" };
+        _exit(entries == expected ? EXIT_SUCCESS : EXIT_FAILURE);
+    }
+
+    int status = 0;
+    pid_t waited;
+    do {
+        waited = waitpid(child, &status, 0);
+    } while (waited < 0 && errno == EINTR);
+    ASSERT_EQ(child, waited);
+    ASSERT_TRUE(WIFEXITED(status)) << "wait status=" << status;
+}
+
+/**
+ * @tc.name: RdbFileSystem_RemoveAll_PermissionDeniedSubdir_006
+ * @tc.desc: Verify RemoveAll(path, false) deletes accessible entries, skips restricted subdir,
+ * preserves root dir without crash
+ * @tc.type: FUNC
+ */
+HWTEST_F(SqliteUtilsTest, RdbFileSystem_RemoveAll_PermissionDeniedSubdir_006, TestSize.Level3)
+{
+    if (geteuid() != 0) {
+        GTEST_SKIP() << "Requires root to prepare a directory for a different UID";
+    }
+    constexpr uid_t testUid = 2000;
+    char baseDir[] = "/data/test/rdb_remove_XXXXXX";
+    ASSERT_NE(nullptr, mkdtemp(baseDir));
+    RegisterCleanup(baseDir);
+    const std::string restricted = std::string(baseDir) + "/restricted";
+    const std::string visible = std::string(baseDir) + "/visible.db";
+    ASSERT_EQ(0, mkdir(restricted.c_str(), S_IRWXU));
+    ASSERT_TRUE(std::ofstream(restricted + "/inner.db").is_open());
+    ASSERT_TRUE(std::ofstream(visible).is_open());
+    ASSERT_EQ(0, chown(baseDir, testUid, static_cast<gid_t>(-1)));
+
+    const pid_t child = fork();
+    ASSERT_GE(child, 0);
+    if (child == 0) {
+        if (chdir(baseDir) != 0 || setuid(testUid) != 0) {
+            _exit(EXIT_FAILURE);
+        }
+        std::error_code ec;
+        std::filesystem::directory_iterator probe("restricted", ec);
+        if (ec != std::errc::permission_denied) {
+            _exit(EXIT_FAILURE);
+        }
+        const auto result = RdbFileSystem::RemoveAll(".", false);
+        _exit(result.first == 1 ? EXIT_SUCCESS : EXIT_FAILURE);
+    }
+
+    int status = 0;
+    pid_t waited;
+    do {
+        waited = waitpid(child, &status, 0);
+    } while (waited < 0 && errno == EINTR);
+    ASSERT_EQ(child, waited);
+    ASSERT_TRUE(WIFEXITED(status)) << "wait status=" << status;
+    EXPECT_TRUE(std::filesystem::is_directory(baseDir));
+    EXPECT_TRUE(std::filesystem::exists(restricted + "/inner.db"));
 }

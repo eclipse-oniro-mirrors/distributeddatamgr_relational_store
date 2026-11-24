@@ -480,6 +480,94 @@ HWTEST_F(RdbStorePredicateJoinTest, RdbStore_LeftOuterJoin_009, TestSize.Level1)
 
     std::vector<std::string> columns;
     std::shared_ptr<ResultSet> allDataTypes = RdbStorePredicateJoinTest::store->Query(predicates, columns);
-    EXPECT_NE(allDataTypes, nullptr);
+    ASSERT_NE(allDataTypes, nullptr);
     allDataTypes->Close();
+}
+
+/* *
+ * @tc.name: RdbStore_CrossJoin_WithoutCondition_010
+ * @tc.desc: Verify CrossJoin without On()/Using() does not crash in GetJoinClause/Query (SIGSEGV regression)
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbStorePredicateJoinTest, RdbStore_CrossJoin_WithoutCondition_010, TestSize.Level3)
+{
+    // Arrange: CrossJoin without On()/Using() — previously caused SIGSEGV in ProcessJoins
+    RdbPredicates predicates("user");
+    predicates.CrossJoin("book");
+
+    // Act: GetJoinClause previously triggered out-of-bounds access on empty joinConditions
+    std::string joinClause = predicates.GetJoinClause();
+
+    // Assert: clause is valid CROSS JOIN SQL without condition
+    EXPECT_EQ("CROSS JOIN book", joinClause) << "joinClause=" << joinClause;
+
+    // Verify query executes without crash; CROSS JOIN user(5) x book(3) = 15 rows
+    std::vector<std::string> columns;
+    std::shared_ptr<ResultSet> allDataTypes = RdbStorePredicateJoinTest::store->Query(predicates, columns);
+    ASSERT_NE(allDataTypes, nullptr) << "Query returned null for CrossJoin without condition";
+    EXPECT_EQ(15, ResultSize(allDataTypes)) << "CROSS JOIN should produce Cartesian product";
+    allDataTypes->Close();
+}
+
+/**
+ * @tc.name: RdbStore_JoinTypesSizeMismatch_011
+ * @tc.desc: Keep the first join and its ON clause when only one join type remains for two tables.
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbStorePredicateJoinTest, RdbStore_JoinTypesSizeMismatch_011, TestSize.Level3)
+{
+    RdbPredicates predicates("user");
+    predicates.InnerJoin("book")->On({ "user.userId = book.userId" });
+    predicates.CrossJoin("publisher");
+    predicates.SetJoinTypes({ "INNER JOIN" });
+
+    EXPECT_EQ("INNER JOIN book ON(user.userId = book.userId)", predicates.GetJoinClause());
+}
+
+/* *
+ * @tc.name: RdbStore_JoinConditionsShortBySetter_012
+ * @tc.desc: Verify GetJoinClause does not crash when joinConditions is set
+ * shorter than joinTableNames via SetJoinConditions (SIGSEGV regression)
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbStorePredicateJoinTest, RdbStore_JoinConditionsShortBySetter_012, TestSize.Level3)
+{
+    // Arrange: two joins produce joinTableNames of size 2
+    RdbPredicates predicates("user");
+    predicates.CrossJoin("book");
+    predicates.CrossJoin("book");
+
+    // Set joinConditions to size 1 via public setter (simulates NAPI joinConditions setter)
+    std::vector<std::string> shortConditions;
+    shortConditions.push_back("ON(user.userId = book.userId)");
+    predicates.SetJoinConditions(shortConditions);
+
+    // Act: GetJoinClause previously crashed at joinConditions[1] out of bounds
+    std::string joinClause = predicates.GetJoinClause();
+
+    // The second CROSS JOIN is preserved without an ON clause.
+    EXPECT_EQ("CROSS JOIN book ON(user.userId = book.userId) CROSS JOIN book", joinClause)
+        << "joinClause=" << joinClause;
+}
+
+/* *
+ * @tc.name: RdbStore_LastJoinWithoutCondition_013
+ * @tc.desc: Verify GetJoinClause does not crash when the last join lacks On/Using
+ * while prior join has On (SIGSEGV regression at i≠0)
+ * @tc.type: FUNC
+ */
+HWTEST_F(RdbStorePredicateJoinTest, RdbStore_LastJoinWithoutCondition_013, TestSize.Level3)
+{
+    // Arrange: first join has On, second join does not — joinConditions=["ON(...)"], joinTableNames=["a","b"]
+    RdbPredicates predicates("user");
+    std::vector<std::string> clauses;
+    clauses.push_back("user.userId = book.userId");
+    predicates.CrossJoin("book")->On(clauses)->CrossJoin("book");
+
+    // Act: GetJoinClause accesses joinConditions[1] where size()==1 — previously SIGSEGV
+    std::string joinClause = predicates.GetJoinClause();
+
+    // Assert: no crash; first join has ON clause, second join has no condition
+    EXPECT_EQ("CROSS JOIN book ON(user.userId = book.userId) CROSS JOIN book", joinClause)
+        << "joinClause=" << joinClause;
 }
