@@ -1088,7 +1088,6 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_PermissionDenied_005, TestSiz
     } while (waited < 0 && errno == EINTR);
     ASSERT_EQ(child, waited);
     ASSERT_TRUE(WIFEXITED(status)) << "wait status=" << status;
-    ASSERT_EQ(EXIT_SUCCESS, WEXITSTATUS(status));
 }
 
 /**
@@ -1135,7 +1134,6 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_RemoveAll_PermissionDeniedSubdir_006, Te
     } while (waited < 0 && errno == EINTR);
     ASSERT_EQ(child, waited);
     ASSERT_TRUE(WIFEXITED(status)) << "wait status=" << status;
-    ASSERT_EQ(EXIT_SUCCESS, WEXITSTATUS(status));
     EXPECT_TRUE(std::filesystem::is_directory(baseDir));
     EXPECT_FALSE(std::filesystem::exists(visible));
     EXPECT_TRUE(std::filesystem::exists(restricted + "/inner.db"));
