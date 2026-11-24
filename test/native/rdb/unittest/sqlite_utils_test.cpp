@@ -1067,17 +1067,16 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_GetEntries_PermissionDenied_005, TestSiz
     const pid_t child = fork();
     ASSERT_GE(child, 0);
     if (child == 0) {
-        if (chdir(baseDir) != 0 || setuid(testUid) != 0) {
+        if (setuid(testUid) != 0) {
             _exit(EXIT_FAILURE);
         }
-        std::error_code ec;
-        std::filesystem::directory_iterator probe("restricted", ec);
-        if (ec != std::errc::permission_denied) {
+        if (access(restricted.c_str(), R_OK) == 0) {
             _exit(EXIT_FAILURE);
         }
-        auto entries = RdbFileSystem::GetEntries(".");
+        auto entries = RdbFileSystem::GetEntries(baseDir);
         std::sort(entries.begin(), entries.end());
-        const std::vector<std::string> expected = { "./restricted", "./visible.db" };
+        std::vector<std::string> expected = { restricted, visible };
+        std::sort(expected.begin(), expected.end());
         _exit(entries == expected ? EXIT_SUCCESS : EXIT_FAILURE);
     }
 
@@ -1116,15 +1115,13 @@ HWTEST_F(SqliteUtilsTest, RdbFileSystem_RemoveAll_PermissionDeniedSubdir_006, Te
     const pid_t child = fork();
     ASSERT_GE(child, 0);
     if (child == 0) {
-        if (chdir(baseDir) != 0 || setuid(testUid) != 0) {
+        if (setuid(testUid) != 0) {
             _exit(EXIT_FAILURE);
         }
-        std::error_code ec;
-        std::filesystem::directory_iterator probe("restricted", ec);
-        if (ec != std::errc::permission_denied) {
+        if (access(restricted.c_str(), R_OK) == 0) {
             _exit(EXIT_FAILURE);
         }
-        const auto result = RdbFileSystem::RemoveAll(".", false);
+        const auto result = RdbFileSystem::RemoveAll(baseDir, false);
         _exit(result.first == 1 ? EXIT_SUCCESS : EXIT_FAILURE);
     }
 
