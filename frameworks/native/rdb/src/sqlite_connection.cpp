@@ -2295,8 +2295,7 @@ int SqliteConnection::VerifySlaveIntegrity(const bool isForceRestore)
         return E_SQLITE_CORRUPT;
     }
     Suspender suspender(Suspender::SQL_LOG);
-    std::string sql = "SELECT COUNT(*) FROM sqlite_master WHERE type='table';";
-    auto [err, obj] = slaveConnection_->ExecuteForValue(sql);
+    auto [err, obj] = slaveConnection_->ExecuteForValue(QUERY_TABLE_COUNT_SQL);
     auto val = std::get_if<int64_t>(&obj.value);
     if (err == E_SQLITE_CORRUPT || (val != nullptr && static_cast<int64_t>(*val) == 0L)) {
         LOG_ERROR("slave %{public}d", err);
@@ -2305,11 +2304,9 @@ int SqliteConnection::VerifySlaveIntegrity(const bool isForceRestore)
 
     int64_t mCount = 0L;
     if (dbHandle_ != nullptr) {
-        std::tie(err, obj) = ExecuteForValue(sql);
+        std::tie(err, obj) = ExecuteForValue(QUERY_TABLE_COUNT_SQL);
         val = std::get_if<int64_t>(&obj.value);
-        if (val != nullptr) {
-            mCount = static_cast<int64_t>(*val);
-        }
+        mCount = (val != nullptr) ? *val : 0L;
     }
     ssize_t slaveSize = 0;
     if (SqliteUtils::IsSupportBinlog(config_)) {
@@ -2325,11 +2322,9 @@ int SqliteConnection::VerifySlaveIntegrity(const bool isForceRestore)
     std::tie(err, obj) = slaveConnection_->ExecuteForValue(INTEGRITIES[2]); // 2 is integrity_check
     if (err == E_OK && (static_cast<std::string>(obj) != "ok")) {
         std::string integrityRet = static_cast<std::string>(obj);
-        LOG_ERROR("slave corrupt, ret:%{public}s, cRet:%{public}d, %{public}d", integrityRet.c_str(),
-            err, errno);
-        std::string appendix = "Slave Check, integrityCheck:" + integrityRet +
-            ", errCode:" + std::to_string(err) + ", errno:" + std::to_string(errno);
-        auto event = Reportor::Create(slaveCfg, E_DFX_SLAVE_CORRUPT, appendix, false, true);
+        LOG_ERROR("slave corrupt, ret:%{public}s, cRet:%{public}d, %{public}d", integrityRet.c_str(), err, errno);
+        auto event = Reportor::Create(slaveCfg, E_DFX_SLAVE_CORRUPT, "Slave Check, integrityCheck:" + integrityRet +
+            ", errCode:" + std::to_string(err) + ", errno:" + std::to_string(errno), false, true);
         event.subCaseDesc = RdbSubCase::BOTH_FAIL;
         Reportor::ReportSlaveCorruptWithMasterCheck(event, config_, "master and slave both corrupt");
         SqliteUtils::SetSlaveInvalid(config_.GetPath(), SqliteUtils::SlaveInvalidReason::VERIFY_FAILED);
