@@ -40,7 +40,21 @@ void NapiCloudSyncInfoObserver::OnSyncInfoChanged(const std::map<std::string, Qu
     if (uvQueue == nullptr) {
         return;
     }
-    uvQueue->AsyncCallInOrder({ callback_, true },
+    napi_ref callback = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (callback_ == nullptr) {
+            return;
+        }
+        napi_value value = nullptr;
+        if (napi_get_reference_value(env_, callback_, &value) != napi_ok || value == nullptr) {
+            return;
+        }
+        if (napi_create_reference(env_, value, 1, &callback) != napi_ok) {
+            return;
+        }
+    }
+    uvQueue->AsyncCallInOrder({ callback, false },
         [observer = shared_from_this(), data](napi_env env, int &argc, napi_value *argv) {
             argc = 1;
             argv[0] = JSUtils::Convert2JSValue(env, data);
@@ -53,7 +67,21 @@ void NapiCloudSyncInfoObserver::OnSyncInfoChanged(const int32_t mode)
     if (uvQueue == nullptr) {
         return;
     }
-    uvQueue->AsyncCallInOrder({ callback_, true },
+    napi_ref callback = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (callback_ == nullptr) {
+            return;
+        }
+        napi_value value = nullptr;
+        if (napi_get_reference_value(env_, callback_, &value) != napi_ok || value == nullptr) {
+            return;
+        }
+        if (napi_create_reference(env_, value, 1, &callback) != napi_ok) {
+            return;
+        }
+    }
+    uvQueue->AsyncCallInOrder({ callback, false },
         [observer = shared_from_this(), mode](napi_env env, int &argc, napi_value *argv) {
             argc = 1;
             napi_value jsValue = nullptr;
@@ -70,6 +98,7 @@ void NapiCloudSyncInfoObserver::OnSyncInfoChanged(const int32_t mode)
 
 bool NapiCloudSyncInfoObserver::operator==(napi_value value)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (callback_ == nullptr) {
         return false;
     }
@@ -91,6 +120,7 @@ bool NapiCloudSyncInfoObserver::operator==(napi_value value)
 
 void NapiCloudSyncInfoObserver::Clear()
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (callback_ == nullptr) {
         return;
     }

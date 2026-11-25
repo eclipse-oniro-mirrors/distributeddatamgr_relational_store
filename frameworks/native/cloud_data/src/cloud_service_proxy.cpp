@@ -352,9 +352,12 @@ void CloudServiceProxy::OnCloudSyncTrigger(int32_t triggerMode)
     CloudSyncScene scene = static_cast<CloudSyncScene>(triggerMode);
     
     std::vector<std::shared_ptr<ISyncInfoObserver>> notifyObservers;
-    for (const auto &obs : cloudSyncTriggerObservers_) {
-        if (obs != nullptr) {
-            notifyObservers.push_back(obs);
+    {
+        std::lock_guard<std::mutex> lock(cloudSyncTriggerObserversMutex_);
+        for (const auto &obs : cloudSyncTriggerObservers_) {
+            if (obs != nullptr) {
+                notifyObservers.push_back(obs);
+            }
         }
     }
     for (const auto &obs : notifyObservers) {
@@ -392,7 +395,10 @@ int32_t CloudServiceProxy::SubscribeCloudSyncTrigger(std::shared_ptr<ISyncInfoOb
     if (DoSubscribeCloudSyncTrigger() != SUCCESS) {
         return ERROR;
     }
-    cloudSyncTriggerObservers_.push_back(observer);
+    {
+        std::lock_guard<std::mutex> lock(cloudSyncTriggerObserversMutex_);
+        cloudSyncTriggerObservers_.push_back(observer);
+    }
     return SUCCESS;
 }
 
@@ -406,11 +412,14 @@ int32_t CloudServiceProxy::UnSubscribeCloudSyncTrigger(std::shared_ptr<ISyncInfo
         return ERROR;
     }
 
-    for (auto obs = cloudSyncTriggerObservers_.begin(); obs != cloudSyncTriggerObservers_.end();) {
-        if (obs->get() == observer.get()) {
-            obs = cloudSyncTriggerObservers_.erase(obs);
-        } else {
-            ++obs;
+    {
+        std::lock_guard<std::mutex> lock(cloudSyncTriggerObserversMutex_);
+        for (auto obs = cloudSyncTriggerObservers_.begin(); obs != cloudSyncTriggerObservers_.end();) {
+            if (obs->get() == observer.get()) {
+                obs = cloudSyncTriggerObservers_.erase(obs);
+            } else {
+                ++obs;
+            }
         }
     }
     return SUCCESS;

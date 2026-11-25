@@ -529,37 +529,63 @@ void ConfigImpl::OnSyncInfoChanged(array_view<::ohos::data::cloudData::BundleInf
         nativeBundleInfos.push_back(nativeInfo);
     }
     TaiheSyncInfoCallback holder = progress;
-    std::vector<OHOS::CloudData::BundleInfo> toSubscribe = CollectSubscribeInfos(nativeBundleInfos, holder);
+    auto observer = std::make_shared<TaiheCloudSyncInfoObserver>(holder);
+    std::vector<OHOS::CloudData::BundleInfo> toSubscribe;
+    {
+        // Deduplicate and register in the same critical section so concurrent calls cannot
+        // both pass the duplicate check before either inserts.
+        std::lock_guard<std::mutex> lock(syncInfoObserversMutex_);
+        toSubscribe = CollectSubscribeInfos(nativeBundleInfos, holder);
+        for (auto &bundleInfo : toSubscribe) {
+            syncInfoObservers_[bundleInfo.bundleName][bundleInfo.storeId].push_back(observer);
+        }
+    }
     if (toSubscribe.empty()) {
         LOG_DEBUG("Duplicate subscribe for sync info changed.");
         return;
     }
-    auto observer = std::make_shared<TaiheCloudSyncInfoObserver>(holder);
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     if (proxy == nullptr) {
         if (state != CloudService::SERVER_UNAVAILABLE) {
             state = CloudService::NOT_SUPPORT;
         }
         LOG_ERROR("proxy is NULL");
+        RollbackSyncInfoObservers(observer, toSubscribe);
         ThrowAniError(state);
         return;
     }
     auto status = proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, toSubscribe, observer);
     if (status != CloudService::Status::SUCCESS) {
         LOG_ERROR("Subscribe failed, errcode = %{public}d", status);
+        RollbackSyncInfoObservers(observer, toSubscribe);
         ThrowAniError(status);
         return;
     }
+}
+
+void ConfigImpl::RollbackSyncInfoObservers(
+    const std::shared_ptr<TaiheCloudSyncInfoObserver> &observer,
+    const std::vector<OHOS::CloudData::BundleInfo> &toSubscribe)
+{
     std::lock_guard<std::mutex> lock(syncInfoObserversMutex_);
     for (auto &bundleInfo : toSubscribe) {
-        syncInfoObservers_[bundleInfo.bundleName][bundleInfo.storeId].push_back(observer);
+        auto bundleIt = syncInfoObservers_.find(bundleInfo.bundleName);
+        if (bundleIt == syncInfoObservers_.end()) {
+            continue;
+        }
+        auto storeIt = bundleIt->second.find(bundleInfo.storeId);
+        if (storeIt == bundleIt->second.end()) {
+            continue;
+        }
+        auto &observers = storeIt->second;
+        observers.erase(std::remove(observers.begin(), observers.end(), observer), observers.end());
     }
 }
 
 std::vector<OHOS::CloudData::BundleInfo> ConfigImpl::CollectSubscribeInfos(
     const std::vector<OHOS::CloudData::BundleInfo> &toSubscribe, const TaiheSyncInfoCallback &callback)
 {
-    std::lock_guard<std::mutex> lock(syncInfoObserversMutex_);
+    // Caller must hold syncInfoObserversMutex_
     std::vector<OHOS::CloudData::BundleInfo> result;
     for (const auto &info : toSubscribe) {
         auto bundleIt = syncInfoObservers_.find(info.bundleName);
@@ -727,36 +753,49 @@ void SetCloudStrategyImpl(StrategyType strategy, optional_view<array<::ohos::dat
 void ConfigImpl::OnAutoSyncTrigger(::taihe::callback_view<void(TaiheCloudSyncTriggerInfo const& data)> observer)
 {
     TaiheSyncTriggerCallback holder = observer;
+    auto obs = std::make_shared<TaiheCloudSyncTriggerObserver>(observer);
     {
+        // Deduplicate and register in the same critical section so concurrent calls cannot
+        // both pass the duplicate check before either inserts.
         std::lock_guard<std::mutex> lock(autoSyncTriggerObserversMutex_);
         bool isDuplicate = std::any_of(autoSyncTriggerObservers_.begin(), autoSyncTriggerObservers_.end(),
-            [&holder](const std::shared_ptr<TaiheCloudSyncTriggerObserver> &obs) {
-                return *obs == holder;
+            [&holder](const std::shared_ptr<TaiheCloudSyncTriggerObserver> &item) {
+                return *item == holder;
             });
         if (isDuplicate) {
             LOG_DEBUG("Duplicate subscribe for auto sync trigger.");
             return;
         }
+        autoSyncTriggerObservers_.push_back(obs);
     }
 
-    auto obs = std::make_shared<TaiheCloudSyncTriggerObserver>(observer);
+    auto rollback = [&obs]() {
+        std::lock_guard<std::mutex> lock(autoSyncTriggerObserversMutex_);
+        auto it = std::find_if(autoSyncTriggerObservers_.begin(), autoSyncTriggerObservers_.end(),
+            [&obs](const std::shared_ptr<TaiheCloudSyncTriggerObserver> &item) {
+                return item.get() == obs.get();
+            });
+        if (it != autoSyncTriggerObservers_.end()) {
+            autoSyncTriggerObservers_.erase(it);
+        }
+    };
     auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
     if (proxy == nullptr) {
         if (state != CloudService::SERVER_UNAVAILABLE) {
             state = CloudService::NOT_SUPPORT;
         }
         LOG_ERROR("proxy is NULL");
+        rollback();
         ThrowAniError(state);
         return;
     }
     auto status = proxy->SubscribeCloudSyncTrigger(obs);
     if (status != CloudService::Status::SUCCESS) {
         LOG_ERROR("SubscribeCloudSyncTrigger failed, errcode = %{public}d", status);
+        rollback();
         ThrowAniError(status);
         return;
     }
-    std::lock_guard<std::mutex> lock(autoSyncTriggerObserversMutex_);
-    autoSyncTriggerObservers_.push_back(obs);
 }
 
 void ConfigImpl::OffAutoSyncTrigger(

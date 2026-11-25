@@ -15,6 +15,7 @@
 #ifndef OH_DATA_UTILS_H
 #define OH_DATA_UTILS_H
 
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include "oh_rdb_types.h"
@@ -38,8 +39,8 @@ private:
         bool Marshal(json &node) const override;
         bool Unmarshal(const json &node) override;
     };
-    static bool isInited_;
-    static bool flag_;
+    static std::atomic<bool> isInited_;
+    static std::atomic<bool> flag_;
     static std::mutex mutex_;
 };
 } // namespace OHOS::RdbNdk

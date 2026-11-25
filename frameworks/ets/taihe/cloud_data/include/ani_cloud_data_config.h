@@ -111,6 +111,9 @@ private:
         const std::vector<OHOS::CloudData::BundleInfo> &toSubscribe, const TaiheSyncInfoCallback &callback);
     static UnsubscribeInfo CollectUnsubscribeInfos(const std::vector<OHOS::CloudData::BundleInfo> &toUnsubscribe,
         optional_view<callback<void(map_view<string, map<string, SyncInfo>> data)>> progress);
+    static void RollbackSyncInfoObservers(
+        const std::shared_ptr<TaiheCloudSyncInfoObserver> &observer,
+        const std::vector<OHOS::CloudData::BundleInfo> &toSubscribe);
     static std::mutex syncInfoObserversMutex_;
     static std::map<std::string, std::map<std::string, std::vector<std::shared_ptr<TaiheCloudSyncInfoObserver>>>>
         syncInfoObservers_;
