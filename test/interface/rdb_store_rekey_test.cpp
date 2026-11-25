@@ -426,13 +426,10 @@ HWTEST_F(RdbInterfaceRekeyTest, Rdb_Rekey_07, TestSize.Level1)
     ASSERT_EQ(errCode, E_OK);
 
     std::string keyPath = encryptedDatabaseKeyDir + RemoveSuffix(encryptedDatabaseName) + ".pub_key_v2";
-    bool isFileExists = OHOS::FileExists(keyPath);
-    ASSERT_TRUE(isFileExists);
-    struct stat fileStat;
-    ino_t inodeNumber1 = -1;
-    if (stat(keyPath.c_str(), &fileStat) == 0) {
-        inodeNumber1 = fileStat.st_ino;
-    }
+    ASSERT_TRUE(OHOS::FileExists(keyPath));
+    std::vector<char> keyContentBefore;
+    ASSERT_TRUE(OHOS::LoadBufferFromFile(keyPath, keyContentBefore));
+    ASSERT_FALSE(keyContentBefore.empty());
     store = nullptr;
 
     {
@@ -443,14 +440,17 @@ HWTEST_F(RdbInterfaceRekeyTest, Rdb_Rekey_07, TestSize.Level1)
     }
 
     store = RdbHelper::GetRdbStore(config, 1, helper, errCode);
-    isFileExists = OHOS::FileExists(keyPath);
-    ASSERT_TRUE(isFileExists);
-    ino_t inodeNumber2 = -1;
-    if (stat(keyPath.c_str(), &fileStat) == 0) {
-        inodeNumber2 = fileStat.st_ino;
-    }
+    ASSERT_NE(store, nullptr);
+    ASSERT_EQ(errCode, E_OK);
+    ASSERT_TRUE(OHOS::FileExists(keyPath));
+    std::vector<char> keyContentAfter;
+    ASSERT_TRUE(OHOS::LoadBufferFromFile(keyPath, keyContentAfter));
+    ASSERT_FALSE(keyContentAfter.empty());
 
-    ASSERT_NE(inodeNumber1, inodeNumber2);
+    // The key file is deleted and regenerated on rebuild, so the content (random
+    // work key + nonce) must differ. Do not compare inodes: the filesystem may
+    // reuse the just-freed inode for the new file, which makes the check flaky.
+    EXPECT_NE(keyContentBefore, keyContentAfter) << "key file was not regenerated after rebuild";
 }
 
 /**
