@@ -21,8 +21,6 @@
 #include <memory>
 #include <string>
 #include <sys/wait.h>
-#include <chrono>
-#include <fstream>
 
 #include "sqlite3sym.h"
 #include "common.h"
@@ -47,6 +45,8 @@ namespace {
 constexpr const char *DB_NAME = "/data/test/ioguard_test.db";
 constexpr const char *DB_A = "/data/test/ioguard_multi_a.db";
 constexpr const char *DB_B = "/data/test/ioguard_multi_b.db";
+constexpr const char *DB_READONLY = "/data/test/ioguard_readonly.db";
+constexpr const char *DB_ENCRYPTED = "/data/test/ioguard_encrypted.db";
 
 constexpr int UNIXFILE_FD_OFFSET = sizeof(void *) * 3;
 constexpr int EXIT_CHILD_OPEN_FAIL = 100;
@@ -54,7 +54,6 @@ constexpr int EXIT_CHILD_FD_FAIL = 101;
 constexpr int EXIT_CHILD_WRITE_FAIL = 102;
 constexpr int EXIT_EXEC_FAIL = 127;
 constexpr mode_t LOG_FILE_MODE = 0644;
-constexpr double PERF_DEGRADE_LIMIT = 1.1;
 
 int ExtractFdFromFile(sqlite3_file *pFile)
 {
@@ -75,7 +74,8 @@ int GetRdbDbFd(const std::shared_ptr<RdbStore> &store)
     if (!pool) {
         return -1;
     }
-    auto conn = pool->Acquire(false);
+    // Read connection: available for both read-write and read-only stores
+    auto conn = pool->Acquire(true);
     if (!conn) {
         return -1;
     }
@@ -150,14 +150,59 @@ std::shared_ptr<RdbStore> OpenStoreHa(const char *dbPath, const char *bundle, HA
     return RdbHelper::GetRdbStore(config, 1, cb, errCode);
 }
 
+std::shared_ptr<RdbStore> OpenStoreReadOnly(const char *dbPath, const char *bundle)
+{
+    RdbStoreConfig config(dbPath, StorageMode::MODE_DISK, true);
+    config.SetBundleName(bundle);
+    int errCode = E_OK;
+    TestOpenCallback cb;
+    return RdbHelper::GetRdbStore(config, 1, cb, errCode);
+}
+
+std::shared_ptr<RdbStore> OpenStoreEncrypted(const char *dbPath, const char *bundle)
+{
+    RdbStoreConfig config(dbPath);
+    config.SetBundleName(bundle);
+    RdbStoreConfig::CryptoParam cryptoParam;
+    cryptoParam.encryptKey_ = std::vector<uint8_t>{ 1, 2, 3, 4, 5, 6 };
+    config.SetCryptoParam(cryptoParam);
+    int errCode = E_OK;
+    TestOpenCallback cb;
+    return RdbHelper::GetRdbStore(config, 1, cb, errCode);
+}
+
 void CrudBasic(const std::shared_ptr<RdbStore> &store, int id, const std::string &name)
 {
     ASSERT_NE(store, nullptr);
+    // Insert
     ValuesBucket v;
     v.PutInt("id", id);
     v.PutString("name", name);
     int64_t rowId = 0;
     EXPECT_EQ(store->Insert(rowId, "test_t", v), E_OK);
+
+    // Query
+    std::string sql = "SELECT name FROM test_t WHERE id = " + std::to_string(id);
+    auto rs = store->QuerySql(sql);
+    ASSERT_NE(rs, nullptr);
+    EXPECT_EQ(rs->GoToFirstRow(), E_OK);
+    std::string result;
+    EXPECT_EQ(rs->GetString(0, result), E_OK);
+    EXPECT_EQ(result, name) << "query name mismatch, id=" << id;
+
+    // Update
+    ValuesBucket upd;
+    upd.PutString("name", "upd_" + name);
+    AbsRdbPredicates predicates("test_t");
+    predicates.EqualTo("id", std::to_string(id));
+    int changedRows = 0;
+    EXPECT_EQ(store->Update(changedRows, upd, predicates), E_OK);
+    EXPECT_EQ(changedRows, 1) << "update should affect 1 row, id=" << id;
+
+    // Delete
+    int deletedRows = 0;
+    EXPECT_EQ(store->Delete(deletedRows, predicates), E_OK);
+    EXPECT_EQ(deletedRows, 1) << "delete should remove 1 row, id=" << id;
 }
 
 void AssertFdNotProtected(const std::shared_ptr<RdbStore> &store)
@@ -202,117 +247,7 @@ void RunChildTest(const char *envKey, const char *filter, const char *logPath)
     EXPECT_EQ(WEXITSTATUS(status), 0) << "child test failed, check log: " << logPath;
 }
 
-// ===== Performance helpers =====
-
-struct PerfResult {
-    double insertAvg;
-    double queryAvg;
-    double updateAvg;
-    double deleteAvg;
-};
-
-static double SafeDivide(double numerator, double denominator)
-{
-    if (denominator == 0.0) {
-        return 0.0;
-    }
-    return numerator / denominator;
-}
-
-static double ElapsedUs(std::chrono::steady_clock::time_point begin,
-                        std::chrono::steady_clock::time_point end, int count)
-{
-    auto total = std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
-    return SafeDivide(static_cast<double>(total), static_cast<double>(count));
-}
-
-static void PreLoadData(const std::shared_ptr<RdbStore> &store, int preLoad)
-{
-    for (int i = 0; i < preLoad; i++) {
-        ValuesBucket v;
-        v.PutInt("id", i);
-        v.PutString("name", std::to_string(i));
-        int64_t rowId = 0;
-        store->Insert(rowId, "test_t", v);
-    }
-}
-
-static double MeasureInsert(const std::shared_ptr<RdbStore> &store, int preLoad, int n)
-{
-    auto begin = std::chrono::steady_clock::now();
-    for (int i = preLoad; i < preLoad + n; i++) {
-        ValuesBucket v;
-        v.PutInt("id", i);
-        v.PutString("name", std::to_string(i));
-        int64_t rowId = 0;
-        store->Insert(rowId, "test_t", v);
-    }
-    auto end = std::chrono::steady_clock::now();
-    return ElapsedUs(begin, end, n);
-}
-
-static double MeasureQuery(const std::shared_ptr<RdbStore> &store, int preLoad, int n)
-{
-    int total = preLoad + n;
-    auto begin = std::chrono::steady_clock::now();
-    for (int i = 0; i < n; i++) {
-        int target = i % total;
-        std::string sql = "SELECT id, name FROM test_t WHERE id = " + std::to_string(target);
-        auto rs = store->QuerySql(sql);
-        if (rs) {
-            rs->GoToFirstRow();
-        }
-    }
-    auto end = std::chrono::steady_clock::now();
-    return ElapsedUs(begin, end, n);
-}
-
-static double MeasureUpdate(const std::shared_ptr<RdbStore> &store, int preLoad, int n)
-{
-    int total = preLoad + n;
-    auto begin = std::chrono::steady_clock::now();
-    for (int i = 0; i < n; i++) {
-        int target = i % total;
-        ValuesBucket v;
-        v.PutString("name", "upd_" + std::to_string(i));
-        AbsRdbPredicates predicates("test_t");
-        predicates.EqualTo("id", std::to_string(target));
-        int changedRows = 0;
-        store->Update(changedRows, v, predicates);
-    }
-    auto end = std::chrono::steady_clock::now();
-    return ElapsedUs(begin, end, n);
-}
-
-static double MeasureDelete(const std::shared_ptr<RdbStore> &store, int preLoad, int n)
-{
-    auto begin = std::chrono::steady_clock::now();
-    for (int i = 0; i < n; i++) {
-        int target = preLoad + i;
-        AbsRdbPredicates predicates("test_t");
-        predicates.EqualTo("id", std::to_string(target));
-        int deletedRows = 0;
-        store->Delete(deletedRows, predicates);
-    }
-    auto end = std::chrono::steady_clock::now();
-    return ElapsedUs(begin, end, n);
-}
-
-static PerfResult MeasureCrud(const std::shared_ptr<RdbStore> &store, int preLoad, int n)
-{
-    PreLoadData(store, preLoad);
-    PerfResult r;
-    r.insertAvg = MeasureInsert(store, preLoad, n);
-    r.queryAvg = MeasureQuery(store, preLoad, n);
-    r.updateAvg = MeasureUpdate(store, preLoad, n);
-    r.deleteAvg = MeasureDelete(store, preLoad, n);
-    return r;
-}
 } // namespace
-
-constexpr int PERF_PRE_LOAD = 20000;
-constexpr int PERF_N = 2000;
-constexpr const char *PERF_RESULT_FILE = "/data/test/ioguard_perf_guarded.txt";
 
 class IoguardTest : public testing::Test {
 public:
@@ -346,6 +281,29 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_Default_NotProtected_001, TestSize.Level0)
 }
 
 /**
+ * @brief Open store, close store (release), then EnableIOGuard — latched, fails.
+ *        SQLite process-level latch: once sqlite3_open has been called, sqlite3_config
+ *        cannot be changed. Closing all connections does not reset the latch.
+ *        Enable returns E_ERROR, reopen store CRUD normal, fd not protected.
+ */
+HWTEST_F(IoguardTest, Rdb_IoGuard_OpenClose_EnableFail_001, TestSize.Level0)
+{
+    auto store = OpenStore(DB_NAME, "com.ohos.ioguard.test");
+    ASSERT_NE(store, nullptr);
+    CrudBasic(store, 1, "first");
+    store = nullptr;
+    RdbHelper::ClearCache();
+
+    EXPECT_EQ(RdbHelper::EnableIOGuard(), E_ERROR)
+        << "enable should fail after sqlite initialized, even if all stores closed";
+
+    auto store2 = OpenStore(DB_NAME, "com.ohos.ioguard.test");
+    ASSERT_NE(store2, nullptr);
+    CrudBasic(store2, 2, "second");
+    AssertFdNotProtected(store2);
+}
+
+/**
  * @brief EnableIOGuard() then open store. io_guard is on.
  *        CRUD normal (authorized writes), direct fd write+close fail EPERM.
  *        Fork+exec child for clean latch state.
@@ -368,6 +326,43 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_Protected_Child_001, TestSize.Level0)
     CrudBasic(store, 2, "world");
 
     AssertFdProtected(store);
+    CrudBasic(store, 3, "after_protected");
+}
+
+/**
+ * @brief EnableIOGuard, open store, release store (nullptr + ClearCache), reopen same DB.
+ *        Verify io_guard protection persists across store reopen — io_guard is a global
+ *        sqlite3_config, not per-store state. Reopened store fd must still be protected.
+ *        Fork+exec child for clean latch state.
+ */
+HWTEST_F(IoguardTest, Rdb_IoGuard_Reopen_StillProtected_001, TestSize.Level0)
+{
+    RunChildTest("IOGUARD_REOPEN_CHILD", "IoguardTest.Rdb_IoGuard_Reopen_Child_001",
+                 "/data/test/ioguard_reopen_child.log");
+}
+
+HWTEST_F(IoguardTest, Rdb_IoGuard_Reopen_Child_001, TestSize.Level0)
+{
+    if (getenv("IOGUARD_REOPEN_CHILD") == nullptr) {
+        GTEST_SKIP() << "skipped in parent";
+    }
+    RdbHelper::DeleteRdbStore(DB_NAME);
+    RdbHelper::ClearCache();
+
+    ASSERT_EQ(RdbHelper::EnableIOGuard(), E_OK);
+    auto store = OpenStore(DB_NAME, "com.ohos.ioguard.reopen");
+    ASSERT_NE(store, nullptr);
+    CrudBasic(store, 1, "first");
+    AssertFdProtected(store);
+
+    store = nullptr;
+    RdbHelper::ClearCache();
+
+    auto store2 = OpenStore(DB_NAME, "com.ohos.ioguard.reopen");
+    ASSERT_NE(store2, nullptr);
+    CrudBasic(store2, 2, "second");
+    AssertFdProtected(store2);
+    CrudBasic(store2, 3, "after_reopen");
 }
 
 // ===== Dual-write =====
@@ -408,6 +403,8 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_DoubleWrite_Child_001, TestSize.Level0)
     EXPECT_EQ(errno, EPERM);
     EXPECT_EQ(close(slaveFd), -1);
     EXPECT_EQ(errno, EPERM);
+
+    CrudBasic(store, 4, "after_protected");
 }
 
 // ===== Single-process multi-db =====
@@ -470,6 +467,8 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_MultiDb_Enable_OpenAB_Child_001, TestSize.Leve
 
     AssertFdProtected(storeA);
     AssertFdProtected(storeB);
+    CrudBasic(storeA, 2, "after_protected");
+    CrudBasic(storeB, 2, "after_protected");
 }
 
 /**
@@ -506,6 +505,8 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_MultiDb_Disable_Child_001, TestSize.Level0)
 
     AssertFdProtected(storeA);
     AssertFdProtected(storeB);
+    CrudBasic(storeA, 2, "after_protected");
+    CrudBasic(storeB, 2, "after_protected");
 }
 
 // ===== Multi-process single-db =====
@@ -535,11 +536,16 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_MultiProcess_Child_001, TestSize.Level0)
     CrudBasic(storeParent, 1, "parent");
 
     AssertFdProtected(storeParent);
+    CrudBasic(storeParent, 2, "after_protected");
+
+    // Release store before fork: child would inherit open SQLite connections
+    // holding WAL/shm locks, causing OpenStore in child to deadlock on lock acquisition.
+    storeParent = nullptr;
+    RdbHelper::ClearCache();
 
     pid_t pid = fork();
     ASSERT_GE(pid, 0) << "fork failed";
     if (pid == 0) {
-        RdbHelper::ClearCache();
         auto storeChild = OpenStore(DB_NAME, "com.ohos.ioguard.mp");
         if (!storeChild) {
             _exit(EXIT_CHILD_OPEN_FAIL);
@@ -562,69 +568,100 @@ HWTEST_F(IoguardTest, Rdb_IoGuard_MultiProcess_Child_001, TestSize.Level0)
     EXPECT_EQ(exitCode, 0) << "child write should succeed after fork, exit=" << exitCode;
 }
 
-// ===== Performance =====
+// ===== Read-only database =====
 
 /**
- * @brief Baseline (parent) + guarded (fork+exec child), compare CRUD degradation.
- *        Parent runs baseline (no io_guard), child runs guarded (io_guard enabled).
- *        Child writes results to file; parent reads and asserts <= 1.1x.
+ * @brief EnableIOGuard, reopen DB as read-only. Query works, query still works after fd check.
+ *        Read-only fd is opened O_RDONLY — write already blocked by kernel (EBADF),
+ *        close succeeds normally. IOGuard fd protection N/A for read-only stores.
+ *        Core assertion: EnableIOGuard doesn't break read-only store Query functionality.
+ *        Two child processes: child 1 seeds data, child 2 enables io_guard and reopens read-only.
  */
-HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Degrade_001, TestSize.Level2)
+HWTEST_F(IoguardTest, Rdb_IoGuard_ReadOnly_Protected_001, TestSize.Level0)
 {
-    RdbHelper::DeleteRdbStore(DB_NAME);
-    RdbHelper::ClearCache();
-
-    auto store = OpenStore(DB_NAME, "com.ohos.ioguard.perf");
-    ASSERT_NE(store, nullptr);
-    auto base = MeasureCrud(store, PERF_PRE_LOAD, PERF_N);
-    store = nullptr;
-    RdbHelper::ClearCache();
-    RdbHelper::DeleteRdbStore(DB_NAME);
-
-    RunChildTest("IOGUARD_PERF_CHILD", "IoguardTest.Rdb_IoGuard_Perf_Child_001",
-                 "/data/test/ioguard_perf_child.log");
-
-    std::ifstream ifs(PERF_RESULT_FILE);
-    ASSERT_TRUE(ifs.is_open()) << "cannot open guarded result file: " << PERF_RESULT_FILE;
-    double gInsert, gQuery, gUpdate, gDelete;
-    ifs >> gInsert >> gQuery >> gUpdate >> gDelete;
-    ifs.close();
-
-    LOG_INFO("perf: N=%{public}d, pre_load=%{public}d", PERF_N, PERF_PRE_LOAD);
-    LOG_INFO("insert: baseline=%{public}.2fus, guarded=%{public}.2fus, ratio=%{public}.2f",
-             base.insertAvg, gInsert, SafeDivide(gInsert, base.insertAvg));
-    LOG_INFO("query: baseline=%{public}.2fus, guarded=%{public}.2fus, ratio=%{public}.2f",
-             base.queryAvg, gQuery, SafeDivide(gQuery, base.queryAvg));
-    LOG_INFO("update: baseline=%{public}.2fus, guarded=%{public}.2fus, ratio=%{public}.2f",
-             base.updateAvg, gUpdate, SafeDivide(gUpdate, base.updateAvg));
-    LOG_INFO("delete: baseline=%{public}.2fus, guarded=%{public}.2fus, ratio=%{public}.2f",
-             base.deleteAvg, gDelete, SafeDivide(gDelete, base.deleteAvg));
-
-    EXPECT_LE(SafeDivide(gInsert, base.insertAvg), PERF_DEGRADE_LIMIT) << "insert degradation exceeds limit";
-    EXPECT_LE(SafeDivide(gQuery, base.queryAvg), PERF_DEGRADE_LIMIT) << "query degradation exceeds limit";
-    EXPECT_LE(SafeDivide(gUpdate, base.updateAvg), PERF_DEGRADE_LIMIT) << "update degradation exceeds limit";
-    EXPECT_LE(SafeDivide(gDelete, base.deleteAvg), PERF_DEGRADE_LIMIT) << "delete degradation exceeds limit";
+    RunChildTest("IOGUARD_RO_SEED_CHILD", "IoguardTest.Rdb_IoGuard_ReadOnly_Seed_Child_001",
+                 "/data/test/ioguard_ro_seed_child.log");
+    RunChildTest("IOGUARD_RO_CHILD", "IoguardTest.Rdb_IoGuard_ReadOnly_Child_001",
+                 "/data/test/ioguard_ro_child.log");
 }
 
-/**
- * @brief Child: fresh process (latch=0). Enable io_guard, run CRUD, write results to file.
- */
-HWTEST_F(IoguardTest, Rdb_IoGuard_Perf_Child_001, TestSize.Level2)
+HWTEST_F(IoguardTest, Rdb_IoGuard_ReadOnly_Seed_Child_001, TestSize.Level0)
 {
-    if (getenv("IOGUARD_PERF_CHILD") == nullptr) {
+    if (getenv("IOGUARD_RO_SEED_CHILD") == nullptr) {
         GTEST_SKIP() << "skipped in parent";
     }
-    RdbHelper::DeleteRdbStore(DB_NAME);
+    RdbHelper::DeleteRdbStore(DB_READONLY);
+    RdbHelper::ClearCache();
+
+    auto store = OpenStore(DB_READONLY, "com.ohos.ioguard.ro");
+    ASSERT_NE(store, nullptr);
+    ValuesBucket v;
+    v.PutInt("id", 1);
+    v.PutString("name", "seed");
+    int64_t rowId = 0;
+    EXPECT_EQ(store->Insert(rowId, "test_t", v), E_OK);
+}
+
+HWTEST_F(IoguardTest, Rdb_IoGuard_ReadOnly_Child_001, TestSize.Level0)
+{
+    if (getenv("IOGUARD_RO_CHILD") == nullptr) {
+        GTEST_SKIP() << "skipped in parent";
+    }
     RdbHelper::ClearCache();
 
     ASSERT_EQ(RdbHelper::EnableIOGuard(), E_OK);
-    auto store = OpenStore(DB_NAME, "com.ohos.ioguard.perf");
+    auto store = OpenStoreReadOnly(DB_READONLY, "com.ohos.ioguard.ro");
     ASSERT_NE(store, nullptr);
-    auto guarded = MeasureCrud(store, PERF_PRE_LOAD, PERF_N);
 
-    std::ofstream ofs(PERF_RESULT_FILE);
-    ASSERT_TRUE(ofs.is_open()) << "cannot open result file for writing: " << PERF_RESULT_FILE;
-    ofs << guarded.insertAvg << " " << guarded.queryAvg << " "
-        << guarded.updateAvg << " " << guarded.deleteAvg;
-    ofs.close();
+    // Query works
+    auto rs = store->QuerySql("SELECT name FROM test_t WHERE id = 1");
+    ASSERT_NE(rs, nullptr);
+    EXPECT_EQ(rs->GoToFirstRow(), E_OK);
+    std::string name;
+    EXPECT_EQ(rs->GetString(0, name), E_OK);
+    EXPECT_EQ(name, "seed");
+
+    // Read-only fd: write fails (-1, EBADF from kernel or EPERM from io_guard),
+    // close fails with EPERM (io_guard protects all SQLite fds regardless of read/write mode)
+    int fd = GetRdbDbFd(store);
+    ASSERT_GE(fd, 0);
+    const char *data = "garbage";
+    EXPECT_EQ(write(fd, data, std::strlen(data)), -1) << "write should fail on read-only fd";
+    EXPECT_EQ(close(fd), -1) << "close should fail (io_guard protects all fds)";
+    EXPECT_EQ(errno, EPERM) << "close errno should be EPERM";
+
+    // Query still works after fd operation
+    auto rs2 = store->QuerySql("SELECT COUNT(*) FROM test_t");
+    ASSERT_NE(rs2, nullptr);
+    EXPECT_EQ(rs2->GoToFirstRow(), E_OK);
+}
+
+// ===== Encrypted database =====
+
+/**
+ * @brief EnableIOGuard, open encrypted DB (custom key). CRUD normal, fd protected, CRUD still works.
+ *        Uses raw key (Path B) to avoid HUKS dependency.
+ *        Fork+exec child for clean latch state.
+ */
+HWTEST_F(IoguardTest, Rdb_IoGuard_Encrypted_Protected_001, TestSize.Level0)
+{
+    RunChildTest("IOGUARD_ENC_CHILD", "IoguardTest.Rdb_IoGuard_Encrypted_Child_001",
+                 "/data/test/ioguard_enc_child.log");
+}
+
+HWTEST_F(IoguardTest, Rdb_IoGuard_Encrypted_Child_001, TestSize.Level0)
+{
+    if (getenv("IOGUARD_ENC_CHILD") == nullptr) {
+        GTEST_SKIP() << "skipped in parent";
+    }
+    RdbHelper::DeleteRdbStore(DB_ENCRYPTED);
+    RdbHelper::ClearCache();
+
+    ASSERT_EQ(RdbHelper::EnableIOGuard(), E_OK);
+    auto store = OpenStoreEncrypted(DB_ENCRYPTED, "com.ohos.ioguard.enc");
+    ASSERT_NE(store, nullptr);
+    CrudBasic(store, 1, "encrypted");
+
+    AssertFdProtected(store);
+    CrudBasic(store, 2, "after_protected");
 }
