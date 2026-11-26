@@ -1259,6 +1259,43 @@ HWTEST_F(CloudDataTest, OnRemoteDied_ExportAndImportObservers, TestSize.Level1)
 }
 
 /**
+ * @tc.name: OnRemoteDied_ClearsServiceHandle
+ * @tc.desc: Test OnRemoteDied clears cloudService_ in critical section
+ * @tc.type: FUNC
+ * @tc.require:
+ */
+HWTEST_F(CloudDataTest, OnRemoteDied_ClearsServiceHandle, TestSize.Level1)
+{
+    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
+    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+    auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
+    ASSERT_NE(cloudServiceProxy, nullptr);
+
+    auto observer = std::make_shared<MockSyncInfoObserver>();
+    std::vector<BundleInfo> bundleInfos = {{TEST_BUNDLE_NAME, TEST_STORE_ID}};
+    ExpectReply(CloudService::TRANS_SUBSCRIBE, CloudService::SUCCESS);
+    ASSERT_EQ(proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer), CloudService::SUCCESS);
+
+    CloudManager::GetInstance().OnRemoteDied();
+    EXPECT_EQ(CloudManager::GetInstance().cloudService_, nullptr);
+}
+
+/**
+ * @tc.name: OnRemoteDied_NullServiceHandle
+ * @tc.desc: Test OnRemoteDied returns early when cloudService_ is already null
+ * @tc.type: FUNC
+ * @tc.require:
+ */
+HWTEST_F(CloudDataTest, OnRemoteDied_NullServiceHandle, TestSize.Level1)
+{
+    CloudManager::GetInstance().ResetServiceHandle();
+    EXPECT_EQ(CloudManager::GetInstance().cloudService_, nullptr);
+
+    CloudManager::GetInstance().OnRemoteDied();
+    EXPECT_EQ(CloudManager::GetInstance().cloudService_, nullptr);
+}
+
+/**
  * @tc.name: OnSyncInfoNotify_ObserverDataVerification
  * @tc.desc: Test OnSyncInfoNotify verifies correct data passed to observer
  * @tc.type: FUNC
@@ -1322,6 +1359,158 @@ HWTEST_F(CloudDataTest, OnSyncInfoNotify_ObserverDataVerification001, TestSize.L
     EXPECT_EQ(observer->GetTriggerMode(), triggerMode);
     ExpectReply(CloudService::TRANS_UNSUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::SUCCESS);
     proxy->UnSubscribeCloudSyncTrigger(observer);
+}
+
+/**
+ * @tc.name: SubscribeCloudSyncTrigger_NullObserver
+ * @tc.desc: Test SubscribeCloudSyncTrigger rejects null observer
+ * @tc.type: FUNC
+ * @tc.require:
+ */
+HWTEST_F(CloudDataTest, SubscribeCloudSyncTrigger_NullObserver, TestSize.Level1)
+{
+    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
+    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+
+    auto status = proxy->SubscribeCloudSyncTrigger(nullptr);
+    EXPECT_EQ(status, CloudService::ERROR);
+}
+
+/**
+ * @tc.name: SubscribeCloudSyncTrigger_FailureNotAdded
+ * @tc.desc: Test SubscribeCloudSyncTrigger does not add observer when IPC subscribe fails
+ * @tc.type: FUNC
+ * @tc.require:
+ */
+HWTEST_F(CloudDataTest, SubscribeCloudSyncTrigger_FailureNotAdded, TestSize.Level1)
+{
+    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
+    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+    auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
+    ASSERT_NE(cloudServiceProxy, nullptr);
+
+    auto observer = std::make_shared<MockSyncInfoObserver>();
+    ExpectReply(CloudService::TRANS_SUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::ERROR);
+    auto status = proxy->SubscribeCloudSyncTrigger(observer);
+    EXPECT_EQ(status, CloudService::ERROR);
+
+    cloudServiceProxy->OnCloudSyncTrigger(TriggerScene::TRIGGER_ENABLE_CLOUD);
+    EXPECT_FALSE(observer->IsCalled());
+}
+
+/**
+ * @tc.name: UnSubscribeCloudSyncTrigger_NullObserver
+ * @tc.desc: Test UnSubscribeCloudSyncTrigger rejects null observer
+ * @tc.type: FUNC
+ * @tc.require:
+ */
+HWTEST_F(CloudDataTest, UnSubscribeCloudSyncTrigger_NullObserver, TestSize.Level1)
+{
+    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
+    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+
+    auto status = proxy->UnSubscribeCloudSyncTrigger(nullptr);
+    EXPECT_EQ(status, CloudService::ERROR);
+}
+
+/**
+ * @tc.name: UnSubscribeCloudSyncTrigger_FailureKeepsObserver
+ * @tc.desc: Test UnSubscribeCloudSyncTrigger keeps observer when IPC unsubscribe fails
+ * @tc.type: FUNC
+ * @tc.require:
+ */
+HWTEST_F(CloudDataTest, UnSubscribeCloudSyncTrigger_FailureKeepsObserver, TestSize.Level1)
+{
+    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
+    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+    auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
+    ASSERT_NE(cloudServiceProxy, nullptr);
+
+    auto observer = std::make_shared<MockSyncInfoObserver>();
+    ExpectReply(CloudService::TRANS_SUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::SUCCESS);
+    ASSERT_EQ(proxy->SubscribeCloudSyncTrigger(observer), CloudService::SUCCESS);
+
+    ExpectReply(CloudService::TRANS_UNSUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::ERROR);
+    auto status = proxy->UnSubscribeCloudSyncTrigger(observer);
+    EXPECT_EQ(status, CloudService::ERROR);
+
+    cloudServiceProxy->OnCloudSyncTrigger(TriggerScene::TRIGGER_ENABLE_CLOUD);
+    EXPECT_TRUE(observer->IsCalled());
+}
+
+/**
+ * @tc.name: UnSubscribeCloudSyncTrigger_KeepsOtherObservers
+ * @tc.desc: Test UnSubscribeCloudSyncTrigger removes only the matching observer
+ * @tc.type: FUNC
+ * @tc.require:
+ */
+HWTEST_F(CloudDataTest, UnSubscribeCloudSyncTrigger_KeepsOtherObservers, TestSize.Level1)
+{
+    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
+    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+    auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
+    ASSERT_NE(cloudServiceProxy, nullptr);
+
+    auto observer1 = std::make_shared<MockSyncInfoObserver>();
+    auto observer2 = std::make_shared<MockSyncInfoObserver>();
+    ExpectReply(CloudService::TRANS_SUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::SUCCESS);
+    ExpectReply(CloudService::TRANS_SUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::SUCCESS);
+    ASSERT_EQ(proxy->SubscribeCloudSyncTrigger(observer1), CloudService::SUCCESS);
+    ASSERT_EQ(proxy->SubscribeCloudSyncTrigger(observer2), CloudService::SUCCESS);
+
+    ExpectReply(CloudService::TRANS_UNSUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::SUCCESS);
+    auto status = proxy->UnSubscribeCloudSyncTrigger(observer1);
+    EXPECT_EQ(status, CloudService::SUCCESS);
+
+    cloudServiceProxy->OnCloudSyncTrigger(TriggerScene::TRIGGER_ENABLE_CLOUD);
+    EXPECT_FALSE(observer1->IsCalled());
+    EXPECT_TRUE(observer2->IsCalled());
+}
+
+/**
+ * @tc.name: OnCloudSyncTrigger_SkipsNullObserver
+ * @tc.desc: Test OnCloudSyncTrigger skips nullptr observers in the list
+ * @tc.type: FUNC
+ * @tc.require:
+ */
+HWTEST_F(CloudDataTest, OnCloudSyncTrigger_SkipsNullObserver, TestSize.Level1)
+{
+    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
+    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+    auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
+    ASSERT_NE(cloudServiceProxy, nullptr);
+
+    auto observer = std::make_shared<MockSyncInfoObserver>();
+    ExpectReply(CloudService::TRANS_SUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::SUCCESS);
+    ASSERT_EQ(proxy->SubscribeCloudSyncTrigger(observer), CloudService::SUCCESS);
+    cloudServiceProxy->cloudSyncTriggerObservers_.push_back(nullptr);
+
+    cloudServiceProxy->OnCloudSyncTrigger(TriggerScene::TRIGGER_ENABLE_CLOUD);
+    EXPECT_TRUE(observer->IsCalled());
+    EXPECT_EQ(observer->GetTriggerMode(), static_cast<int32_t>(TriggerScene::TRIGGER_ENABLE_CLOUD));
+}
+
+/**
+ * @tc.name: OnCloudSyncTrigger_InvalidModeStillNotifies
+ * @tc.desc: Test OnCloudSyncTrigger logs invalid mode and still notifies observers
+ * @tc.type: FUNC
+ * @tc.require:
+ */
+HWTEST_F(CloudDataTest, OnCloudSyncTrigger_InvalidModeStillNotifies, TestSize.Level1)
+{
+    auto [state, proxy] = CloudManager::GetInstance().GetCloudService();
+    ASSERT_EQ(state == CloudService::SUCCESS && proxy != nullptr, true);
+    auto cloudServiceProxy = std::static_pointer_cast<CloudServiceProxy>(proxy);
+    ASSERT_NE(cloudServiceProxy, nullptr);
+
+    auto observer = std::make_shared<MockSyncInfoObserver>();
+    ExpectReply(CloudService::TRANS_SUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::SUCCESS);
+    ASSERT_EQ(proxy->SubscribeCloudSyncTrigger(observer), CloudService::SUCCESS);
+
+    int32_t invalidMode = TriggerScene::TRIGGER_USER_CHANGE + 1;
+    cloudServiceProxy->OnCloudSyncTrigger(invalidMode);
+    EXPECT_TRUE(observer->IsCalled());
+    EXPECT_EQ(observer->GetTriggerMode(), invalidMode);
 }
 
 /**
