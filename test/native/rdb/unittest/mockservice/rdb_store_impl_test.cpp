@@ -1726,15 +1726,17 @@ HWTEST_F(RdbStoreImplConditionTest, RegisterDataChangeCallback_Test_002, TestSiz
     config.SetStorageMode(StorageMode::MODE_DISK);
     config.SetDBType(DB_SQLITE);
     config.SetRegisterInfo(RegisterType::STORE_OBSERVER, true);
-    RdbStoreImplConditionTestOpenCallback helper;
-    int errCode = E_OK;
-    std::shared_ptr<RdbStore> store = RdbHelper::GetRdbStore(config, 0, helper, errCode);
-    ASSERT_NE(store, nullptr) << "store is null";
+    auto storeImpl = std::make_shared<RdbStoreImpl>(config);
+    auto pool = std::make_shared<ConnectionPool>(storeImpl->configHolder_, config);
+    auto [initErrcode, node] = pool->writers_.Initialize(
+        [conn = mockConnection]() {return std::make_pair(E_OK, conn); }, 1, 5, false);
+    ASSERT_EQ(E_OK, initErrcode);
+    storeImpl->connectionPool_ = pool;
     std::vector<std::string> tables;
     OHOS::DistributedRdb::DistributedConfig distributedConfig;
     tables.push_back("employee");
     EXPECT_CALL(*mockConnection, SubscribeTableChanges(_)).WillOnce(Return(E_ERROR));
-    errCode = store->SetDistributedTables(tables, DISTRIBUTED_CLOUD, distributedConfig);
+    int errCode = storeImpl->SetDistributedTables(tables, DISTRIBUTED_CLOUD, distributedConfig);
     EXPECT_EQ(E_OK, errCode);
 }
 
