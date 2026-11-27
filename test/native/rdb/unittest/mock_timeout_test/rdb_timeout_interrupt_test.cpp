@@ -142,7 +142,7 @@ HWTEST_F(RdbTimeoutInterruptTest, BatchInsert_Timeout_001, TestSize.Level1)
         "CREATE TABLE " + tableName + " (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, data BLOB)");
     ASSERT_EQ(res.first, E_OK);
 
-    auto rows = BuildLargeRows(LARGE_ROW_COUNT);
+    auto rows = BuildLargeRows(BATCH_ROW_COUNT);
 
     BatchInsertConfig config;
     config.timeoutMs = 500;
@@ -457,7 +457,7 @@ HWTEST_F(RdbTimeoutInterruptTest, Transaction_BatchInsert_Timeout_001, TestSize.
     auto rows = BuildLargeRows(LARGE_ROW_COUNT);
 
     BatchInsertConfig config;
-    config.timeoutMs = 500;
+    config.timeoutMs = 300;
     auto start = std::chrono::steady_clock::now();
     auto [errCode, insertResult] =
         trans->BatchInsert(tableName, rows, config);
