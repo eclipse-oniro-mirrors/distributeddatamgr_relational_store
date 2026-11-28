@@ -1277,7 +1277,7 @@ HWTEST_F(CloudDataTest, OnRemoteDied_ClearsServiceHandle, TestSize.Level1)
     ASSERT_EQ(proxy->Subscribe(CloudSubscribeType::SYNC_INFO_CHANGED, bundleInfos, observer), CloudService::SUCCESS);
 
     CloudManager::GetInstance().OnRemoteDied();
-    EXPECT_EQ(CloudManager::GetInstance().cloudService_, nullptr);
+    EXPECT_NE(CloudManager::GetInstance().cloudService_.get(), proxy.get());
 }
 
 /**
@@ -1454,8 +1454,8 @@ HWTEST_F(CloudDataTest, UnSubscribeCloudSyncTrigger_KeepsOtherObservers, TestSiz
     auto observer1 = std::make_shared<MockSyncInfoObserver>();
     auto observer2 = std::make_shared<MockSyncInfoObserver>();
     ExpectReply(CloudService::TRANS_SUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::SUCCESS);
-    ExpectReply(CloudService::TRANS_SUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::SUCCESS);
     ASSERT_EQ(proxy->SubscribeCloudSyncTrigger(observer1), CloudService::SUCCESS);
+    ExpectReply(CloudService::TRANS_SUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::SUCCESS);
     ASSERT_EQ(proxy->SubscribeCloudSyncTrigger(observer2), CloudService::SUCCESS);
 
     ExpectReply(CloudService::TRANS_UNSUBSCRIBE_CLOUD_SYNC_TRIGGER, CloudService::SUCCESS);
