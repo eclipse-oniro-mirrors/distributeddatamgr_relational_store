@@ -104,6 +104,7 @@ struct RdbKnowledgeProcess {
 struct RdbKnowledgeSchema {
     int64_t version = 0;
     std::string dbName;
+    bool isIndependentInvertedDb = false;
     std::vector<RdbKnowledgeTable> tables;
     RdbKnowledgeProcess knowledgeProcess;
 };
